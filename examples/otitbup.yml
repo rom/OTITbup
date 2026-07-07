@@ -1,0 +1,50 @@
+# Example otitbup configuration.
+# This file is the inventory source of truth — keep it in git.
+
+data_dir: ./data          # backup git repository (relative to this file)
+
+secrets:
+  backend: plainfile      # plainfile | encryptedfile (needs otitbup[crypto])
+  path: secrets.yml       # relative to data_dir's parent
+
+git:
+  push: false             # set true + remote to mirror off-appliance
+  # remote: git@gitlab.plant.local:ot/backups.git
+
+alerts:
+  webhooks: []
+  # syslog:
+  #   address: 10.0.0.1
+  #   port: 514
+  # email:
+  #   smtp_host: mail.plant.local
+  #   from: otitbup@plant.local
+  #   to: [ot-team@example.com]
+
+sites:
+  - name: plant-a
+    zones:
+      - name: cell-1
+        maintenance_window: "18:00-06:00"   # only poll outside production
+        max_concurrent: 1                    # sequential within this zone
+        devices:
+          - name: plc-01-exports
+            driver: generic_file
+            schedule: 1h
+            options:
+              path: /srv/exports/plc-01     # engineer-exported TIA projects
+              patterns: ["**/*.zap*", "**/*.ap*"]
+
+      - name: network
+        max_concurrent: 2
+        devices:
+          - name: core-sw-01
+            driver: generic_ssh
+            address: 10.10.0.1
+            schedule: 1h
+            credentials: core-sw-01
+            options:
+              device_type: cisco_ios
+              commands:
+                - show running-config
+                - show version

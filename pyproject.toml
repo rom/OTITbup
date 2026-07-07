@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "otitbup"
+version = "0.1.0"
+description = "OT and IT backup tool: versioned git backups of PLC, RTU, gateway and network equipment configurations"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+ssh = ["netmiko>=4.3"]
+siemens = ["python-snap7>=1.3"]
+rockwell = ["pycomm3>=1.2"]
+crypto = ["cryptography>=42.0"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+otitbup = "otitbup.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
