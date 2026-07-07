@@ -78,6 +78,17 @@ def test_wrong_password_is_driver_error(web_console):
         )
 
 
+@pytest.mark.parametrize(
+    "driver", ["siemens_sicam", "abb_rtu500", "abb_rtu520", "abb_rtu560"]
+)
+def test_rtu_web_aliases_fetch_like_generic_http(web_console, driver):
+    artifacts = get_driver(driver).collect(
+        _device(web_console, driver=driver),
+        {"username": "admin", "password": "moxa"},
+    )
+    assert artifacts[0].data == _CONFIG
+
+
 def test_missing_urls_is_clear_error():
     device = Device(
         name="n", driver="moxa_nport", site="a", zone="z",

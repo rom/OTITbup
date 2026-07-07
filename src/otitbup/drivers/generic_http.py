@@ -105,3 +105,25 @@ class MoxaNPortDriver(GenericHTTPDriver):
     your device's configuration export endpoint."""
 
     name = "moxa_nport"
+
+
+class SiemensSicamDriver(GenericHTTPDriver):
+    """Siemens SICAM A8000 (CP-8000/CP-8021/CP-8022/CP-8050) RTUs.
+    Engineering is proprietary (SICAM TOOLBOX II / Device Manager) — keep
+    parameter-set exports versioned with generic_file. This driver pulls
+    what the RTU's integrated web server exposes (diagnostics/parameter
+    pages, config archives where the firmware offers them); set
+    options.urls to the endpoints of your firmware."""
+
+    name = "siemens_sicam"
+
+
+class AbbRtu500Driver(GenericHTTPDriver):
+    """ABB RTU500 series (RTU520, RTU540, RTU560). The RTU500 integrated
+    web server exposes status/configuration pages and file downloads;
+    set options.urls to your firmware's export endpoints (https with
+    verify_tls: false is common on these). Full configurations are
+    engineered in RTUtil500 — version its exports with generic_file.
+    Registered as abb_rtu520 and abb_rtu560."""
+
+    name = "abb_rtu500"

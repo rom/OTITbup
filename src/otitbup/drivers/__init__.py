@@ -15,6 +15,15 @@ _REGISTRY: dict[str, str | type[Driver]] = {
     "schneider_modbus": "otitbup.drivers.schneider_modbus:SchneiderModbusDriver",
     "generic_http": "otitbup.drivers.generic_http:GenericHTTPDriver",
     "moxa_nport": "otitbup.drivers.generic_http:MoxaNPortDriver",
+    "generic_opcua": "otitbup.drivers.generic_opcua:GenericOPCUADriver",
+    "generic_dnp3": "otitbup.drivers.generic_dnp3:GenericDNP3Driver",
+    "mitsubishi_mc": "otitbup.drivers.mitsubishi_mc:MitsubishiMCDriver",
+    "omron_fins": "otitbup.drivers.omron_fins:OmronFINSDriver",
+    "beckhoff_ads": "otitbup.drivers.beckhoff_ads:BeckhoffADSDriver",
+    "siemens_sicam": "otitbup.drivers.generic_http:SiemensSicamDriver",
+    "abb_rtu500": "otitbup.drivers.generic_http:AbbRtu500Driver",
+    "abb_rtu520": "otitbup.drivers.generic_http:AbbRtu500Driver",
+    "abb_rtu560": "otitbup.drivers.generic_http:AbbRtu500Driver",
 }
 
 # Vendor SSH profiles (presets over generic_ssh) register themselves from

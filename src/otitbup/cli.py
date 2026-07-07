@@ -153,6 +153,15 @@ def main(argv: list[str] | None = None) -> int:
             "siemens_s7": "Siemens S7 PLCs (block upload, CPU info, fingerprint)",
             "rockwell_enip": "Rockwell/Allen-Bradley Logix controllers (pycomm3)",
             "schneider_modbus": "Schneider/Modicon PLCs (device identification)",
+            "generic_opcua": "any OPC UA server: build info + namespace fingerprint",
+            "generic_dnp3": "any DNP3 outstation/RTU: device attributes (g0)",
+            "mitsubishi_mc": "Mitsubishi MELSEC Q/L/iQ CPUs (MC protocol identity)",
+            "omron_fins": "Omron CJ/CS/CP/NJ/NX PLCs (FINS identity)",
+            "beckhoff_ads": "Beckhoff TwinCAT controllers (ADS device info)",
+            "siemens_sicam": "Siemens SICAM A8000 RTUs (web endpoints)",
+            "abb_rtu500": "ABB RTU500 series RTUs (web endpoints)",
+            "abb_rtu520": "ABB RTU520 (RTU500 series, web endpoints)",
+            "abb_rtu560": "ABB RTU560 (RTU500 series, web endpoints)",
         }
         for name in available_drivers():
             description = core.get(name) or PROFILES.get(name, {}).get(

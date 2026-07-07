@@ -217,6 +217,18 @@ PROFILES: dict[str, dict[str, Any]] = {
             r"^!System Up Time",
         ],
     },
+    # ------------------------------------------------------- SEL (substations)
+    "sel_terminal": {
+        # SEL RTAC (3530/3505) and SEL protection relays: settings are
+        # retrieved with terminal commands. ID = identity/FID, STA =
+        # status, SHO = settings. Devices behind an access-level password
+        # (ACC) may need a session hook or an account that lands at the
+        # right level — verify on your device and override commands.
+        "description": "SEL RTAC and protection relays (terminal commands)",
+        "device_type": "generic",
+        "commands": ["ID", "STA", "SHO"],
+        "scrub": [r"Date\s*[=:]", r"Time\s*[=:]", r"[Uu]ptime"],
+    },
     # ------------------------------------------------------------- Omron
     "omron_switch": {
         # Omron industrial ethernet switches; many models are web-managed

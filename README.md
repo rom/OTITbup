@@ -49,8 +49,19 @@ Then point the config at it (`backend: encryptedfile`, `path: secrets.enc`,
 CPU allows it, CPU info + program fingerprint always), `rockwell_enip`
 (pycomm3: controller identity, tag list, program fingerprint),
 `schneider_modbus` (stdlib Modbus device identification incl. loaded
-application name + fingerprint), `generic_file` (watch-folder ingest of
-engineer-exported projects).
+application name + fingerprint), `mitsubishi_mc` (stdlib MC protocol:
+MELSEC Q/L/iQ CPU identity), `omron_fins` (stdlib FINS/TCP: CJ/CS/CP and
+NJ/NX controller identity), `beckhoff_ads` (pyads: TwinCAT device info
+and run state), `generic_opcua` (asyncua: build info + namespace
+fingerprint for any controller with an OPC UA server), `generic_file`
+(watch-folder ingest of engineer-exported projects).
+
+**RTU drivers**: `generic_dnp3` (stdlib DNP3 group-0 device attributes —
+covers SCADAPack, GE, SEL RTAC, Kingfisher and most water/power RTUs),
+`sel_terminal` (SEL RTAC and protection relays via terminal commands),
+`siemens_sicam` (SICAM A8000 web endpoints), `abb_rtu520` / `abb_rtu560`
+(ABB RTU500-series web server). RTU engineering-tool exports (SICAM
+TOOLBOX, RTUtil500, acSELerator) are versioned with `generic_file`.
 
 **Network drivers** (SSH via netmiko, with per-vendor presets for
 commands and volatile-line scrubbing — run `otitbup drivers` for the
