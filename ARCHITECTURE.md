@@ -94,12 +94,22 @@ program-change signal. Unsupported identification categories degrade to
 `network_profiles.py` layers vendor presets over the shared SSH core
 (`generic_ssh.collect_ssh`): each profile fixes the netmiko device_type,
 the commands to capture, and `scrub` regexes that strip volatile lines
-(uptime, "last configuration change" stamps, ntp clock-period) so diffs
-only show real changes. Profiles cover Cisco IOS/IOS-XE, Siemens SCALANCE,
-RUGGEDCOM ROS (whose whole config lives in `config.csv`) and ROX II, Moxa
-EDS/EDR switches, Westermo WeOS switches, and Westermo Merlin 4G/5G
-routers. Industrial firmware lines vary, so every profile field is
-overridable per device via options.
+(uptime, "last configuration change" stamps, ntp clock-period,
+ASA Cryptochecksum) so diffs only show real changes. Profiles register
+themselves into the driver registry from the PROFILES table, so the two
+can never drift; `otitbup drivers` lists them all with descriptions.
+
+Coverage spans switches, routers and firewalls per vendor: Cisco
+(IOS/IOS-XE + ASA firewalls), Siemens SCALANCE (X-switches, M-series
+cellular routers, S/SC firewalls on one CLI), RUGGEDCOM (ROS switches
+whose whole config lives in `config.csv`; ROX II routers/firewalls),
+Hirschmann/Belden (HiOS and Classic switches, EAGLE firewalls), Moxa
+(EDS switches, EDR secure routers/firewalls), Westermo (WeOS
+switches/RedFox routers, Merlin 4G/5G), Advantech (EKI switches, ICR
+cellular routers), Netgear (M4300/ProSAFE switches; their
+routers/firewalls are web-managed → generic_http), and Omron switches
+(no router/firewall product line). Industrial firmware lines vary, so
+every profile field is overridable per device via options.
 
 Moxa NPort serial-to-ethernet converters are web-managed, not CLI devices:
 `moxa_nport` (an alias of `generic_http`) fetches the configuration from

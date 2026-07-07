@@ -21,6 +21,9 @@ ntp clock-period 17208078
 interface GigabitEthernet0/1
  description uplink
 end
+: Written by admin at 12:00:00.000 UTC Mon Jul 6 2026
+: Saved
+Cryptochecksum: 8a1f00cafe44beef
 """
 
 
@@ -95,6 +98,29 @@ def test_volatile_lines_are_scrubbed(fake_netmiko):
     version = {a.name: a.data.decode() for a in artifacts}["show_version.txt"]
     assert "uptime is" not in version
     assert "Serial: X1" in version
+
+
+def test_cisco_asa_scrubs_firewall_stamps(fake_netmiko):
+    artifacts = get_driver("cisco_asa").collect(_device("cisco_asa"), _SECRETS)
+    config = {a.name: a.data.decode() for a in artifacts}["show_running_config.txt"]
+    assert "hostname core-sw-01" in config
+    assert "Cryptochecksum" not in config
+    assert ": Written by" not in config
+    assert ": Saved" not in config
+
+
+def test_hirschmann_family_shares_defaults(fake_netmiko):
+    for profile in ("hirschmann_hios", "hirschmann_classic",
+                    "hirschmann_eagle", "belden_switch"):
+        get_driver(profile).collect(_device(profile), _SECRETS)
+        assert FakeConnection.sent_commands == [
+            "show running-config", "show system info",
+        ]
+
+
+def test_netgear_uses_prosafe_device_type(fake_netmiko):
+    get_driver("netgear_switch").collect(_device("netgear_switch"), _SECRETS)
+    assert FakeConnection.last_params["device_type"] == "netgear_prosafe"
 
 
 def test_ruggedcom_ros_reads_config_csv(fake_netmiko):

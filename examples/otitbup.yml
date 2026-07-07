@@ -130,6 +130,30 @@ sites:
               urls:
                 - "http://{address}/ConfigExport.txt"  # your model's export path
 
+          - name: hall2-sw-01
+            driver: hirschmann_hios         # Hirschmann/Belden BOBCAT, GREYHOUND, RSP
+            address: 10.10.0.8
+            schedule: 1h
+            credentials: hall2-sw-01
+
+          - name: hall2-sw-02
+            driver: advantech_switch        # Advantech EKI
+            address: 10.10.0.9
+            schedule: 1h
+            credentials: hall2-sw-02
+
+          - name: office-sw-01
+            driver: netgear_switch          # Netgear M4300/M4250/ProSAFE
+            address: 10.10.0.10
+            schedule: 1h
+            credentials: office-sw-01
+
+          - name: line4-sw-01
+            driver: omron_switch            # Omron industrial switches
+            address: 10.10.0.11
+            schedule: 1h
+            credentials: line4-sw-01
+
           - name: other-device
             driver: generic_ssh             # anything netmiko can reach
             address: 10.10.0.99
@@ -140,3 +164,30 @@ sites:
               commands:
                 - show running-config
                 - show version
+
+      - name: perimeter
+        max_concurrent: 1
+        devices:
+          - name: plant-fw-01
+            driver: cisco_asa               # needs enable_secret in secrets
+            address: 10.10.1.1
+            schedule: 4h
+            credentials: plant-fw-01
+
+          - name: ot-fw-01
+            driver: hirschmann_eagle        # EAGLE20/30/40 industrial firewall
+            address: 10.10.1.2
+            schedule: 4h
+            credentials: ot-fw-01
+
+          - name: cell-fw-01
+            driver: moxa_edr                # EDR-810/G903/G9010 secure router
+            address: 10.10.1.3
+            schedule: 4h
+            credentials: cell-fw-01
+
+          - name: remote-rtr-01
+            driver: advantech_router        # ICR cellular router (Linux shell)
+            address: 10.10.1.4
+            schedule: 1d
+            credentials: remote-rtr-01

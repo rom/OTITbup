@@ -55,6 +55,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("validate", help="check the config file and exit")
     sub.add_parser("list", help="list configured devices")
+    sub.add_parser("drivers", help="list available drivers")
 
     p_backup = sub.add_parser("backup", help="run a backup now")
     p_backup.add_argument("devices", nargs="*", help="device names (default: all)")
@@ -140,6 +141,25 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+
+    if args.command == "drivers":
+        from .drivers import available_drivers
+        from .drivers.network_profiles import PROFILES
+        core = {
+            "generic_file": "watch-folder ingest of engineer-exported project files",
+            "generic_ssh": "any SSH-CLI device via netmiko device_type",
+            "generic_http": "config export over HTTP(S) from web-managed devices",
+            "moxa_nport": "Moxa NPort serial-to-ethernet converters (HTTP export)",
+            "siemens_s7": "Siemens S7 PLCs (block upload, CPU info, fingerprint)",
+            "rockwell_enip": "Rockwell/Allen-Bradley Logix controllers (pycomm3)",
+            "schneider_modbus": "Schneider/Modicon PLCs (device identification)",
+        }
+        for name in available_drivers():
+            description = core.get(name) or PROFILES.get(name, {}).get(
+                "description", ""
+            )
+            print(f"{name:20s} {description}")
+        return 0
 
     if args.command == "passwd":
         from .auth import hash_password

@@ -110,8 +110,8 @@ def proposal_yaml(
             lines += [
                 f"            credentials: {name}   # add to your secrets file",
                 "            # If the vendor is known, use its profile instead of",
-                "            # generic_ssh: cisco_ios, siemens_scalance, ruggedcom_ros,",
-                "            # ruggedcom_rox, moxa_switch, westermo_weos, westermo_merlin",
+                "            # generic_ssh — run `otitbup drivers` for the full list",
+                "            # (cisco_ios, siemens_scalance, hirschmann_hios, ...)",
                 "            options:",
                 "              device_type: cisco_ios   # adjust to vendor",
             ]
