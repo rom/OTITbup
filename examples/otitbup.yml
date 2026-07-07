@@ -76,11 +76,65 @@ sites:
       - name: network
         max_concurrent: 2
         devices:
+          # Vendor profiles preset the netmiko device type, the commands to
+          # capture, and volatile-line scrubbing. Everything is overridable
+          # per device via options (device_type, commands, port, scrub).
           - name: core-sw-01
-            driver: generic_ssh
+            driver: cisco_ios               # Cisco IOS / IOS-XE
             address: 10.10.0.1
             schedule: 1h
             credentials: core-sw-01
+
+          - name: cell1-sw-01
+            driver: siemens_scalance        # SCALANCE X/XB/XC/XR
+            address: 10.10.0.2
+            schedule: 1h
+            credentials: cell1-sw-01
+
+          - name: ring-sw-01
+            driver: ruggedcom_ros           # RUGGEDCOM ROS (config.csv)
+            address: 10.10.0.3
+            schedule: 1h
+            credentials: ring-sw-01
+
+          - name: edge-rtr-01
+            driver: ruggedcom_rox           # RUGGEDCOM ROX II (RX1500, ...)
+            address: 10.10.0.4
+            schedule: 1h
+            credentials: edge-rtr-01
+
+          - name: cell2-sw-01
+            driver: moxa_switch             # Moxa EDS/EDR managed switches
+            address: 10.10.0.5
+            schedule: 1h
+            credentials: cell2-sw-01
+
+          - name: cab3-sw-01
+            driver: westermo_weos           # Westermo Lynx/Viper/RedFox
+            address: 10.10.0.6
+            schedule: 1h
+            credentials: cab3-sw-01
+
+          - name: remote-gw-01
+            driver: westermo_merlin         # Westermo Merlin 4G/5G routers
+            address: 10.10.0.7
+            schedule: 4h
+            credentials: remote-gw-01
+
+          - name: nport-01
+            driver: moxa_nport              # Moxa NPort serial-to-ethernet
+            address: 10.10.0.40             # (web-managed: HTTP export)
+            schedule: 1d
+            credentials: nport-01
+            options:
+              urls:
+                - "http://{address}/ConfigExport.txt"  # your model's export path
+
+          - name: other-device
+            driver: generic_ssh             # anything netmiko can reach
+            address: 10.10.0.99
+            schedule: 1d
+            credentials: other-device
             options:
               device_type: cisco_ios
               commands:
