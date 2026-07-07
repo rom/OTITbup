@@ -6,6 +6,10 @@
     otitbup -c otitbup.yml diff DEVICE
     otitbup -c otitbup.yml log [DEVICE]
     otitbup -c otitbup.yml daemon
+    otitbup -c otitbup.yml serve [--host H] [--port P]
+    otitbup secrets genkey [--out keyfile]
+    otitbup secrets encrypt plain.yml encrypted.yml [--key-file keyfile]
+    otitbup secrets decrypt encrypted.yml [--key-file keyfile]
 """
 from __future__ import annotations
 
@@ -71,11 +75,54 @@ def main(argv: list[str] | None = None) -> int:
         "--once", action="store_true", help="one scheduler tick, then exit"
     )
 
+    p_serve = sub.add_parser("serve", help="run the read-only web UI")
+    p_serve.add_argument("--host", default="127.0.0.1")
+    p_serve.add_argument("--port", type=int, default=8080)
+
+    p_secrets = sub.add_parser("secrets", help="manage encrypted secrets")
+    secrets_sub = p_secrets.add_subparsers(dest="secrets_command", required=True)
+    p_genkey = secrets_sub.add_parser(
+        "genkey", help="generate an encryption key"
+    )
+    p_genkey.add_argument(
+        "--out", help="write the key to this file (mode 0600) instead of stdout"
+    )
+    p_encrypt = secrets_sub.add_parser(
+        "encrypt", help="encrypt a plaintext secrets YAML file"
+    )
+    p_encrypt.add_argument("src", help="plaintext secrets YAML")
+    p_encrypt.add_argument("dst", help="encrypted output file")
+    p_encrypt.add_argument("--key-file", help="key file (or set OTITBUP_KEY)")
+    p_decrypt = secrets_sub.add_parser(
+        "decrypt", help="decrypt an encrypted secrets file to stdout"
+    )
+    p_decrypt.add_argument("src", help="encrypted secrets file")
+    p_decrypt.add_argument("--key-file", help="key file (or set OTITBUP_KEY)")
+
     args = parser.parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+
+    if args.command == "secrets":
+        from . import secrets as secrets_mod
+        try:
+            if args.secrets_command == "genkey":
+                key = secrets_mod.generate_key(args.out)
+                if args.out:
+                    print(f"key written to {args.out}")
+                else:
+                    print(key)
+            elif args.secrets_command == "encrypt":
+                secrets_mod.encrypt_file(args.src, args.dst, args.key_file)
+                print(f"encrypted {args.src} -> {args.dst}")
+            elif args.secrets_command == "decrypt":
+                print(secrets_mod.decrypt_file(args.src, args.key_file), end="")
+        except Exception as exc:
+            print(f"secrets error: {exc}", file=sys.stderr)
+            return 2
+        return 0
 
     try:
         config = load_config(args.config)
@@ -130,6 +177,15 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         try:
             daemon.run_forever()
+        except KeyboardInterrupt:
+            return 0
+
+    if args.command == "serve":
+        from .webui import serve
+        store = GitStore(config.data_dir)
+        store.ensure_repo()
+        try:
+            serve(config, store, host=args.host, port=args.port)
         except KeyboardInterrupt:
             return 0
 
