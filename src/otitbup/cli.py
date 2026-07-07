@@ -76,8 +76,44 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     p_serve = sub.add_parser("serve", help="run the read-only web UI")
-    p_serve.add_argument("--host", default="127.0.0.1")
-    p_serve.add_argument("--port", type=int, default=8080)
+    p_serve.add_argument("--host", default=None)
+    p_serve.add_argument("--port", type=int, default=None)
+
+    p_discover = sub.add_parser(
+        "discover",
+        help="scan subnets for devices; writes a YAML proposal for review",
+    )
+    p_discover.add_argument("subnets", nargs="+", help="CIDR subnets to scan")
+    p_discover.add_argument("--site", default="discovered-site")
+    p_discover.add_argument("--zone", default="discovered")
+    p_discover.add_argument("--timeout", type=float, default=0.5)
+    p_discover.add_argument(
+        "--delay", type=float, default=0.05,
+        help="seconds between probes (sequential scan, OT-safe)",
+    )
+    p_discover.add_argument(
+        "--out", default="discovered.yml", help="proposal file to write"
+    )
+
+    p_restore = sub.add_parser(
+        "restore",
+        help="export a hash-verified restore bundle (no device writes)",
+    )
+    p_restore.add_argument("device")
+    p_restore.add_argument(
+        "--commit", help="backup commit to restore from (default: latest)"
+    )
+    p_restore.add_argument(
+        "--out", help="bundle directory (default: restore-<device>-<commit>)"
+    )
+
+    p_passwd = sub.add_parser(
+        "passwd", help="hash a web UI password (prints a config snippet)"
+    )
+    p_passwd.add_argument("--username", default="admin")
+    p_passwd.add_argument(
+        "--password", help="password (omit to be prompted securely)"
+    )
 
     p_secrets = sub.add_parser("secrets", help="manage encrypted secrets")
     secrets_sub = p_secrets.add_subparsers(dest="secrets_command", required=True)
@@ -104,6 +140,21 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+
+    if args.command == "passwd":
+        from .auth import hash_password
+        password = args.password
+        if not password:
+            import getpass
+            password = getpass.getpass("password: ")
+            if getpass.getpass("repeat: ") != password:
+                print("passwords do not match", file=sys.stderr)
+                return 2
+        print("webui:")
+        print("  auth:")
+        print(f"    username: {args.username}")
+        print(f"    password_hash: {hash_password(password)}")
+        return 0
 
     if args.command == "secrets":
         from . import secrets as secrets_mod
@@ -185,9 +236,67 @@ def main(argv: list[str] | None = None) -> int:
         store = GitStore(config.data_dir)
         store.ensure_repo()
         try:
-            serve(config, store, host=args.host, port=args.port)
+            serve(
+                config, store,
+                host=args.host or config.webui.get("host", "127.0.0.1"),
+                port=args.port or int(config.webui.get("port", 8080)),
+                auth=config.webui.get("auth"),
+            )
         except KeyboardInterrupt:
             return 0
+
+    if args.command == "discover":
+        from .discovery import proposal_yaml, scan
+        exclude = {d.address for d in config.all_devices() if d.address}
+        print(
+            f"scanning {', '.join(args.subnets)} sequentially "
+            f"(timeout {args.timeout}s, delay {args.delay}s) ..."
+        )
+        findings = scan(
+            args.subnets, timeout=args.timeout, delay=args.delay,
+            exclude=exclude,
+        )
+        if not findings:
+            print("no new devices found")
+            return 0
+        for finding in findings:
+            ports = ", ".join(str(p) for p in finding.open_ports)
+            print(f"  {finding.address:16s} ports {ports:20s} -> {finding.driver}")
+        Path(args.out).write_text(
+            proposal_yaml(findings, args.site, args.zone)
+        )
+        print(
+            f"\n{len(findings)} device(s) written to {args.out} — review "
+            "and merge the entries you approve into your config; nothing "
+            "was added automatically"
+        )
+        return 0
+
+    if args.command == "restore":
+        from .restore import RestoreError, export_bundle
+        [device] = config.find_devices([args.device])
+        store = GitStore(config.data_dir)
+        try:
+            commit = args.commit or store.last_commit_hash(device)
+            if not commit:
+                print(f"no backups for {device.qualified_name}", file=sys.stderr)
+                return 1
+            out = args.out or f"restore-{device.name}-{commit[:8]}"
+            commit, mismatches = export_bundle(
+                store, device, out, commit=commit
+            )
+        except RestoreError as exc:
+            print(f"restore error: {exc}", file=sys.stderr)
+            return 1
+        print(f"restore bundle written to {out} (backup {commit[:10]})")
+        if mismatches:
+            print(
+                "HASH MISMATCH on: " + ", ".join(mismatches)
+                + " — do not use this bundle", file=sys.stderr,
+            )
+            return 1
+        print("all artifact hashes verified; see RESTORE.md for the checklist")
+        return 0
 
     return 0
 

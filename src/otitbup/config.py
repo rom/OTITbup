@@ -90,4 +90,5 @@ def load_config(path: str | Path) -> AppConfig:
         secrets=raw.get("secrets") or {},
         alerts=raw.get("alerts") or {},
         git=raw.get("git") or {},
+        webui=raw.get("webui") or {},
     )

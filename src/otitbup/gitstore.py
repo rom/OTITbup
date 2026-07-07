@@ -100,6 +100,35 @@ class GitStore:
             return ""
         return self._git("show", "--stat", "--patch", last, "--", device.path)
 
+    def _git_bytes(self, *args: str) -> bytes:
+        proc = subprocess.run(["git", *args], cwd=self.root, capture_output=True)
+        if proc.returncode != 0:
+            raise GitStoreError(
+                f"git {' '.join(args)} failed: "
+                f"{proc.stderr.decode(errors='replace').strip()}"
+            )
+        return proc.stdout
+
+    def last_commit_hash(self, device: Device) -> str | None:
+        commit = self._git(
+            "log", "-1", "--format=%H", "--", device.path, check=False
+        ).strip()
+        return commit or None
+
+    def commit_summary(self, commit: str) -> str:
+        return self._git(
+            "show", "-s", "--format=%h  %ad%n%s", "--date=iso", commit
+        ).strip()
+
+    def list_files_at(self, commit: str, path: str) -> list[str]:
+        out = self._git(
+            "ls-tree", "-r", "--name-only", commit, "--", path
+        )
+        return [line for line in out.splitlines() if line]
+
+    def read_file_at(self, commit: str, path: str) -> bytes:
+        return self._git_bytes("show", f"{commit}:{path}")
+
     def last_commit_info(self, device: Device) -> str:
         """Short hash + date of the device's most recent backup, or ''."""
         return self._git(

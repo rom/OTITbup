@@ -17,6 +17,7 @@ from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote
 
+from .auth import check_basic_auth
 from .gitstore import GitStore
 from .models import AppConfig, Device
 
@@ -58,9 +59,13 @@ def _page(title: str, body: str) -> bytes:
 
 
 class WebUI:
-    def __init__(self, config: AppConfig, store: GitStore):
+    def __init__(
+        self, config: AppConfig, store: GitStore,
+        auth: dict | None = None,
+    ):
         self.config = config
         self.store = store
+        self.auth = auth
 
     def index(self) -> bytes:
         rows = []
@@ -127,6 +132,17 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def do_GET(self):
+        if self.ui.auth and not check_basic_auth(
+            self.headers.get("Authorization"), self.ui.auth
+        ):
+            content = _page("unauthorized", "<p>unauthorized</p>")
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="otitbup"')
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+            return
         path = unquote(self.path.split("?", 1)[0])
         if path in ("/", "/index.html"):
             return self._send(200, self.ui.index())
@@ -140,8 +156,14 @@ class _Handler(BaseHTTPRequestHandler):
 def serve(
     config: AppConfig, store: GitStore,
     host: str = "127.0.0.1", port: int = 8080,
+    auth: dict | None = None,
 ) -> None:
-    ui = WebUI(config, store)
+    if not auth and host not in ("127.0.0.1", "localhost", "::1"):
+        log.warning(
+            "web UI on %s has NO authentication configured — set "
+            "webui.auth in the config (see `otitbup passwd`)", host,
+        )
+    ui = WebUI(config, store, auth=auth)
     server = ThreadingHTTPServer((host, port), partial(_Handler, ui))
     log.info("web UI listening on http://%s:%d", host, server.server_port)
     server.serve_forever()
