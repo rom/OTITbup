@@ -15,15 +15,18 @@ _REGISTRY: dict[str, str | type[Driver]] = {
     "schneider_modbus": "otitbup.drivers.schneider_modbus:SchneiderModbusDriver",
     "generic_http": "otitbup.drivers.generic_http:GenericHTTPDriver",
     "moxa_nport": "otitbup.drivers.generic_http:MoxaNPortDriver",
-    # Vendor SSH profiles (presets over generic_ssh; see network_profiles.py)
-    "cisco_ios": "otitbup.drivers.network_profiles:CiscoIosDriver",
-    "siemens_scalance": "otitbup.drivers.network_profiles:SiemensScalanceDriver",
-    "ruggedcom_ros": "otitbup.drivers.network_profiles:RuggedcomRosDriver",
-    "ruggedcom_rox": "otitbup.drivers.network_profiles:RuggedcomRoxDriver",
-    "moxa_switch": "otitbup.drivers.network_profiles:MoxaSwitchDriver",
-    "westermo_weos": "otitbup.drivers.network_profiles:WestermoWeosDriver",
-    "westermo_merlin": "otitbup.drivers.network_profiles:WestermoMerlinDriver",
 }
+
+# Vendor SSH profiles (presets over generic_ssh) register themselves from
+# PROFILES so the registry can never drift from the profile table. The
+# import is dependency-light: netmiko is only loaded on collect().
+from .network_profiles import PROFILES as _NETWORK_PROFILES  # noqa: E402
+from .network_profiles import _class_name as _profile_class_name  # noqa: E402
+
+for _profile in _NETWORK_PROFILES:
+    _REGISTRY[_profile] = (
+        f"otitbup.drivers.network_profiles:{_profile_class_name(_profile)}"
+    )
 
 
 def register(name: str, cls: type[Driver]) -> None:

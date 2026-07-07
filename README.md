@@ -53,12 +53,27 @@ application name + fingerprint), `generic_file` (watch-folder ingest of
 engineer-exported projects).
 
 **Network drivers** (SSH via netmiko, with per-vendor presets for
-commands and volatile-line scrubbing): `cisco_ios`, `siemens_scalance`,
-`ruggedcom_ros` (config.csv), `ruggedcom_rox`, `moxa_switch`,
-`westermo_weos` (Lynx/Viper/RedFox), `westermo_merlin` (4G/5G routers),
-plus `generic_ssh` for anything else netmiko reaches. Web-managed gear:
-`moxa_nport` / `generic_http` fetch config exports over HTTP(S) with
-Basic/Digest auth, stdlib-only.
+commands and volatile-line scrubbing — run `otitbup drivers` for the
+live list). Vendor coverage:
+
+| Vendor | Switches | Routers | Firewalls |
+|---|---|---|---|
+| Cisco | `cisco_ios` | `cisco_ios` | `cisco_asa` |
+| Siemens SCALANCE | `siemens_scalance` | `siemens_scalance` (M-series 4G/5G) | `siemens_scalance` (S/SC) |
+| Siemens RUGGEDCOM | `ruggedcom_ros` | `ruggedcom_rox` | `ruggedcom_rox` |
+| Hirschmann | `hirschmann_hios`, `hirschmann_classic` | — | `hirschmann_eagle` |
+| Belden | `belden_switch` (Hirschmann family) | — | `hirschmann_eagle` |
+| Moxa | `moxa_switch` (EDS) | `moxa_edr` | `moxa_edr` |
+| Moxa NPort (serial-to-eth) | — | `moxa_nport` (HTTP export) | — |
+| Westermo | `westermo_weos` | `westermo_weos` (RedFox), `westermo_merlin` (4G/5G) | `westermo_weos` |
+| Advantech | `advantech_switch` (EKI) | `advantech_router` (ICR) | — |
+| Netgear | `netgear_switch` | web-managed → `generic_http` | web-managed → `generic_http` |
+| Omron | `omron_switch` | — (no router/firewall line) | — |
+
+Anything else netmiko reaches: `generic_ssh`. Web-managed gear:
+`generic_http` fetches config exports over HTTP(S) with Basic/Digest
+auth, stdlib-only. Every profile field (device_type, commands, scrub)
+is overridable per device — industrial firmware CLIs vary.
 
 **Core**: local git store with per-device history and sha256 manifests;
 maintenance windows and per-zone rate limiting; scheduler daemon; change
