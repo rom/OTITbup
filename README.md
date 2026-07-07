@@ -53,8 +53,14 @@ application name + fingerprint), `mitsubishi_mc` (stdlib MC protocol:
 MELSEC Q/L/iQ CPU identity), `omron_fins` (stdlib FINS/TCP: CJ/CS/CP and
 NJ/NX controller identity), `beckhoff_ads` (pyads: TwinCAT device info
 and run state), `generic_opcua` (asyncua: build info + namespace
-fingerprint for any controller with an OPC UA server), `generic_file`
-(watch-folder ingest of engineer-exported projects).
+fingerprint for any controller with an OPC UA server), `generic_enip`
+(stdlib EtherNet/IP ListIdentity: CIP identity + fingerprint for any
+EtherNet/IP device, incl. `ge_pacsystems`/`emerson_pacsystems` aliases
+for PACSystems RX3i/RSTi-EP), `wago_pfc` / `phoenix_plcnext` /
+`codesys_ssh` (paramiko SFTP: the deployed boot project fetched straight
+off Linux-based Codesys controllers — full content, not just a
+fingerprint), `generic_file` (watch-folder ingest of engineer-exported
+projects).
 
 **RTU drivers**: `generic_dnp3` (stdlib DNP3 group-0 device attributes —
 covers SCADAPack, GE, SEL RTAC, Kingfisher and most water/power RTUs),

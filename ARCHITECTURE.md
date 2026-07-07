@@ -105,6 +105,19 @@ generic_file:
   version) + namespace array from any OPC UA server, plus optional
   configured node reads. One driver fingerprints every modern controller
   exposing OPC UA (S7-1200/1500, NJ/NX, Beckhoff, WAGO, B&R, ...).
+- `generic_enip` — stdlib EtherNet/IP: one ListIdentity (0x0063) returns
+  the CIP Identity Object (vendor, device type, product code, revision,
+  serial, product name) from any EtherNet/IP device. Status/state are
+  recorded but excluded from the fingerprint so run-mode changes don't
+  churn diffs. `ge_pacsystems`/`emerson_pacsystems` are aliases for
+  PACSystems RX3i/RSTi-EP with EtherNet/IP enabled; SRTP-only legacy GE
+  CPUs stay with PAC Machine Edition exports via generic_file.
+- `generic_sftp` (paramiko) — fetches remote files/dirs/globs from
+  Linux-based controllers, capturing the deployed boot project itself
+  rather than a fingerprint. Presets: `wago_pfc` (/home/codesys and
+  /home/codesys3), `phoenix_plcnext` (/opt/plcnext/projects),
+  `codesys_ssh` (vendor-neutral, paths required). Missing preset paths
+  are noted, not fatal — runtime dirs vary by firmware.
 
 ## RTU drivers
 
