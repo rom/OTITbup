@@ -109,6 +109,9 @@ def proposal_yaml(
         if finding.driver == "generic_ssh":
             lines += [
                 f"            credentials: {name}   # add to your secrets file",
+                "            # If the vendor is known, use its profile instead of",
+                "            # generic_ssh: cisco_ios, siemens_scalance, ruggedcom_ros,",
+                "            # ruggedcom_rox, moxa_switch, westermo_weos, westermo_merlin",
                 "            options:",
                 "              device_type: cisco_ios   # adjust to vendor",
             ]

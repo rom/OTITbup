@@ -45,12 +45,20 @@ Then point the config at it (`backend: encryptedfile`, `path: secrets.enc`,
 
 ## Status
 
-**Drivers**: `generic_file` (watch-folder ingest of engineer-exported
-projects), `generic_ssh` (multi-vendor network equipment via netmiko),
-`siemens_s7` (python-snap7: MC7 block upload where the CPU allows it, CPU
-info + program fingerprint always), `rockwell_enip` (pycomm3: controller
-identity, tag list, program fingerprint), `schneider_modbus` (stdlib
-Modbus device identification incl. loaded application name + fingerprint).
+**PLC drivers**: `siemens_s7` (python-snap7: MC7 block upload where the
+CPU allows it, CPU info + program fingerprint always), `rockwell_enip`
+(pycomm3: controller identity, tag list, program fingerprint),
+`schneider_modbus` (stdlib Modbus device identification incl. loaded
+application name + fingerprint), `generic_file` (watch-folder ingest of
+engineer-exported projects).
+
+**Network drivers** (SSH via netmiko, with per-vendor presets for
+commands and volatile-line scrubbing): `cisco_ios`, `siemens_scalance`,
+`ruggedcom_ros` (config.csv), `ruggedcom_rox`, `moxa_switch`,
+`westermo_weos` (Lynx/Viper/RedFox), `westermo_merlin` (4G/5G routers),
+plus `generic_ssh` for anything else netmiko reaches. Web-managed gear:
+`moxa_nport` / `generic_http` fetch config exports over HTTP(S) with
+Basic/Digest auth, stdlib-only.
 
 **Core**: local git store with per-device history and sha256 manifests;
 maintenance windows and per-zone rate limiting; scheduler daemon; change

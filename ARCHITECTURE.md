@@ -32,7 +32,7 @@ otitbup.yml (inventory, source of truth, versioned by the operator)
 | `config.py` | YAML inventory loading with load-time validation (schedules, windows, duplicates) |
 | `windows.py` | Interval schedules (`30m`, `4h`, `1d`) and maintenance windows (`22:00-06:00`, overnight-aware) |
 | `secrets.py` | `SecretsBackend` interface; `plainfile` and `encryptedfile` (Fernet) backends; Vault/CyberArk slot in later |
-| `drivers/` | `Driver.collect(device, secrets) -> [Artifact]`; registry with lazy imports; read-only by contract. Ships `generic_file`, `generic_ssh`, `siemens_s7`, `rockwell_enip`, `schneider_modbus` |
+| `drivers/` | `Driver.collect(device, secrets) -> [Artifact]`; registry with lazy imports; read-only by contract. PLC: `siemens_s7`, `rockwell_enip`, `schneider_modbus`, `generic_file`. Network: `generic_ssh` + vendor profiles (`cisco_ios`, `siemens_scalance`, `ruggedcom_ros`, `ruggedcom_rox`, `moxa_switch`, `westermo_weos`, `westermo_merlin`) and `generic_http`/`moxa_nport` for web-managed gear |
 | `discovery.py` | Opt-in sequential TCP probe of known OT/IT ports; emits an inventory-shaped YAML *proposal* for human review — never edits the inventory |
 | `auth.py` | PBKDF2 password hashing and HTTP Basic verification for the web UI |
 | `restore.py` | Guided restore: exports hash-verified artifacts + RESTORE.md checklist with driver-specific vendor-tool instructions; performs no device writes |
@@ -88,6 +88,24 @@ no dependency): vendor, product, revision, and `UserApplicationName`,
 which Modicon CPUs set to the loaded project's name, giving a genuine
 program-change signal. Unsupported identification categories degrade to
 `collection_notes`, never a failed backup.
+
+## Network equipment: SSH profiles and HTTP export
+
+`network_profiles.py` layers vendor presets over the shared SSH core
+(`generic_ssh.collect_ssh`): each profile fixes the netmiko device_type,
+the commands to capture, and `scrub` regexes that strip volatile lines
+(uptime, "last configuration change" stamps, ntp clock-period) so diffs
+only show real changes. Profiles cover Cisco IOS/IOS-XE, Siemens SCALANCE,
+RUGGEDCOM ROS (whose whole config lives in `config.csv`) and ROX II, Moxa
+EDS/EDR switches, Westermo WeOS switches, and Westermo Merlin 4G/5G
+routers. Industrial firmware lines vary, so every profile field is
+overridable per device via options.
+
+Moxa NPort serial-to-ethernet converters are web-managed, not CLI devices:
+`moxa_nport` (an alias of `generic_http`) fetches the configuration from
+the device's export endpoint over HTTP(S) with Basic/Digest auth,
+stdlib-only, deliberately bypassing any proxy environment so backup
+traffic never leaves the OT network.
 
 ## Discovery
 
