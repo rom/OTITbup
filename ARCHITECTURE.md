@@ -12,7 +12,7 @@ otitbup.yml (inventory, source of truth, versioned by the operator)
 │  config   │──▶│  Runner   │──▶│ drivers (pluggable, lazy)    │
 │  loader   │   │ per-zone  │   │  generic_file  (watch dir)   │
 └──────────┘   │ semaphores │   │  generic_ssh   (netmiko)     │
-    │          │ + windows  │   │  siemens_s7    (planned)     │
+    │          │ + windows  │   │  siemens_s7    (snap7)       │
     ▼          └─────┬──────┘   │  rockwell_enip (planned)     │
 ┌──────────┐         │          │  schneider     (planned)     │
 │ secrets   │────────┤          └──────────────────────────────┘
@@ -32,12 +32,13 @@ otitbup.yml (inventory, source of truth, versioned by the operator)
 | `config.py` | YAML inventory loading with load-time validation (schedules, windows, duplicates) |
 | `windows.py` | Interval schedules (`30m`, `4h`, `1d`) and maintenance windows (`22:00-06:00`, overnight-aware) |
 | `secrets.py` | `SecretsBackend` interface; `plainfile` and `encryptedfile` (Fernet) backends; Vault/CyberArk slot in later |
-| `drivers/` | `Driver.collect(device, secrets) -> [Artifact]`; registry with lazy imports; read-only by contract in phase 1 |
+| `drivers/` | `Driver.collect(device, secrets) -> [Artifact]`; registry with lazy imports; read-only by contract in phase 1. Ships `generic_file`, `generic_ssh`, `siemens_s7` |
 | `gitstore.py` | Local git repo; per-device commits; `manifest.yml` with sha256 fingerprints (change detection for binaries); optional push to remote |
 | `runner.py` | Orchestration: per-zone concurrency semaphores, maintenance-window checks, change/failure alerts |
 | `daemon.py` | Scheduler loop; per-device interval state in `state.json` |
 | `alerts.py` | Webhook, syslog, email notifiers; failures logged, never fatal |
-| `cli.py` | `validate`, `list`, `backup`, `diff`, `log`, `daemon` |
+| `webui.py` | Read-only web UI (stdlib http.server): device dashboard, per-device history and diffs. No auth yet — bind to trusted interfaces only |
+| `cli.py` | `validate`, `list`, `backup`, `diff`, `log`, `daemon`, `serve`, `secrets genkey/encrypt/decrypt` |
 
 ## Key design points
 
@@ -56,11 +57,21 @@ otitbup.yml (inventory, source of truth, versioned by the operator)
 - **State separation**: scheduler state (`state.json`) and secrets live
   next to — not inside — the backup repo, keeping history clean.
 
+## The siemens_s7 driver
+
+Degrades gracefully by fidelity level: program blocks as binary MC7 via
+block upload (S7-300/400, unprotected CPUs), always CPU identification
+(`cpu_info.yml`: module, serial, order code, firmware, state) and a program
+fingerprint (`fingerprint.yml`: sha256 across uploaded blocks). Protected
+CPUs and S7-1200/1500, which refuse upload, still yield metadata +
+fingerprint, and every degradation is recorded in `collection_notes` so a
+partial backup is visible in the diff rather than silent.
+
 ## Phase 2+ (not yet implemented)
 
-- Vendor drivers: `siemens_s7` (python-snap7 block upload + fingerprint),
-  `rockwell_enip` (pycomm3 identity/program hash), `schneider_umas`.
-- Web UI: read-only inventory/status viewer with diff browsing.
+- Vendor drivers: `rockwell_enip` (pycomm3 identity/program hash),
+  `schneider_umas`.
+- Web UI authentication and TLS.
 - Auto-discovery proposing YAML inventory additions for human review.
 - Restore workflows (guided first, automated later).
 - git-lfs or artifact store for very large project files.

@@ -61,31 +61,72 @@ class EncryptedFileBackend(PlainFileBackend):
         super().__init__(path)
         self.key_file = key_file
 
-    def _key(self) -> bytes:
-        key = os.environ.get("OTITBUP_KEY")
-        if not key and self.key_file:
-            key = Path(self.key_file).read_text().strip()
-        if not key:
-            raise SecretsError(
-                "no encryption key: set OTITBUP_KEY or configure key_file"
-            )
-        return key.encode()
-
     def _load(self) -> dict[str, Any]:
-        try:
-            from cryptography.fernet import Fernet
-        except ImportError as exc:
-            raise SecretsError(
-                "encrypted secrets require the 'cryptography' package "
-                "(pip install otitbup[crypto])"
-            ) from exc
         if not self.path.exists():
             raise SecretsError(f"secrets file not found: {self.path}")
-        plaintext = Fernet(self._key()).decrypt(self.path.read_bytes())
+        fernet = _fernet_cls()(_resolve_key(self.key_file))
+        plaintext = fernet.decrypt(self.path.read_bytes())
         data = yaml.safe_load(plaintext) or {}
         if not isinstance(data, dict):
             raise SecretsError(f"{self.path}: top level must be a mapping")
         return data
+
+
+def _fernet_cls():
+    try:
+        from cryptography.fernet import Fernet
+    except ImportError as exc:
+        raise SecretsError(
+            "this operation requires the 'cryptography' package "
+            "(pip install otitbup[crypto])"
+        ) from exc
+    return Fernet
+
+
+def generate_key(out: str | Path | None = None) -> str:
+    """Generate a Fernet key. If `out` is given, write it there with
+    owner-only permissions; otherwise the caller prints it."""
+    key = _fernet_cls().generate_key().decode()
+    if out:
+        path = Path(out)
+        path.touch(mode=0o600)
+        path.write_text(key + "\n")
+        path.chmod(0o600)
+    return key
+
+
+def _resolve_key(key_file: str | None) -> bytes:
+    key = os.environ.get("OTITBUP_KEY")
+    if not key and key_file:
+        key = Path(key_file).read_text().strip()
+    if not key:
+        raise SecretsError(
+            "no encryption key: set OTITBUP_KEY or pass --key-file"
+        )
+    return key.encode()
+
+
+def encrypt_file(
+    src: str | Path, dst: str | Path, key_file: str | None = None
+) -> None:
+    """Encrypt a plaintext secrets YAML file. Validates the YAML first so
+    a malformed file is caught before it is locked away."""
+    src, dst = Path(src), Path(dst)
+    plaintext = src.read_bytes()
+    data = yaml.safe_load(plaintext)
+    if not isinstance(data, dict):
+        raise SecretsError(f"{src}: top level must be a mapping")
+    fernet = _fernet_cls()(_resolve_key(key_file))
+    token = fernet.encrypt(plaintext)
+    dst.touch(mode=0o600)
+    dst.write_bytes(token)
+    dst.chmod(0o600)
+
+
+def decrypt_file(src: str | Path, key_file: str | None = None) -> str:
+    """Decrypt an encrypted secrets file and return the plaintext YAML."""
+    ciphertext = Path(src).read_bytes()
+    return _fernet_cls()(_resolve_key(key_file)).decrypt(ciphertext).decode()
 
 
 def load_backend(cfg: dict[str, Any], base_dir: str | Path = ".") -> SecretsBackend:

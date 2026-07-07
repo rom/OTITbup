@@ -100,6 +100,13 @@ class GitStore:
             return ""
         return self._git("show", "--stat", "--patch", last, "--", device.path)
 
+    def last_commit_info(self, device: Device) -> str:
+        """Short hash + date of the device's most recent backup, or ''."""
+        return self._git(
+            "log", "-1", "--format=%h %ad", "--date=format:%Y-%m-%d %H:%M",
+            "--", device.path, check=False,
+        ).strip()
+
     def history(self, device: Device | None = None, limit: int = 20) -> str:
         args = ["log", f"-{limit}", "--format=%h  %ad  %s", "--date=iso"]
         if device:
