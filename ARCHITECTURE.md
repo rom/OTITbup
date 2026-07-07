@@ -32,7 +32,7 @@ otitbup.yml (inventory, source of truth, versioned by the operator)
 | `config.py` | YAML inventory loading with load-time validation (schedules, windows, duplicates) |
 | `windows.py` | Interval schedules (`30m`, `4h`, `1d`) and maintenance windows (`22:00-06:00`, overnight-aware) |
 | `secrets.py` | `SecretsBackend` interface; `plainfile` and `encryptedfile` (Fernet) backends; Vault/CyberArk slot in later |
-| `drivers/` | `Driver.collect(device, secrets) -> [Artifact]`; registry with lazy imports; read-only by contract. PLC: `siemens_s7`, `rockwell_enip`, `schneider_modbus`, `generic_file`. Network: `generic_ssh` + vendor profiles (`cisco_ios`, `siemens_scalance`, `ruggedcom_ros`, `ruggedcom_rox`, `moxa_switch`, `westermo_weos`, `westermo_merlin`) and `generic_http`/`moxa_nport` for web-managed gear |
+| `drivers/` | `Driver.collect(device, secrets) -> [Artifact]`; registry with lazy imports; read-only by contract. PLC: `siemens_s7`, `rockwell_enip`, `schneider_modbus`, `mitsubishi_mc`, `omron_fins`, `beckhoff_ads`, `generic_opcua`, `generic_file`. RTU: `generic_dnp3`, `sel_terminal`, `siemens_sicam`, `abb_rtu520`/`abb_rtu560`. Network: `generic_ssh` + vendor profiles and `generic_http` for web-managed gear — run `otitbup drivers` for the full list |
 | `discovery.py` | Opt-in sequential TCP probe of known OT/IT ports; emits an inventory-shaped YAML *proposal* for human review — never edits the inventory |
 | `auth.py` | PBKDF2 password hashing and HTTP Basic verification for the web UI |
 | `restore.py` | Guided restore: exports hash-verified artifacts + RESTORE.md checklist with driver-specific vendor-tool instructions; performs no device writes |
@@ -88,6 +88,38 @@ no dependency): vendor, product, revision, and `UserApplicationName`,
 which Modicon CPUs set to the loaded project's name, giving a genuine
 program-change signal. Unsupported identification categories degrade to
 `collection_notes`, never a failed backup.
+
+## PLC identity drivers (Mitsubishi, Omron, Beckhoff, OPC UA)
+
+Where a vendor's program-upload protocol is closed, the drivers follow the
+fingerprint level of the capture ladder — identity + hash, projects via
+generic_file:
+
+- `mitsubishi_mc` — MC protocol 3E binary frames on stdlib sockets: CPU
+  model name and model code (command 0x0101). Q/L/iQ-R/iQ-F CPUs.
+- `omron_fins` — FINS/TCP on stdlib sockets (handshake + CPU UNIT DATA
+  READ): controller model and firmware version. CJ/CS/CP, NJ/NX.
+- `beckhoff_ads` — pyads: ADS device name, TwinCAT version, Run/Stop
+  state. Requires an ADS route configured on the target.
+- `generic_opcua` — asyncua: BuildInfo (manufacturer, product, software
+  version) + namespace array from any OPC UA server, plus optional
+  configured node reads. One driver fingerprints every modern controller
+  exposing OPC UA (S7-1200/1500, NJ/NX, Beckhoff, WAGO, B&R, ...).
+
+## RTU drivers
+
+- `generic_dnp3` — a minimal, read-only DNP3 client on stdlib sockets
+  (link CRC verified against the published test vector): one READ of
+  group 0 device attributes (g0v254) returns vendor, product, serial,
+  software/hardware versions from any conforming outstation. Unsolicited
+  responses are skipped, multi-fragment responses reassembled; no writes,
+  no time sync, no confirmations.
+- `sel_terminal` — SSH profile issuing SEL terminal commands (ID, STA,
+  SHO) for RTAC and protection relays, with date/time scrubbing.
+- `siemens_sicam` / `abb_rtu520` / `abb_rtu560` — the SICAM A8000 and ABB
+  RTU500-series web servers via the generic_http machinery (set your
+  firmware's export/diagnostic URLs). Full configurations remain with
+  SICAM TOOLBOX II / RTUtil500 exports through generic_file.
 
 ## Network equipment: SSH profiles and HTTP export
 

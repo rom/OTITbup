@@ -73,6 +73,68 @@ sites:
             options:
               unit_id: 255
 
+      - name: cell-3
+        devices:
+          - name: plc-04
+            driver: mitsubishi_mc           # MELSEC Q/L/iQ (stdlib)
+            address: 10.20.0.40
+            schedule: 12h
+            options:
+              port: 5007                    # match the CPU's MC port
+
+          - name: plc-05
+            driver: omron_fins              # Omron CJ/CS/CP/NJ/NX (stdlib)
+            address: 10.20.0.50
+            schedule: 12h
+
+          - name: plc-06
+            driver: beckhoff_ads            # needs otitbup[beckhoff] + ADS route
+            address: 10.20.0.60
+            schedule: 12h
+
+          - name: plc-07-ua
+            driver: generic_opcua           # needs otitbup[opcua]
+            address: 10.20.0.70
+            schedule: 12h
+            # credentials: plc-07-ua        # if the server requires login
+
+      - name: rtus
+        max_concurrent: 1
+        devices:
+          - name: rtu-01
+            driver: generic_dnp3            # any DNP3 outstation (stdlib)
+            address: 10.30.0.10
+            schedule: 1d
+            options:
+              outstation: 1
+              master: 3
+
+          - name: rtac-01
+            driver: sel_terminal            # SEL RTAC / relays over SSH
+            address: 10.30.0.20
+            schedule: 1d
+            credentials: rtac-01
+
+          - name: sicam-01
+            driver: siemens_sicam           # SICAM A8000 web endpoints
+            address: 10.30.0.30
+            schedule: 1d
+            credentials: sicam-01
+            options:
+              urls:
+                - "https://{address}/diag/parameters"  # your firmware's paths
+              verify_tls: false
+
+          - name: rtu520-01
+            driver: abb_rtu520              # ABB RTU500 series web server
+            address: 10.30.0.40
+            schedule: 1d
+            credentials: rtu520-01
+            options:
+              urls:
+                - "https://{address}/status"           # your firmware's paths
+              verify_tls: false
+
       - name: network
         max_concurrent: 2
         devices:
