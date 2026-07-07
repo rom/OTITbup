@@ -52,6 +52,7 @@ class AppConfig:
     secrets: dict[str, Any] = field(default_factory=dict)
     alerts: dict[str, Any] = field(default_factory=dict)
     git: dict[str, Any] = field(default_factory=dict)
+    webui: dict[str, Any] = field(default_factory=dict)
 
     def all_devices(self) -> list[Device]:
         return [d for s in self.sites for z in s.zones for d in z.devices]

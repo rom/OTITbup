@@ -17,6 +17,14 @@ git:
   push: false             # set true + remote to mirror off-appliance
   # remote: git@gitlab.plant.local:ot/backups.git
 
+webui:
+  host: 127.0.0.1
+  port: 8080
+  # Generate with: otitbup passwd
+  # auth:
+  #   username: admin
+  #   password_hash: pbkdf2_sha256$600000$...$...
+
 alerts:
   webhooks: []
   # syslog:
@@ -48,6 +56,22 @@ sites:
             options:
               path: /srv/exports/plc-01     # engineer-exported TIA projects
               patterns: ["**/*.zap*", "**/*.ap*"]
+
+      - name: cell-2
+        maintenance_window: "18:00-06:00"
+        devices:
+          - name: plc-02
+            driver: rockwell_enip           # needs otitbup[rockwell]
+            address: 10.20.0.20
+            schedule: 12h
+            options:
+              slot: 0
+          - name: plc-03
+            driver: schneider_modbus        # stdlib-only, no extra needed
+            address: 10.20.0.30
+            schedule: 12h
+            options:
+              unit_id: 255
 
       - name: network
         max_concurrent: 2

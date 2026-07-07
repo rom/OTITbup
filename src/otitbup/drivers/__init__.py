@@ -11,6 +11,8 @@ _REGISTRY: dict[str, str | type[Driver]] = {
     "generic_file": "otitbup.drivers.generic_file:GenericFileDriver",
     "generic_ssh": "otitbup.drivers.generic_ssh:GenericSSHDriver",
     "siemens_s7": "otitbup.drivers.siemens_s7:SiemensS7Driver",
+    "rockwell_enip": "otitbup.drivers.rockwell_enip:RockwellENIPDriver",
+    "schneider_modbus": "otitbup.drivers.schneider_modbus:SchneiderModbusDriver",
 }
 
 
