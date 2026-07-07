@@ -1,0 +1,47 @@
+"""Driver registry with lazy imports so optional vendor dependencies
+(netmiko, python-snap7, pycomm3) are only required when the corresponding
+driver is actually used."""
+from __future__ import annotations
+
+import importlib
+
+from .base import Artifact, Driver, DriverError
+
+_REGISTRY: dict[str, str | type[Driver]] = {
+    "generic_file": "otitbup.drivers.generic_file:GenericFileDriver",
+    "generic_ssh": "otitbup.drivers.generic_ssh:GenericSSHDriver",
+}
+
+
+def register(name: str, cls: type[Driver]) -> None:
+    _REGISTRY[name] = cls
+
+
+def available_drivers() -> list[str]:
+    return sorted(_REGISTRY)
+
+
+def get_driver(name: str) -> Driver:
+    target = _REGISTRY.get(name, name if ":" in name else None)
+    if target is None:
+        raise DriverError(
+            f"unknown driver {name!r} (available: {', '.join(available_drivers())})"
+        )
+    if isinstance(target, str):
+        module_name, _, class_name = target.partition(":")
+        try:
+            module = importlib.import_module(module_name)
+            target = getattr(module, class_name)
+        except (ImportError, AttributeError) as exc:
+            raise DriverError(f"cannot load driver {name!r}: {exc}") from exc
+    return target()
+
+
+__all__ = [
+    "Artifact",
+    "Driver",
+    "DriverError",
+    "available_drivers",
+    "get_driver",
+    "register",
+]
