@@ -1,4 +1,4 @@
-"""Pluggable secret backends (REQUIREMENTS.md section 8).
+"""Pluggable secret backends (docs/REQUIREMENTS.md section 8).
 
 Ships with a plain YAML file backend and a Fernet-encrypted file backend.
 External managers (HashiCorp Vault, CyberArk) can be added later by

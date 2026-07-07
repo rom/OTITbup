@@ -1,6 +1,6 @@
 """Siemens S7 driver (python-snap7), read-only.
 
-Captures, in descending fidelity (REQUIREMENTS.md section 2):
+Captures, in descending fidelity (docs/REQUIREMENTS.md section 2):
 
 1. Program blocks as binary (MC7) via block upload — S7-300/400 and
    unprotected CPUs. Stored under blocks/<TYPE>_<num>.mc7.

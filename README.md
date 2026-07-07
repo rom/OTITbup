@@ -5,9 +5,11 @@ settings, logic and code etc from OT equipment (PLC, RTU, gateways, com
 equipment), IT infrastructure equipment (network equipment), in a versioned
 git backup.
 
-- [REQUIREMENTS.md](REQUIREMENTS.md) — scope and decisions from the
-  requirements interview
-- [ARCHITECTURE.md](ARCHITECTURE.md) — module layout and design
+- [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) — scope and decisions from
+  the requirements interview
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout and design
+- [docs/CONFIGURATION.md](docs/CONFIGURATION.md) — configuration file
+  reference (`otitbup.yml`, secrets, web UI auth/TLS, alerts)
 
 ## Quick start
 
@@ -20,13 +22,15 @@ $EDITOR otitbup.yml secrets.yml
 
 otitbup validate               # check the config
 otitbup list                   # show the inventory
+otitbup drivers                # list all drivers with descriptions
 otitbup backup                 # back up everything now
 otitbup backup core-sw-01      # one device
 otitbup diff core-sw-01        # latest change
 otitbup log core-sw-01         # backup history
 otitbup daemon                 # run the scheduler
-otitbup serve                  # read-only web UI on 127.0.0.1:8080
-otitbup passwd                 # hash a web UI password (webui.auth snippet)
+otitbup serve                  # web UI on 127.0.0.1:8080
+otitbup passwd                 # hash a web UI password (webui.auth)
+otitbup certgen                # self-signed TLS pair (webui.tls)
 otitbup discover 10.20.0.0/24  # sequential scan -> YAML proposal for review
 otitbup restore plc-01 --out ./bundle   # hash-verified restore bundle
 ```
@@ -43,35 +47,44 @@ otitbup secrets decrypt secrets.enc --key-file otitbup.key   # to view/edit
 Then point the config at it (`backend: encryptedfile`, `path: secrets.enc`,
 `key_file: otitbup.key` — or provide the key via `OTITBUP_KEY`).
 
-## Status
+## Supported equipment
 
-**PLC drivers**: `siemens_s7` (python-snap7: MC7 block upload where the
-CPU allows it, CPU info + program fingerprint always), `rockwell_enip`
-(pycomm3: controller identity, tag list, program fingerprint),
-`schneider_modbus` (stdlib Modbus device identification incl. loaded
-application name + fingerprint), `mitsubishi_mc` (stdlib MC protocol:
-MELSEC Q/L/iQ CPU identity), `omron_fins` (stdlib FINS/TCP: CJ/CS/CP and
-NJ/NX controller identity), `beckhoff_ads` (pyads: TwinCAT device info
-and run state), `generic_opcua` (asyncua: build info + namespace
-fingerprint for any controller with an OPC UA server), `generic_enip`
-(stdlib EtherNet/IP ListIdentity: CIP identity + fingerprint for any
-EtherNet/IP device, incl. `ge_pacsystems`/`emerson_pacsystems` aliases
-for PACSystems RX3i/RSTi-EP), `wago_pfc` / `phoenix_plcnext` /
-`codesys_ssh` (paramiko SFTP: the deployed boot project fetched straight
-off Linux-based Codesys controllers — full content, not just a
-fingerprint), `generic_file` (watch-folder ingest of engineer-exported
-projects).
+Every driver is read-only by contract. Fidelity varies by what each
+vendor's protocol allows: **full content** (configuration or program
+files land in the repo) or **identity + fingerprint** (change detection;
+the full project is versioned via engineering-tool exports with
+`generic_file`). All defaults — ports, commands, paths — are overridable
+per device; see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-**RTU drivers**: `generic_dnp3` (stdlib DNP3 group-0 device attributes —
-covers SCADAPack, GE, SEL RTAC, Kingfisher and most water/power RTUs),
-`sel_terminal` (SEL RTAC and protection relays via terminal commands),
-`siemens_sicam` (SICAM A8000 web endpoints), `abb_rtu520` / `abb_rtu560`
-(ABB RTU500-series web server). RTU engineering-tool exports (SICAM
-TOOLBOX, RTUtil500, acSELerator) are versioned with `generic_file`.
+### PLCs and controllers
 
-**Network drivers** (SSH via netmiko, with per-vendor presets for
-commands and volatile-line scrubbing — run `otitbup drivers` for the
-live list). Vendor coverage:
+| Vendor | Equipment | Driver | Captures | Extra install |
+|---|---|---|---|---|
+| Siemens | S7-300/400 (and unprotected CPUs) | `siemens_s7` | program blocks (MC7) + CPU info + fingerprint | `otitbup[siemens]` |
+| Siemens | S7-1200/1500, protected CPUs | `siemens_s7` | CPU info + fingerprint (upload refused is noted, not fatal) | `otitbup[siemens]` |
+| Rockwell / Allen-Bradley | ControlLogix, CompactLogix | `rockwell_enip` | controller identity, tag list, program fingerprint | `otitbup[rockwell]` |
+| Schneider / Modicon | M340, M580, Quantum, Premium | `schneider_modbus` | device identification incl. loaded application name + fingerprint | — (stdlib) |
+| Mitsubishi | MELSEC Q, L, iQ-R, iQ-F | `mitsubishi_mc` | CPU model + fingerprint (MC protocol) | — (stdlib) |
+| Omron | CJ, CS, CP, NJ, NX | `omron_fins` | controller model + firmware + fingerprint (FINS) | — (stdlib) |
+| Beckhoff | CX / TwinCAT 2 & 3 | `beckhoff_ads` | device name, TwinCAT version, run state + fingerprint | `otitbup[beckhoff]` |
+| WAGO | PFC100, PFC200 | `wago_pfc` | **deployed boot project files** via SFTP | `otitbup[sftp]` |
+| Phoenix Contact | PLCnext (AXC F, RFC) | `phoenix_plcnext` | **deployed project** (/opt/plcnext/projects) via SFTP | `otitbup[sftp]` |
+| Codesys family (Festo, Bosch Rexroth ctrlX, ...) | Linux-based controllers | `codesys_ssh` | project/settings files via SFTP (paths per device) | `otitbup[sftp]` |
+| GE / Emerson | PACSystems RX3i, RSTi-EP | `ge_pacsystems` | CIP identity + fingerprint (EtherNet/IP enabled) | — (stdlib) |
+| Any vendor | OPC UA server exposed | `generic_opcua` | build info, namespaces, optional nodes + fingerprint | `otitbup[opcua]` |
+| Any vendor | EtherNet/IP device | `generic_enip` | CIP identity + fingerprint | — (stdlib) |
+| Any vendor | engineering-tool project exports (TIA Portal, Studio 5000, EcoStruxure, GX Works, Sysmac, PME, ...) | `generic_file` | **full project files** from a watch folder | — |
+
+### RTUs
+
+| Vendor | Equipment | Driver | Captures | Extra install |
+|---|---|---|---|---|
+| Any DNP3 vendor (Schneider SCADAPack, GE, Kingfisher/Semaphore, ...) | DNP3 outstations | `generic_dnp3` | device attributes (vendor, model, serial, versions) + fingerprint | — (stdlib) |
+| SEL | RTAC 3530/3505, protection relays | `sel_terminal` | ID / STA / SHO terminal output (settings) | `otitbup[ssh]` |
+| Siemens | SICAM A8000 (CP-8000/8021/8022/8050) | `siemens_sicam` | web-server endpoints (diagnostics/parameters) | — (stdlib) |
+| ABB | RTU520, RTU540, RTU560 (RTU500 series) | `abb_rtu520` / `abb_rtu560` | web-server endpoints (status/config downloads) | — (stdlib) |
+
+### Network equipment
 
 | Vendor | Switches | Routers | Firewalls |
 |---|---|---|---|
@@ -81,27 +94,46 @@ live list). Vendor coverage:
 | Hirschmann | `hirschmann_hios`, `hirschmann_classic` | — | `hirschmann_eagle` |
 | Belden | `belden_switch` (Hirschmann family) | — | `hirschmann_eagle` |
 | Moxa | `moxa_switch` (EDS) | `moxa_edr` | `moxa_edr` |
-| Moxa NPort (serial-to-eth) | — | `moxa_nport` (HTTP export) | — |
+| Moxa NPort (serial-to-ethernet) | — | `moxa_nport` (HTTP export) | — |
 | Westermo | `westermo_weos` | `westermo_weos` (RedFox), `westermo_merlin` (4G/5G) | `westermo_weos` |
 | Advantech | `advantech_switch` (EKI) | `advantech_router` (ICR) | — |
-| Netgear | `netgear_switch` | web-managed → `generic_http` | web-managed → `generic_http` |
+| Netgear | `netgear_switch` (M4300/M4250/ProSAFE) | web-managed → `generic_http` | web-managed → `generic_http` |
 | Omron | `omron_switch` | — (no router/firewall line) | — |
 
-Anything else netmiko reaches: `generic_ssh`. Web-managed gear:
-`generic_http` fetches config exports over HTTP(S) with Basic/Digest
-auth, stdlib-only. Every profile field (device_type, commands, scrub)
-is overridable per device — industrial firmware CLIs vary.
+All SSH profiles capture full configurations with volatile-line
+scrubbing (uptime, "last change" stamps) so diffs only show real
+changes. They need `otitbup[ssh]`.
 
-**Core**: local git store with per-device history and sha256 manifests;
-maintenance windows and per-zone rate limiting; scheduler daemon; change
-alerts (webhook/syslog/email); encrypted secrets tooling; web UI with
-optional HTTP Basic auth (PBKDF2-hashed passwords via `otitbup passwd`);
-opt-in sequential discovery that writes human-reviewed YAML proposals;
-and a guided restore workflow — `otitbup restore` exports hash-verified
-artifacts plus a RESTORE.md checklist, and never writes to devices.
+### Generic transports
 
-Planned: UMAS/ACD program capture where vendors allow it, web UI TLS,
-git-lfs for very large project files — see ARCHITECTURE.md.
+| Driver | Use it for | Extra install |
+|---|---|---|
+| `generic_ssh` | any SSH-CLI device netmiko reaches (device_type + commands) | `otitbup[ssh]` |
+| `generic_sftp` | files/directories/globs off any Linux device | `otitbup[sftp]` |
+| `generic_http` | config exports from web-managed devices (Basic/Digest auth) | — |
+| `generic_file` | watch-folder ingest of anything exported by hand | — |
+| `generic_opcua` / `generic_enip` / `generic_dnp3` | protocol-level identity + fingerprint | see above |
+
+## Web UI
+
+`otitbup serve` — read-only by design (the YAML config stays the source
+of truth): dashboard with summary tiles, per-zone grouping and live
+filtering; per-device pages with artifact lists, backup history and
+diffs; per-commit diff views; raw artifact viewing; an activity feed
+across all devices; and the driver catalog. Optional HTTP Basic auth
+(`otitbup passwd`) and TLS (`otitbup certgen` for a self-signed pair, or
+any PEM cert/key) — see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+
+## OT safety
+
+- Drivers are read-only by contract; restore is a guided export
+  (`otitbup restore` produces hash-verified artifacts + a RESTORE.md
+  checklist), never a device write.
+- Per-zone maintenance windows and connection caps keep backup traffic
+  from disturbing control traffic.
+- Discovery (`otitbup discover`) is opt-in, sequential TCP-connect only,
+  and produces a YAML proposal for human review — it never edits the
+  inventory.
 
 ## Tests
 

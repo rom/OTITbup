@@ -40,8 +40,9 @@ otitbup.yml (inventory, source of truth, versioned by the operator)
 | `runner.py` | Orchestration: per-zone concurrency semaphores, maintenance-window checks, change/failure alerts |
 | `daemon.py` | Scheduler loop; per-device interval state in `state.json` |
 | `alerts.py` | Webhook, syslog, email notifiers; failures logged, never fatal |
-| `webui.py` | Read-only web UI (stdlib http.server): device dashboard, per-device history and diffs; optional HTTP Basic auth, warns when bound beyond loopback without it |
-| `cli.py` | `validate`, `list`, `backup`, `diff`, `log`, `daemon`, `serve`, `discover`, `restore`, `passwd`, `secrets genkey/encrypt/decrypt` |
+| `webui.py` | Read-only web UI (stdlib http.server): dashboard with tiles/zone grouping/filtering, activity feed, driver catalog, per-device artifacts + history, per-commit diffs, raw artifact viewing; optional HTTP Basic auth and TLS, warns when bound beyond loopback without auth |
+| `tlscert.py` | Self-signed EC P-256 certificate generation for the web UI (`otitbup certgen`) |
+| `cli.py` | `validate`, `list`, `drivers`, `backup`, `diff`, `log`, `daemon`, `serve`, `discover`, `restore`, `passwd`, `certgen`, `secrets genkey/encrypt/decrypt` |
 
 ## Key design points
 
@@ -185,5 +186,4 @@ contract holds even in the restore workflow.
 ## Later
 
 - Automated restore paths where a vendor-supported, safe write API exists.
-- Web UI TLS.
 - git-lfs or artifact store for very large project files.

@@ -1,7 +1,7 @@
 """Core data model: site -> zone -> device.
 
 The hierarchy is multi-site-ready from day one even though the first
-deployments are single-site (see REQUIREMENTS.md section 4).
+deployments are single-site (see docs/REQUIREMENTS.md section 4).
 """
 from __future__ import annotations
 

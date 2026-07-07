@@ -1,4 +1,4 @@
-"""Schedules and maintenance windows (REQUIREMENTS.md section 10).
+"""Schedules and maintenance windows (docs/REQUIREMENTS.md section 10).
 
 Schedules are simple intervals ("30m", "4h", "1d"). Maintenance windows are
 "HH:MM-HH:MM" ranges during which a zone may be polled; overnight windows

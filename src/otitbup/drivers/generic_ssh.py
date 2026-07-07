@@ -1,4 +1,4 @@
-"""SSH command-capture driver for network equipment (REQUIREMENTS.md
+"""SSH command-capture driver for network equipment (docs/REQUIREMENTS.md
 section 1). Built on netmiko so one driver covers many vendors via
 device_type. Vendor-specific presets (Cisco IOS, SCALANCE, RUGGEDCOM,
 Moxa, Westermo, ...) live in network_profiles.py and reuse collect_ssh().

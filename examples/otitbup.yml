@@ -24,6 +24,10 @@ webui:
   # auth:
   #   username: admin
   #   password_hash: pbkdf2_sha256$600000$...$...
+  # Generate a self-signed pair with: otitbup certgen (or use CA-issued PEMs)
+  # tls:
+  #   cert_file: webui-cert.pem    # relative to this config file
+  #   key_file: webui-key.pem
 
 alerts:
   webhooks: []

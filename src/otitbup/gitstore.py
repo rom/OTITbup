@@ -1,5 +1,5 @@
 """Versioned backup store: a local git repository on the appliance, with
-optional push to a remote (REQUIREMENTS.md section 6).
+optional push to a remote (docs/REQUIREMENTS.md section 6).
 
 Repository layout:
 
@@ -135,6 +135,13 @@ class GitStore:
             "log", "-1", "--format=%h %ad", "--date=format:%Y-%m-%d %H:%M",
             "--", device.path, check=False,
         ).strip()
+
+    def commit_diff(self, device: Device, commit: str) -> str:
+        """Diff of one commit, restricted to the device's path."""
+        return self._git(
+            "show", "--stat", "--patch", commit, "--", device.path,
+            check=False,
+        )
 
     def history(self, device: Device | None = None, limit: int = 20) -> str:
         args = ["log", f"-{limit}", "--format=%h  %ad  %s", "--date=iso"]
