@@ -26,7 +26,8 @@ def _require(mapping: dict[str, Any], key: str, context: str) -> Any:
     return mapping[key]
 
 
-_RETENTION_KEYS = {"keep_versions", "keep_days", "large_file_threshold"}
+_RETENTION_KEYS = {"keep_versions", "keep_days", "large_file_threshold",
+                   "lock_days"}
 
 
 def _parse_retention(raw: Any, context: str) -> dict[str, int]:

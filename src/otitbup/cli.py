@@ -313,6 +313,18 @@ def main(argv: list[str] | None = None) -> int:
         "--commit", help="commit to annotate (default: latest for the device)"
     )
 
+    p_hold = sub.add_parser(
+        "hold",
+        help="legal hold: protect a scope's backups from retention pruning",
+    )
+    hold_sub = p_hold.add_subparsers(dest="hold_command", required=True)
+    p_hset = hold_sub.add_parser("set", help="place a legal hold")
+    p_hset.add_argument("scope", help="device, 'site/*', 'site/zone/*', or '*'")
+    p_hset.add_argument("--reason")
+    p_hclear = hold_sub.add_parser("clear", help="release a legal hold")
+    p_hclear.add_argument("scope")
+    hold_sub.add_parser("list", help="list active legal holds")
+
     p_maint = sub.add_parser(
         "maintenance",
         help="mark a device/zone/site in maintenance (changes = expected)",
@@ -875,10 +887,12 @@ def main(argv: list[str] | None = None) -> int:
         from .retention import apply as retention_apply
         from .retention import describe_policy, plan
         from .runner import default_blobstore
+        from .runstore import default_runstore
         store = GitStore(config.data_dir)
         store.ensure_repo()
         blobstore = default_blobstore(config)
-        prune_plan = plan(config, store, blobstore)
+        prune_plan = plan(config, store, blobstore,
+                          runstore=default_runstore(config))
         for dplan in prune_plan.devices:
             sources = ", ".join(
                 f"{key}={dplan.sources[key]}"
@@ -888,6 +902,7 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"{dplan.device:40s} {describe_policy(dplan.policy):45s} "
                 f"backups kept {dplan.kept_backups}/{dplan.backups}"
+                + ("  [HELD]" if dplan.held else "")
                 + (f"   [{sources}]" if sources else "")
             )
         print(
@@ -1184,6 +1199,26 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         store.set_annotation(commit, args.text)
         print(f"annotated {commit[:10]} on {device.qualified_name}")
+        return 0
+
+    if args.command == "hold":
+        from .runstore import default_runstore
+        import time
+        runstore = default_runstore(config)
+        if args.hold_command == "set":
+            runstore.set_hold(args.scope, time.time(), reason=args.reason,
+                              set_by=userEmail_or_none())
+            print(f"legal hold set on {args.scope} — retention will not prune "
+                  "it until cleared")
+        elif args.hold_command == "clear":
+            n = runstore.clear_hold(args.scope)
+            print(f"legal hold cleared on {args.scope}" if n
+                  else f"no hold on {args.scope}")
+        else:
+            holds = runstore.holds()
+            for h in holds:
+                print(f"{h['scope']:30s} {h.get('reason') or ''}")
+            print(f"\n{len(holds)} active hold(s)", file=sys.stderr)
         return 0
 
     if args.command == "maintenance":

@@ -308,6 +308,24 @@ See also: report, search.
 """),
 
     # ------------------------------------------------ Retention & strategy
+    _c("hold", "Retention & strategy",
+       "legal hold: protect backups from retention pruning", """
+`otitbup hold set <scope> [--reason ...]` places a **legal hold** on a scope
+(a device qualified name, `site/*`, `site/zone/*`, or `*`). While held, the
+scope's entire offloaded history is exempt from retention pruning — nothing
+is deleted, whatever `keep_versions`/`keep_days` say — until you
+`otitbup hold clear <scope>`. Use it for incident preservation, litigation
+holds, or a known-good copy you must not lose. `otitbup hold list` shows
+active holds.
+
+Complementary to a **retention lock**: set `retention.lock_days: N` in the
+config to keep everything captured within the last N days regardless of
+policy (a minimum-retention / WORM window). For true immutability of the
+off-appliance copy, point the git remote or the `offsite` target at an
+append-only / object-locked (WORM) store.
+
+See also: retention, strategy, offsite.
+"""),
     _c("retention", "Retention & strategy",
        "show retention policies and prune expired blobs", """
 `otitbup retention [--apply]` shows every device's effective retention
