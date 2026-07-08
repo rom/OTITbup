@@ -1202,8 +1202,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "hold":
-        from .runstore import default_runstore
         import time
+
+        from .runstore import default_runstore
         runstore = default_runstore(config)
         if args.hold_command == "set":
             runstore.set_hold(args.scope, time.time(), reason=args.reason,
