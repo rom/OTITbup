@@ -38,6 +38,12 @@ otitbup.yml (inventory, source of truth, versioned by the operator)
 | `restore.py` | Guided restore: exports hash-verified artifacts + RESTORE.md checklist with driver-specific vendor-tool instructions; performs no device writes |
 | `blobstore.py` | Content-addressed store for large artifacts (sha256, deduplicated); pointer files go into git |
 | `retention.py` | Hierarchical retention policies (device > zone > site > global), prune planning/apply; never rewrites git history |
+| `runstore.py` | SQLite: backup run results, restore rehearsals, maintenance state — the source for status, metrics and reports |
+| `verify.py` | Backup verification job: re-hash artifacts against manifests, check blob integrity |
+| `policy.py` | Config policy/compliance checks (built-in + custom rules) over captured text configs |
+| `metrics.py` | Prometheus text metrics and JSON status |
+| `reports.py` | HTML compliance reports and per-site DR runbooks |
+| `netrestore.py` | Automated restore for network gear (netmiko), dry-run default, pre/post verify; PLCs stay guided |
 | `gitstore.py` | Local git repo; per-device commits; `manifest.yml` with sha256 fingerprints (change detection for binaries); optional push to remote |
 | `runner.py` | Orchestration: per-zone concurrency semaphores, maintenance-window checks, change/failure alerts |
 | `daemon.py` | Scheduler loop; per-device interval state in `state.json` |

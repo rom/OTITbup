@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
@@ -18,6 +19,7 @@ from .blobstore import BlobStore
 from .drivers import get_driver
 from .gitstore import GitStore
 from .models import AppConfig, Device
+from .runstore import RunRecord, RunStore, default_runstore
 from .secrets import SecretsBackend
 
 
@@ -35,6 +37,7 @@ class BackupResult:
     changed: bool = False
     commit: str | None = None
     message: str = ""
+    expected: bool | None = None   # for a change: was it during maintenance?
 
 
 class Runner:
@@ -45,6 +48,7 @@ class Runner:
         secrets: SecretsBackend | None = None,
         alerts: AlertManager | None = None,
         force: bool = False,
+        runstore: RunStore | None = None,
     ):
         self.config = config
         self.store = store
@@ -52,6 +56,7 @@ class Runner:
         self.alerts = alerts or AlertManager(config.alerts)
         self.force = force
         self.blobstore = default_blobstore(config)
+        self.runstore = runstore or default_runstore(config)
 
     def backup_devices(self, devices: list[Device]) -> list[BackupResult]:
         self.store.ensure_repo()
@@ -69,19 +74,35 @@ class Runner:
             ]
             results = [f.result() for f in futures]
 
-        changed = [r for r in results if r.changed]
+        # Unexpected changes (detected outside a maintenance window) are
+        # called out separately — that is the unauthorized-change signal.
+        unexpected = [r for r in results if r.changed and r.expected is False]
+        expected = [r for r in results if r.changed and r.expected]
         failed = [r for r in results if not r.ok]
-        if changed:
-            names = ", ".join(r.device for r in changed)
+        if unexpected:
+            names = ", ".join(r.device for r in unexpected)
             body = "\n".join(
-                f"{r.device}: commit {r.commit}" for r in changed
+                f"{r.device}: commit {r.commit} (NOT in maintenance)"
+                for r in unexpected
             )
-            self.alerts.notify(f"otitbup: changes detected on {names}", body)
+            self.alerts.notify(
+                f"otitbup: UNEXPECTED changes on {names}", body
+            )
+        if expected:
+            names = ", ".join(r.device for r in expected)
+            body = "\n".join(
+                f"{r.device}: commit {r.commit} (maintenance)"
+                for r in expected
+            )
+            self.alerts.notify(
+                f"otitbup: changes on {names} (expected, maintenance)", body
+            )
         if failed:
             body = "\n".join(f"{r.device}: {r.message}" for r in failed)
             self.alerts.notify(
                 f"otitbup: {len(failed)} backup(s) failed", body
             )
+        self._alert_stale(devices)
 
         if self.config.git.get("push") and self.config.git.get("remote"):
             try:
@@ -91,11 +112,32 @@ class Runner:
 
         return results
 
+    def _alert_stale(self, devices: list[Device]) -> None:
+        """Alert on devices whose last SUCCESSFUL backup is older than
+        alerts.stale_days (default 7; 0 disables). Silent failure is the
+        classic way backups rot — this is the catch-all."""
+        stale_days = int(self.config.alerts.get("stale_days", 7))
+        if stale_days <= 0:
+            return
+        cutoff = time.time() - stale_days * 86400
+        stale = []
+        for device in devices:
+            status = self.runstore.status(device.qualified_name)
+            if status.last_success is None or status.last_success < cutoff:
+                stale.append(device.qualified_name)
+        if stale:
+            self.alerts.notify(
+                f"otitbup: {len(stale)} device(s) with no successful backup "
+                f"in {stale_days}d",
+                "\n".join(stale),
+            )
+
     def _backup_one(
         self, device: Device, limit: threading.Semaphore
     ) -> BackupResult:
         from .windows import in_window
 
+        started = time.time()
         zone = self.config.find_zone(device)
         if not self.force and not in_window(zone.maintenance_window):
             return BackupResult(
@@ -105,37 +147,61 @@ class Runner:
                         f"{zone.maintenance_window}",
             )
         with limit:
-            try:
-                driver = get_driver(device.driver)
-                secret = None
-                if device.credentials:
-                    if not self.secrets:
-                        raise RuntimeError(
-                            "device references credentials but no secrets "
-                            "backend is configured"
-                        )
-                    secret = self.secrets.get(device.credentials)
-                artifacts = driver.collect(device, secret)
-                threshold = self.config.retention_for(device).get(
-                    "large_file_threshold", 0
+            result = self._collect_and_store(device, started)
+        self.runstore.record_run(RunRecord(
+            device=result.device,
+            started_at=started,
+            finished_at=time.time(),
+            ok=result.ok,
+            changed=result.changed,
+            commit_hash=result.commit,
+            message=result.message,
+            expected=result.expected,
+        ))
+        return result
+
+    def _collect_and_store(
+        self, device: Device, started: float
+    ) -> BackupResult:
+        try:
+            driver = get_driver(device.driver)
+            secret = None
+            if device.credentials:
+                if not self.secrets:
+                    raise RuntimeError(
+                        "device references credentials but no secrets "
+                        "backend is configured"
+                    )
+                secret = self.secrets.get(device.credentials)
+            artifacts = driver.collect(device, secret)
+            threshold = self.config.retention_for(device).get(
+                "large_file_threshold", 0
+            )
+            commit = self.store.write_and_commit(
+                device, artifacts,
+                blobstore=self.blobstore, threshold=threshold,
+            )
+            expected = None
+            if commit:
+                expected = self.runstore.in_maintenance(
+                    device.qualified_name, started
                 )
-                commit = self.store.write_and_commit(
-                    device, artifacts,
-                    blobstore=self.blobstore, threshold=threshold,
+                log.info(
+                    "%s: changed, commit %s%s", device.qualified_name,
+                    commit[:10], "" if expected else " (UNEXPECTED)",
                 )
-                if commit:
-                    log.info("%s: changed, commit %s", device.qualified_name, commit[:10])
-                else:
-                    log.info("%s: no change", device.qualified_name)
-                return BackupResult(
-                    device=device.qualified_name,
-                    ok=True,
-                    changed=commit is not None,
-                    commit=commit,
-                    message="changed" if commit else "no change",
-                )
-            except Exception as exc:
-                log.error("%s: %s", device.qualified_name, exc)
-                return BackupResult(
-                    device=device.qualified_name, ok=False, message=str(exc)
-                )
+            else:
+                log.info("%s: no change", device.qualified_name)
+            return BackupResult(
+                device=device.qualified_name,
+                ok=True,
+                changed=commit is not None,
+                commit=commit,
+                message="changed" if commit else "no change",
+                expected=expected,
+            )
+        except Exception as exc:
+            log.error("%s: %s", device.qualified_name, exc)
+            return BackupResult(
+                device=device.qualified_name, ok=False, message=str(exc)
+            )

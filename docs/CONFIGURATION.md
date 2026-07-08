@@ -20,8 +20,10 @@ data_dir: ./data        # backup git repository; relative paths resolve
 secrets:   { ... }      # credential backend        (section below)
 git:       { ... }      # remote mirroring          (section below)
 webui:     { ... }      # web UI: host/port/auth/TLS (section below)
-alerts:    { ... }      # change/failure alerts     (section below)
+alerts:    { ... }      # change/failure/staleness alerts (section below)
 retention: { ... }      # global retention defaults (section below)
+policy:    { ... }      # config policy checks      (section below)
+reports:   { ... }      # scheduled compliance reports (section below)
 sites:     [ ... ]      # the inventory             (section below)
 ```
 
@@ -224,6 +226,7 @@ strictly read-only.
 
 ```yaml
 alerts:
+  stale_days: 7          # alert if no successful backup in N days (0 = off)
   webhooks:
     - https://hooks.example.com/otitbup   # JSON POST per alert
   syslog:
@@ -236,9 +239,59 @@ alerts:
     to: [ot-team@example.com]
 ```
 
-Alerts fire when a backup run detects changes (one alert summarising the
-changed devices) and when backups fail. Delivery failures are logged and
-never block backups.
+Alerts fire when a run detects **unexpected** changes (a change outside a
+maintenance window — the unauthorized-change signal), separately for
+**expected** changes (during maintenance), when backups **fail**, and
+when a device has had **no successful backup in `stale_days`** — the last
+being the catch-all against silent failure. Delivery failures are logged
+and never block backups.
+
+### Maintenance mode (expected vs. unexpected changes)
+
+A change is *expected* if the device is under active maintenance when it
+is detected, *unexpected* otherwise. Maintenance is a runtime state set
+with the CLI, not config:
+
+```bash
+otitbup maintenance plant-a/cell-1/plc-01 --hours 8 --reason "PLC upgrade"
+otitbup maintenance "plant-a/cell-1/*" --hours 8      # whole zone
+otitbup maintenance "plant-a/*"                       # whole site, until cleared
+otitbup maintenance plant-a/cell-1/plc-01 --off       # clear early
+```
+
+## policy
+
+Config policy checks lint captured text configs and flag insecure or
+non-conformant settings (`otitbup policy`, the web UI Policy page, and the
+compliance report). Built-in rules (telnet, SNMP `public`, unencrypted
+HTTP admin, weak/plaintext enable passwords) are vendor-neutral. Add or
+suppress rules:
+
+```yaml
+policy:
+  disable: [no-snmpv1v2]           # silence built-in rule ids
+  rules:
+    - id: no-http-server
+      description: HTTP server (unencrypted) enabled
+      severity: medium             # low | medium | high | critical
+      match: "^ip http server$"    # regex; PRESENCE is a finding
+    - id: require-ntp
+      description: no NTP server configured
+      severity: low
+      absent: "ntp server"         # regex; ABSENCE is a finding
+```
+
+## reports
+
+Scheduled compliance reports (the daemon writes/emails one every
+`interval`); on demand use `otitbup report`.
+
+```yaml
+reports:
+  interval: 7d           # 7d/24h/... ; omit to disable scheduling
+  period_days: 30        # window the report summarises
+  out: /var/otitbup/compliance-report.html   # optional file output
+```
 
 ## Files next to the config
 
@@ -246,6 +299,7 @@ never block backups.
 |---|---|---|
 | `data/` | `otitbup backup` | the backup git repository (`data_dir`) |
 | `blobs/` | `otitbup backup` | content-addressed store for offloaded large artifacts; pruned by `otitbup retention --apply` |
+| `runstore.db` | `otitbup backup` | SQLite: run results, rehearsals, maintenance state (feeds status/metrics/reports); safe to delete (loses history) |
 | `state.json` | `otitbup daemon` | per-device last-run times; safe to delete (forces a run) |
 | `otitbup.key` | `otitbup secrets genkey` | Fernet key, mode 0600 |
 | `webui-cert.pem`, `webui-key.pem` | `otitbup certgen` | TLS pair, key mode 0600 |

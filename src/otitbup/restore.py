@@ -34,7 +34,7 @@ _GENERIC_STEPS = """\
    `otitbup diff {name}` shows no unexpected difference.
 """
 
-_DRIVER_INSTRUCTIONS = {
+DRIVER_INSTRUCTIONS = {
     "generic_file": (
         "This bundle contains engineer-exported project files. Open the "
         "project in the engineering tool it came from (TIA Portal, "
@@ -139,7 +139,7 @@ def export_bundle(
         "HASH MISMATCH — do NOT use these artifacts:\n"
         + "\n".join(f"  - {m}" for m in mismatches)
     )
-    instructions = _DRIVER_INSTRUCTIONS.get(
+    instructions = DRIVER_INSTRUCTIONS.get(
         device.driver,
         "No driver-specific instructions; restore with the vendor tool "
         "appropriate for this equipment.",
