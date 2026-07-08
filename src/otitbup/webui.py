@@ -1512,6 +1512,19 @@ class _Handler(BaseHTTPRequestHandler):
         self.ui = ui
         super().__init__(*args, **kwargs)
 
+    def handle(self):
+        """A client that closes its connection abruptly (a closed browser
+        tab, a dropped SSE stream, a load-balancer health probe) makes the
+        stdlib server raise ConnectionResetError/BrokenPipeError from deep
+        inside request parsing and dump a full traceback. That is benign
+        network noise, not a fault — swallow it and log a single debug line
+        instead of a scary stack trace."""
+        try:
+            super().handle()
+        except (ConnectionResetError, BrokenPipeError,
+                ConnectionAbortedError, TimeoutError) as exc:
+            log.debug("client connection dropped: %s", exc)
+
     def log_message(self, fmt, *args):  # route to logging, not stderr
         log.debug(fmt, *args)
 

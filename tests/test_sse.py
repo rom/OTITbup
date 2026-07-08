@@ -79,3 +79,28 @@ def test_sse_stream_delivers_events(tmp_path):
         conn.close()
     finally:
         httpd.shutdown()
+
+
+def test_abrupt_disconnect_no_crash(tmp_path):
+    import socket
+    import time as _t
+    httpd, ui = _make_server(tmp_path)
+    try:
+        addr = httpd.server_address
+        # Open a connection, send a partial request line, then reset it
+        # (SO_LINGER 0 -> RST) — the stdlib server used to dump a traceback.
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect(addr)
+        s.sendall(b"GET /he")
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER,
+                     __import__("struct").pack("ii", 1, 0))
+        s.close()
+        _t.sleep(0.1)
+        # Server must still be serving normal requests afterwards.
+        import http.client
+        conn = http.client.HTTPConnection(*addr, timeout=5)
+        conn.request("GET", "/healthz")
+        assert conn.getresponse().status == 200
+        conn.close()
+    finally:
+        httpd.shutdown()
