@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from .models import AppConfig
@@ -123,6 +123,7 @@ class Daemon:
             self.reload()  # pick up config edits without a restart
             self.run_once()
             self._maybe_report()
+            self._maybe_gc()
             time.sleep(_POLL_SECONDS)
 
     def _install_sighup(self) -> None:
@@ -182,4 +183,28 @@ class Daemon:
         except Exception as exc:
             log.warning("scheduled report failed: %s", exc)
         self.state["__report__"] = now.isoformat()
+        self._save_state()
+
+    def _maybe_gc(self) -> None:
+        """Run `git gc` every housekeeping.gc_interval_days to keep the
+        backup repo compact. 0/unset disables."""
+        days = int(self.config.housekeeping.get("gc_interval_days", 0))
+        if days <= 0:
+            return
+        now = datetime.now(UTC)
+        last = self.state.get("__gc__")
+        if last is not None:
+            due_at = datetime.fromisoformat(last) + timedelta(days=days)
+            if now < due_at:
+                return
+        try:
+            before = self.runner.store.repo_size_bytes()
+            self.runner.store.gc(
+                aggressive=bool(self.config.housekeeping.get("gc_aggressive")))
+            after = self.runner.store.repo_size_bytes()
+            log.info("housekeeping git gc: %.1f -> %.1f MiB",
+                     before / 1048576, after / 1048576)
+        except Exception as exc:
+            log.warning("housekeeping git gc failed: %s", exc)
+        self.state["__gc__"] = now.isoformat()
         self._save_state()

@@ -56,3 +56,57 @@ def test_daemon_keeps_old_config_on_broken_reload(tmp_path):
     cfg.write_text("data_dir: ./data\nsites: [{name: s, zones: [{}]}]\n")
     assert daemon.reload() is False        # invalid -> not applied
     assert len(daemon.config.all_devices()) == 1   # old config retained
+
+
+class _GcRunner(_FakeRunner):
+    def __init__(self, config):
+        super().__init__(config)
+        self.gc_calls = 0
+
+        class _Store:
+            def repo_size_bytes(_self):
+                return 1000
+
+            def gc(_self, aggressive=False):
+                self.gc_calls += 1
+                return ""
+
+        self.store = _Store()
+
+        class _Alerts:
+            def notify(self, *a, **k):
+                pass
+
+        self.alerts = _Alerts()
+
+
+def test_daemon_periodic_gc(tmp_path):
+    cfg = tmp_path / "otitbup.yml"
+    cfg.write_text(textwrap.dedent("""\
+        data_dir: ./data
+        housekeeping:
+          gc_interval_days: 7
+        sites:
+          - name: s
+            zones:
+              - name: z
+                devices:
+                  - {name: a, driver: cisco_ios}
+    """))
+    config = load_config(cfg)
+    runner = _GcRunner(config)
+    daemon = Daemon(config, runner, config_path=str(cfg))
+
+    daemon._maybe_gc()
+    assert runner.gc_calls == 1          # first run: due
+    daemon._maybe_gc()
+    assert runner.gc_calls == 1          # within interval: skipped
+
+
+def test_daemon_gc_disabled_by_default(tmp_path):
+    cfg = tmp_path / "otitbup.yml"
+    _write(cfg, ["a"])
+    config = load_config(cfg)
+    runner = _GcRunner(config)
+    Daemon(config, runner, config_path=str(cfg))._maybe_gc()
+    assert runner.gc_calls == 0
