@@ -40,8 +40,9 @@ otitbup.yml (inventory, source of truth, versioned by the operator)
 | `runner.py` | Orchestration: per-zone concurrency semaphores, maintenance-window checks, change/failure alerts |
 | `daemon.py` | Scheduler loop; per-device interval state in `state.json` |
 | `alerts.py` | Webhook, syslog, email notifiers; failures logged, never fatal |
-| `webui.py` | Read-only web UI (stdlib http.server): device dashboard, per-device history and diffs; optional HTTP Basic auth, warns when bound beyond loopback without it |
-| `cli.py` | `validate`, `list`, `backup`, `diff`, `log`, `daemon`, `serve`, `discover`, `restore`, `passwd`, `secrets genkey/encrypt/decrypt` |
+| `webui.py` | Read-only web UI (stdlib http.server): dashboard with tiles/zone grouping/filtering, activity feed, driver catalog, per-device artifacts + history, per-commit diffs, raw artifact viewing; optional HTTP Basic auth and TLS, warns when bound beyond loopback without auth |
+| `tlscert.py` | Self-signed EC P-256 certificate generation for the web UI (`otitbup certgen`) |
+| `cli.py` | `validate`, `list`, `drivers`, `backup`, `diff`, `log`, `daemon`, `serve`, `discover`, `restore`, `passwd`, `certgen`, `secrets genkey/encrypt/decrypt` |
 
 ## Key design points
 
@@ -105,6 +106,19 @@ generic_file:
   version) + namespace array from any OPC UA server, plus optional
   configured node reads. One driver fingerprints every modern controller
   exposing OPC UA (S7-1200/1500, NJ/NX, Beckhoff, WAGO, B&R, ...).
+- `generic_enip` — stdlib EtherNet/IP: one ListIdentity (0x0063) returns
+  the CIP Identity Object (vendor, device type, product code, revision,
+  serial, product name) from any EtherNet/IP device. Status/state are
+  recorded but excluded from the fingerprint so run-mode changes don't
+  churn diffs. `ge_pacsystems`/`emerson_pacsystems` are aliases for
+  PACSystems RX3i/RSTi-EP with EtherNet/IP enabled; SRTP-only legacy GE
+  CPUs stay with PAC Machine Edition exports via generic_file.
+- `generic_sftp` (paramiko) — fetches remote files/dirs/globs from
+  Linux-based controllers, capturing the deployed boot project itself
+  rather than a fingerprint. Presets: `wago_pfc` (/home/codesys and
+  /home/codesys3), `phoenix_plcnext` (/opt/plcnext/projects),
+  `codesys_ssh` (vendor-neutral, paths required). Missing preset paths
+  are noted, not fatal — runtime dirs vary by firmware.
 
 ## RTU drivers
 
@@ -172,5 +186,4 @@ contract holds even in the restore workflow.
 ## Later
 
 - Automated restore paths where a vendor-supported, safe write API exists.
-- Web UI TLS.
 - git-lfs or artifact store for very large project files.

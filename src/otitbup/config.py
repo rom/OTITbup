@@ -1,7 +1,7 @@
 """Load and validate the YAML inventory/config file.
 
 The config file is the source of truth for the device inventory
-(REQUIREMENTS.md section 7) and is expected to be versioned in git by the
+(docs/REQUIREMENTS.md section 7) and is expected to be versioned in git by the
 operator.
 """
 from __future__ import annotations

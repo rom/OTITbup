@@ -9,3 +9,7 @@ secrets.yml
 otitbup.yml
 !examples/otitbup.yml
 !examples/secrets.yml
+webui-cert.pem
+webui-key.pem
+otitbup.key
+secrets.enc

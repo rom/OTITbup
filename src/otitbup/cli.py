@@ -116,6 +116,20 @@ def main(argv: list[str] | None = None) -> int:
         "--password", help="password (omit to be prompted securely)"
     )
 
+    p_certgen = sub.add_parser(
+        "certgen", help="generate a self-signed TLS pair for the web UI"
+    )
+    p_certgen.add_argument(
+        "--host", action="append", dest="hosts",
+        help="DNS name for the certificate (repeatable; default localhost)",
+    )
+    p_certgen.add_argument(
+        "--ip", action="append", dest="ips",
+        help="IP address for the certificate (repeatable)",
+    )
+    p_certgen.add_argument("--out-dir", default=".")
+    p_certgen.add_argument("--days", type=int, default=3650)
+
     p_secrets = sub.add_parser("secrets", help="manage encrypted secrets")
     secrets_sub = p_secrets.add_subparsers(dest="secrets_command", required=True)
     p_genkey = secrets_sub.add_parser(
@@ -143,30 +157,8 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if args.command == "drivers":
-        from .drivers import available_drivers
-        from .drivers.network_profiles import PROFILES
-        core = {
-            "generic_file": "watch-folder ingest of engineer-exported project files",
-            "generic_ssh": "any SSH-CLI device via netmiko device_type",
-            "generic_http": "config export over HTTP(S) from web-managed devices",
-            "moxa_nport": "Moxa NPort serial-to-ethernet converters (HTTP export)",
-            "siemens_s7": "Siemens S7 PLCs (block upload, CPU info, fingerprint)",
-            "rockwell_enip": "Rockwell/Allen-Bradley Logix controllers (pycomm3)",
-            "schneider_modbus": "Schneider/Modicon PLCs (device identification)",
-            "generic_opcua": "any OPC UA server: build info + namespace fingerprint",
-            "generic_dnp3": "any DNP3 outstation/RTU: device attributes (g0)",
-            "mitsubishi_mc": "Mitsubishi MELSEC Q/L/iQ CPUs (MC protocol identity)",
-            "omron_fins": "Omron CJ/CS/CP/NJ/NX PLCs (FINS identity)",
-            "beckhoff_ads": "Beckhoff TwinCAT controllers (ADS device info)",
-            "siemens_sicam": "Siemens SICAM A8000 RTUs (web endpoints)",
-            "abb_rtu500": "ABB RTU500 series RTUs (web endpoints)",
-            "abb_rtu520": "ABB RTU520 (RTU500 series, web endpoints)",
-            "abb_rtu560": "ABB RTU560 (RTU500 series, web endpoints)",
-        }
-        for name in available_drivers():
-            description = core.get(name) or PROFILES.get(name, {}).get(
-                "description", ""
-            )
+        from .drivers import driver_descriptions
+        for name, description in driver_descriptions().items():
             print(f"{name:20s} {description}")
         return 0
 
@@ -183,6 +175,26 @@ def main(argv: list[str] | None = None) -> int:
         print("  auth:")
         print(f"    username: {args.username}")
         print(f"    password_hash: {hash_password(password)}")
+        return 0
+
+    if args.command == "certgen":
+        from .tlscert import TLSCertError, generate_self_signed
+        out_dir = Path(args.out_dir)
+        cert_file = out_dir / "webui-cert.pem"
+        key_file = out_dir / "webui-key.pem"
+        try:
+            generate_self_signed(
+                cert_file, key_file,
+                hostnames=args.hosts, ips=args.ips, days=args.days,
+            )
+        except (TLSCertError, ValueError) as exc:
+            print(f"certgen error: {exc}", file=sys.stderr)
+            return 2
+        print(f"wrote {cert_file} and {key_file} (key mode 0600)")
+        print("webui:")
+        print("  tls:")
+        print(f"    cert_file: {cert_file}")
+        print(f"    key_file: {key_file}")
         return 0
 
     if args.command == "secrets":
@@ -264,12 +276,22 @@ def main(argv: list[str] | None = None) -> int:
         from .webui import serve
         store = GitStore(config.data_dir)
         store.ensure_repo()
+        tls = config.webui.get("tls")
+        if tls:
+            # cert/key paths are relative to the config file's directory.
+            base = Path(args.config).resolve().parent
+            tls = {
+                key: str(base / value) if not Path(value).is_absolute()
+                else value
+                for key, value in tls.items()
+            }
         try:
             serve(
                 config, store,
                 host=args.host or config.webui.get("host", "127.0.0.1"),
                 port=args.port or int(config.webui.get("port", 8080)),
                 auth=config.webui.get("auth"),
+                tls=tls,
             )
         except KeyboardInterrupt:
             return 0

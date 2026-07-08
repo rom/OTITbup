@@ -1,4 +1,4 @@
-"""Change alerts via webhook, syslog, and email (REQUIREMENTS.md section 9).
+"""Change alerts via webhook, syslog, and email (docs/REQUIREMENTS.md section 9).
 
 Config:
 

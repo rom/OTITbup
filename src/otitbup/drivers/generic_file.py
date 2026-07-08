@@ -1,4 +1,4 @@
-"""Watch-folder ingest driver (REQUIREMENTS.md section 2, item 2).
+"""Watch-folder ingest driver (docs/REQUIREMENTS.md section 2, item 2).
 
 Versions engineer-exported project files (TIA Portal, Studio 5000, Unity)
 dropped into a directory. Options:

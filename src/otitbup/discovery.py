@@ -1,4 +1,4 @@
-"""Opt-in network discovery (REQUIREMENTS.md section 7).
+"""Opt-in network discovery (docs/REQUIREMENTS.md section 7).
 
 OT safeguards, by design:
 

@@ -1,5 +1,5 @@
 """Scheduler daemon: per-device interval schedules with maintenance-window
-awareness (REQUIREMENTS.md section 9). Last-run state persists in
+awareness (docs/REQUIREMENTS.md section 9). Last-run state persists in
 <data_dir>/../state.json (kept next to, not inside, the backup repo so it
 doesn't pollute history).
 """

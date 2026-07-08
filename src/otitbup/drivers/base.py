@@ -1,6 +1,6 @@
 """Driver contract.
 
-Drivers are strictly read-only in phase 1 (REQUIREMENTS.md sections 3 and
+Drivers are strictly read-only in phase 1 (docs/REQUIREMENTS.md sections 3 and
 10): collect() gathers artifacts from a device and must never change device
 state. No write paths ship until restore is designed.
 """

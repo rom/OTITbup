@@ -1,6 +1,6 @@
 """Backup orchestration.
 
-Respects OT safety constraints (REQUIREMENTS.md section 10): per-zone
+Respects OT safety constraints (docs/REQUIREMENTS.md section 10): per-zone
 maintenance windows and per-zone concurrency caps so backup traffic cannot
 disturb control traffic.
 """

@@ -1,6 +1,6 @@
 """Phase 2 restore workflow — guided, not automated.
 
-Per REQUIREMENTS.md sections 3 and 10 the collector never writes to
+Per docs/REQUIREMENTS.md sections 3 and 10 the collector never writes to
 devices. `otitbup restore` exports a *restore bundle*: the exact versioned
 artifacts for a chosen backup, hash-verified against the manifest recorded
 at backup time, plus a RESTORE.md checklist with driver-specific

@@ -24,6 +24,10 @@ webui:
   # auth:
   #   username: admin
   #   password_hash: pbkdf2_sha256$600000$...$...
+  # Generate a self-signed pair with: otitbup certgen (or use CA-issued PEMs)
+  # tls:
+  #   cert_file: webui-cert.pem    # relative to this config file
+  #   key_file: webui-key.pem
 
 alerts:
   webhooks: []
@@ -97,6 +101,23 @@ sites:
             address: 10.20.0.70
             schedule: 12h
             # credentials: plc-07-ua        # if the server requires login
+
+          - name: plc-08
+            driver: wago_pfc                # needs otitbup[sftp]; fetches
+            address: 10.20.0.80             # the Codesys runtime dirs
+            schedule: 12h
+            credentials: plc-08
+
+          - name: plc-09
+            driver: phoenix_plcnext         # /opt/plcnext/projects via SFTP
+            address: 10.20.0.90
+            schedule: 12h
+            credentials: plc-09
+
+          - name: plc-10
+            driver: ge_pacsystems           # EtherNet/IP identity (stdlib)
+            address: 10.20.0.100
+            schedule: 12h
 
       - name: rtus
         max_concurrent: 1
