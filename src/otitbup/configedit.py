@@ -8,13 +8,12 @@ only then writes it back atomically — keeping a `.bak` of the previous
 version. A change that would produce an invalid config is refused and the
 file on disk is left untouched.
 
-Caveat: writes go through PyYAML, which does not preserve comments. The
-first GUI edit therefore normalises the file (comments dropped, keys
-reordered). The previous, commented version is always kept as
-`<config>.bak`. Deployments that want to keep a richly-commented,
-git-tracked config can simply not use the GUI editor (it is admin-gated and
-entirely optional). If `ruamel.yaml` is installed it is used instead, which
-DOES round-trip comments.
+Comments are preserved: writes go through ruamel.yaml (a declared
+dependency) in round-trip mode, so hand-written comments and key order in
+the config survive a GUI edit. The previous version is always kept as
+`<config>.bak` regardless. If ruamel is somehow unavailable the code falls
+back to PyYAML (which normalises the file), but that is not the shipped
+configuration.
 """
 from __future__ import annotations
 
@@ -122,7 +121,7 @@ def _apply(target: dict, fields: dict[str, Any]) -> None:
     (so a blank form field clears a setting); a dict value is merged
     recursively, and an empty dict deletes the key."""
     for key, value in fields.items():
-        if value is None or value == "":
+        if value is None or value == "" or value == [] or value == ():
             target.pop(key, None)
         elif isinstance(value, dict):
             if not value:
@@ -214,6 +213,36 @@ def add_zone(path: str | Path, site: str, zone: str,
     if fields:
         _apply(entry, fields)
     zones.append(entry)
+    save_raw(path, raw)
+
+
+def add_collector(path: str | Path, collector: dict[str, Any]) -> str:
+    """Append a federation collector (central roll-up). Rejects a duplicate
+    name. Returns the collector name."""
+    raw = load_raw(path)
+    fed = raw.get("federation")
+    if not isinstance(fed, dict):
+        fed = {}
+    collectors = fed.setdefault("collectors", [])
+    name = collector.get("name")
+    if not name or not collector.get("url"):
+        raise ConfigEditError("collector name and url are required")
+    if any(c.get("name") == name for c in collectors):
+        raise ConfigEditError(f"collector already exists: {name}")
+    collectors.append(collector)
+    raw["federation"] = fed
+    save_raw(path, raw)
+    return name
+
+
+def delete_collector(path: str | Path, name: str) -> None:
+    raw = load_raw(path)
+    fed = raw.get("federation") or {}
+    collectors = fed.get("collectors") or []
+    remaining = [c for c in collectors if c.get("name") != name]
+    if len(remaining) == len(collectors):
+        raise ConfigEditError(f"no such collector: {name}")
+    fed["collectors"] = remaining
     save_raw(path, raw)
 
 
