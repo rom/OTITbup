@@ -144,3 +144,39 @@ def test_action_bad_int_rejected(tmp_path):
         "logging", {"section": "logging", "max_bytes": "not-a-number"},
         "admin")
     assert not ok and "number" in msg
+
+
+def test_action_float_csv_bool_coercion(tmp_path):
+    ui, _ = _ui(tmp_path)
+    assert ui.action_config_global(
+        "retry", {"section": "retry", "attempts": "3", "backoff": "2.5"},
+        "admin")[0]
+    assert ui.config.retry == {"attempts": 3, "backoff": 2.5}
+    assert ui.action_config_global(
+        "alerts", {"section": "alerts", "stale_days": "7",
+                   "email.to": "a@x.com, b@y.com"}, "admin")[0]
+    assert ui.config.alerts["email"]["to"] == ["a@x.com", "b@y.com"]
+    assert ui.action_config_global(
+        "anomaly", {"section": "anomaly", "enabled": "", "sigma": "4.0"},
+        "admin")[0]
+    assert ui.config.anomaly["enabled"] is False
+    assert ui.config.anomaly["sigma"] == 4.0
+
+
+def test_action_federation_collector_add_delete(tmp_path):
+    ui, _ = _ui(tmp_path)
+    ok, msg, _ = ui.action_config_collector_add(
+        {"name": "plant-b", "url": "https://b:8443", "token": "otb_x",
+         "verify_tls": "false"}, "admin")
+    assert ok
+    c = ui.config.federation["collectors"][0]
+    assert c == {"name": "plant-b", "url": "https://b:8443",
+                 "token": "otb_x", "verify_tls": False}
+    assert ui.action_config_collector_delete({"name": "plant-b"}, "admin")[0]
+    assert ui.config.federation.get("collectors") == []
+
+
+def test_comments_preserved_on_save(tmp_path):
+    p = _cfg(tmp_path)
+    configedit.set_global(p, "netbox", {"url": "http://x"})
+    assert "# commented config" in p.read_text()

@@ -88,10 +88,10 @@ and retention, including adding and deleting devices, zones and sites.
 Every save is validated through the real config loader before it is
 written; an invalid edit is refused and the file is left untouched, the
 previous version is kept as `<config>.bak`, and the process reloads
-immediately. Saving normalises the file, so **comments are not preserved**
-unless `ruamel.yaml` is installed (the commented original stays in `.bak`).
-The page requires `serve` to have been started with `-c <config>`, and is
-CSRF-protected and audited. See USAGE §13.
+immediately. **Comments and key order are preserved** on save (writes go
+through `ruamel.yaml`, a declared dependency), and the pre-edit version is
+kept as `<config>.bak`. The page requires `serve` to have been started with
+`-c <config>`, and is CSRF-protected and audited. See USAGE §13.
 
 ## Devices & drivers
 
@@ -122,9 +122,14 @@ pick a generic transport that matches how the device exposes its config:
   stay clean. Needs `otitbup[ssh]`.
 - `generic_sftp` — any Linux-based device: set `options.paths` to the files,
   directories or globs to fetch. Needs `otitbup[sftp]`.
+- `generic_ftp` — older or embedded devices that expose files over FTP/FTPS:
+  same `options.paths` (files, directories, globs); `options.tls: true` for
+  FTPS. Stdlib (no extra).
 - `generic_http` — web-managed devices with an export URL: set `options.urls`
   (`{address}` is substituted) and `options.verify_tls: false` for a
-  self-signed device cert. Stdlib.
+  self-signed device cert. Stdlib. Use `generic_https` (or `options.https:
+  true` on any HTTP-based driver) to force TLS — a scheme-less or `http://`
+  URL is upgraded to `https://`.
 - `snmp_fingerprint` / `generic_opcua` / `generic_enip` / `generic_dnp3` —
   protocol-level identity plus a change fingerprint when there's no file to
   pull.

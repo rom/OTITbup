@@ -148,6 +148,7 @@ _DOC_FILES = {
     "faq": "FAQ.md",
     "releasenotes": "RELEASENOTES.md",
     "architecture": "ARCHITECTURE.md",
+    "sitecollector": "SITECOLLECTOR.md",
 }
 
 
@@ -252,6 +253,78 @@ _SETTINGS_FORMS = [
          ("push", "Push after each backup", "bool"),
          ("sign.key_file", "Commit signing key (SSH)", "str"),
      ]},
+    {"section": "secrets", "title": "Secrets backend",
+     "fields": [
+         ("backend", "Backend (plainfile|encryptedfile|vault|cyberark)",
+          "str"),
+         ("path", "File path", "str"),
+         ("key_file", "Encryption key file", "str"),
+         ("url", "Vault/CyberArk URL", "str"),
+         ("mount", "Vault mount", "str"),
+         ("token_file", "Vault token file", "str"),
+     ]},
+    {"section": "retention", "title": "Retention (global defaults)",
+     "fields": [
+         ("keep_versions", "Keep newest N backups", "int"),
+         ("keep_days", "Keep backups newer than N days", "int"),
+         ("large_file_threshold", "Blob offload threshold (bytes)", "int"),
+     ]},
+    {"section": "alerts", "title": "Alerts",
+     "fields": [
+         ("stale_days", "Stale after N days (0=off)", "int"),
+         ("min_interval", "Rate-limit window (s)", "int"),
+         ("webhooks", "Webhook URLs (comma-separated)", "csv"),
+         ("email.smtp_host", "SMTP host", "str"),
+         ("email.from", "From address", "str"),
+         ("email.to", "Recipients (comma-separated)", "csv"),
+     ]},
+    {"section": "retry", "title": "Retry on transient failures",
+     "fields": [
+         ("attempts", "Attempts per device (1=no retry)", "int"),
+         ("backoff", "Backoff seconds (doubles each retry)", "float"),
+     ]},
+    {"section": "hooks", "title": "Pre/post hooks (global)",
+     "fields": [
+         ("pre", "Pre-backup shell command", "str"),
+         ("post", "Post-backup shell command", "str"),
+     ]},
+    {"section": "anomaly", "title": "Anomaly detection",
+     "fields": [
+         ("enabled", "Enabled", "bool"),
+         ("sigma", "Duration z-score threshold", "float"),
+         ("duration_floor", "Ignore runs faster than (s)", "float"),
+         ("change_window", "Change-storm window", "int"),
+         ("change_recent", "Recent change-rate trigger", "float"),
+         ("change_baseline", "Max baseline change-rate", "float"),
+         ("flap_window", "Flapping window", "int"),
+         ("flap_transitions", "Flapping transitions", "int"),
+         ("trend_window", "Slow-trend window", "int"),
+         ("trend_ratio", "Slow-trend multiplier", "float"),
+     ]},
+    {"section": "housekeeping", "title": "Git housekeeping",
+     "fields": [
+         ("gc_interval_days", "git gc every N days (0=off)", "int"),
+         ("gc_aggressive", "Aggressive gc", "bool"),
+     ]},
+    {"section": "desired", "title": "Config-as-code (desired state)",
+     "fields": [
+         ("dir", "Desired-config directory", "str"),
+         ("strip_trailing_ws", "Ignore trailing whitespace", "bool"),
+     ]},
+    {"section": "reports", "title": "Scheduled compliance reports",
+     "fields": [
+         ("interval", "Interval (e.g. 7d; empty=off)", "str"),
+         ("period_days", "Report period (days)", "int"),
+         ("out", "Output path", "str"),
+     ]},
+    {"section": "strategy", "title": "3-2-1 strategy",
+     "fields": [
+         ("offsite", "Git remote is genuinely off-site", "bool"),
+         ("offline.path", "Offline export path", "str"),
+         ("offline.max_age_days", "Offline max age (days)", "int"),
+     ]},
+    {"section": "federation", "title": "Federation (central roll-up)",
+     "fields": [("role", "Role (e.g. central)", "str")]},
 ]
 
 
@@ -676,22 +749,56 @@ class WebUI:
         body = [
             "<h2>Configuration</h2>",
             "<p class='muted'>Admin-only. Changes are validated, written to "
-            "the config file (previous kept as <code>.bak</code>) and reloaded"
-            ". Comments in the file are not preserved on save. "
+            "the config file (comments preserved; previous kept as "
+            "<code>.bak</code>) and reloaded. "
             "<a href='/users'>User management &rarr;</a></p>",
             "<h3>Global settings</h3>",
             *sections,
+            self._federation_editor(raw, csrf),
             self._inventory_editor(raw, csrf),
         ]
         return _page("otitbup — configuration", "".join(body))
 
+    def _federation_editor(self, raw: dict, csrf: str) -> str:
+        """Add/remove federation collectors (the central roll-up list)."""
+        collectors = (raw.get("federation") or {}).get("collectors") or []
+        rows = []
+        for c in collectors:
+            name = c.get("name", "")
+            rows.append(
+                "<form method='post' action='/config/collector-delete' "
+                f"class='cfg-inline'>{_csrf(csrf)}"
+                f"<input type='hidden' name='name' value='{html.escape(name)}'>"
+                f"<b>{html.escape(name)}</b> "
+                f"<span class='muted'>{html.escape(str(c.get('url', '')))}</span>"
+                "<button type='submit' class='danger' "
+                "onclick=\"return confirm('Remove collector?')\">Remove"
+                "</button></form>")
+        add = (
+            "<form method='post' action='/config/collector-add' "
+            f"class='cfg-inline'>{_csrf(csrf)}add collector: "
+            + _labeled("name", "", "site name")
+            + _labeled("url", "", "https://host:8443")
+            + _labeled("token", "", "otb_… (or token_file)")
+            + _labeled("token_file", "", "/etc/otitbup/x.token")
+            + _labeled("verify_tls", "", "true | /path/ca.pem | false")
+            + "<button type='submit'>Add collector</button></form>"
+        )
+        return ("<h3>Federation collectors</h3>"
+                "<p class='muted'>The central appliance polls each "
+                "collector's <code>/api/status</code>. See "
+                "<a href='/help/sitecollector'>SITECOLLECTOR</a>.</p>"
+                + "".join(rows) + add)
+
     def _config_input(self, name: str, label: str, ftype: str, value) -> str:
+        if ftype == "csv" and isinstance(value, (list, tuple)):
+            value = ", ".join(str(v) for v in value)
         safe = html.escape(str(value)) if value not in (None, "") else ""
         if ftype == "bool":
             checked = " checked" if value in (True, "true", "1", 1) else ""
             field = (f"<input type='checkbox' name='{name}' value='1'"
                      f"{checked}>")
-        elif ftype == "int":
+        elif ftype in ("int", "float"):
             field = (f"<input name='{name}' value='{safe}' inputmode='numeric'>")
         else:
             field = f"<input name='{name}' value='{safe}'>"
@@ -842,14 +949,16 @@ class WebUI:
         for dotted, _label, ftype in spec["fields"]:
             if ftype == "bool":
                 _nest(dotted, form.get(dotted) == "1", fields)
-            else:
-                raw_val = form.get(dotted, "")
-                if ftype == "int" and raw_val not in ("", None):
-                    try:
-                        raw_val = int(raw_val)
-                    except ValueError:
-                        return False, f"{dotted} must be a number", "/config"
-                _nest(dotted, raw_val, fields)
+                continue
+            raw_val = form.get(dotted, "")
+            if ftype == "csv":
+                raw_val = [p.strip() for p in raw_val.split(",") if p.strip()]
+            elif ftype in ("int", "float") and raw_val not in ("", None):
+                try:
+                    raw_val = int(raw_val) if ftype == "int" else float(raw_val)
+                except ValueError:
+                    return False, f"{dotted} must be a number", "/config"
+            _nest(dotted, raw_val, fields)
         return self._do_config(
             lambda: (configedit.set_global(self.config_path, section, fields)
                      or f"saved {section} settings"),
@@ -919,6 +1028,30 @@ class WebUI:
         return self._do_config(
             lambda: (configedit.add_site(self.config_path, site)
                      or f"added site {site}"), actor)
+
+    def action_config_collector_add(self, form: dict, actor: str):
+        from . import configedit
+        collector: dict = {"name": form.get("name", ""),
+                           "url": form.get("url", "")}
+        if form.get("token"):
+            collector["token"] = form["token"]
+        if form.get("token_file"):
+            collector["token_file"] = form["token_file"]
+        vtls = form.get("verify_tls", "").strip()
+        if vtls.lower() == "false":
+            collector["verify_tls"] = False
+        elif vtls and vtls.lower() != "true":
+            collector["verify_tls"] = vtls   # CA bundle path
+        return self._do_config(
+            lambda: "added collector " + configedit.add_collector(
+                self.config_path, collector), actor)
+
+    def action_config_collector_delete(self, form: dict, actor: str):
+        from . import configedit
+        name = form.get("name", "")
+        return self._do_config(
+            lambda: (configedit.delete_collector(self.config_path, name)
+                     or f"removed collector {name}"), actor)
 
     # ------------------------------------------------------------ pages
 
@@ -1592,6 +1725,7 @@ class WebUI:
         for slug, label in (("usage", "Usage guide"),
                             ("configuration", "Configuration reference"),
                             ("faq", "FAQ"),
+                            ("sitecollector", "Site collectors"),
                             ("releasenotes", "Release notes")):
             if _find_doc(slug) is not None:
                 doc_links.append(f"<a href='/help/{slug}'>{label}</a>")
@@ -2411,6 +2545,10 @@ class _Handler(BaseHTTPRequestHandler):
                     form, actor),
                 "/config/site-add": lambda: self.ui.action_config_site_add(
                     form, actor),
+                "/config/collector-add":
+                    lambda: self.ui.action_config_collector_add(form, actor),
+                "/config/collector-delete":
+                    lambda: self.ui.action_config_collector_delete(form, actor),
             }
             handler = handlers.get(path)
             if handler is None:

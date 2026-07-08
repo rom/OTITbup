@@ -9,6 +9,28 @@ branch; `0.1.0` is the current package version.
 
 ## Unreleased
 
+### Added — config editor expansion, generic FTP/HTTPS, site-collector guide
+
+- **Config editor covers more settings.** The web Config page now also edits
+  the secrets backend, global retention defaults, alerts (staleness,
+  rate-limit, email, webhooks), retry/backoff, pre/post hooks, anomaly
+  thresholds, git housekeeping, config-as-code (desired), scheduled
+  reports, and 3-2-1 strategy — plus add/remove of **federation
+  collectors** for the central roll-up.
+- **Comments are always preserved** on GUI saves: `ruamel.yaml` is now a
+  declared dependency, so a hand-commented config survives round-trips.
+- **`generic_ftp` driver** — read-only file/directory/glob fetch over
+  FTP/FTPS (stdlib `ftplib`), the plain-FTP sibling of `generic_sftp`, for
+  older and embedded devices.
+- **`generic_https` driver + one-flag TLS.** Any `generic_http`-based driver
+  can now be flipped to HTTPS with `options.https: true` (scheme-less and
+  `http://` URLs are upgraded to `https://`); `generic_https` defaults to
+  that.
+- **`docs/SITECOLLECTOR.md`** — a detailed guide to setting up, configuring,
+  using and supervising site collectors / Purdue-model federation, linked
+  from the in-app Help.
+- Extended the README **Tests** section.
+
 ### Added — web config editor, HMI/IED/RTU drivers, more examples
 
 - **Configure the whole tool from the web UI.** A new admin-only **Config**
@@ -20,9 +42,8 @@ branch; `0.1.0` is the current package version.
   of devices, zones and sites. Every save is validated through the real
   config loader before writing (invalid edits are refused, the file left
   untouched), the previous version is kept as `<config>.bak`, and the
-  process reloads immediately. CSRF-protected and audited. (`ruamel.yaml`,
-  if installed, preserves comments on save; otherwise the file is
-  normalised and the commented original stays in `.bak`.)
+  process reloads immediately. Comments and key order are preserved on save
+  (via `ruamel.yaml`, now a declared dependency). CSRF-protected and audited.
 - **More HMI/SCADA, substation IED and RTU drivers (124 total).** HMI/SCADA:
   AVEVA Edge, zenon, Movicon, FactoryTalk View SE, VTScada, ClearSCADA/Geo
   SCADA, WinCC Unified, Reliance. Protection relays / IEDs (IEC 61850 MMS
