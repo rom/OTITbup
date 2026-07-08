@@ -111,7 +111,8 @@ def _page(title: str, body: str) -> bytes:
         f"<meta name='viewport' content='width=device-width, initial-scale=1'>"
         f"<title>{html.escape(title)}</title><style>{_STYLE}</style></head>"
         f"<body><header><h1><a href='/'>otitbup</a></h1>"
-        f"<nav><a href='/'>Devices</a><a href='/health'>Health</a>"
+        f"<nav><a href='/'>Devices</a><a href='/dashboard'>Dashboard</a>"
+        f"<a href='/health'>Health</a>"
         f"<a href='/search'>Search</a><a href='/drift'>Drift</a>"
         f"<a href='/activity'>Activity</a><a href='/policy'>Policy</a>"
         f"<a href='/retention'>Retention</a><a href='/strategy'>Strategy</a>"
@@ -527,6 +528,128 @@ class WebUI:
             f"<p class='muted'>last {limit} commits</p>"
         )
         return _page("otitbup — activity", body)
+
+    def _day_buckets(self, runs: list[dict], days: int = 30,
+                     now: float | None = None):
+        """Bucket runs into the last `days` calendar days -> list of
+        (label, total, changed, failed) oldest first."""
+        import datetime as _dt
+        import time
+        now = now if now is not None else time.time()
+        today = _dt.datetime.fromtimestamp(now, _dt.timezone.utc).date()
+        buckets = {}
+        for i in range(days):
+            day = today - _dt.timedelta(days=days - 1 - i)
+            buckets[day] = [0, 0, 0]
+        for run in runs:
+            day = _dt.datetime.fromtimestamp(
+                run["started_at"], _dt.timezone.utc).date()
+            if day in buckets:
+                buckets[day][0] += 1
+                if run["changed"]:
+                    buckets[day][1] += 1
+                if not run["ok"]:
+                    buckets[day][2] += 1
+        return [
+            (day.strftime("%m-%d"), c[0], c[1], c[2])
+            for day, c in sorted(buckets.items())
+        ]
+
+    def dashboard(self) -> bytes:
+        import time
+        from . import charts
+        now = time.time()
+        devices = self.config.all_devices()
+        # Classify each device into exactly one bucket (priority order) so
+        # the stacked bar sums to the device count.
+        covered = never = stale = failing = healthy = 0
+        if self.runstore is not None:
+            for device in devices:
+                st = self.runstore.status(device.qualified_name)
+                if st.last_success is not None:
+                    covered += 1
+                if st.last_success is None:
+                    never += 1
+                elif st.consecutive_failures > 0:
+                    failing += 1
+                elif now - st.last_success > 7 * 86400:
+                    stale += 1
+                else:
+                    healthy += 1
+
+        # Coverage donut + status stacked bar.
+        cov = charts.donut(covered, len(devices), "covered", charts.OK)
+        status_bar = charts.stacked_hbar([
+            ("healthy", healthy, charts.OK),
+            ("stale", stale, charts.WARN),
+            ("failing", failing, charts.FAIL),
+            ("never", never, charts.MUTED),
+        ])
+        status_legend = charts.legend([
+            ("healthy", charts.OK), ("stale >7d", charts.WARN),
+            ("failing", charts.FAIL), ("never", charts.MUTED),
+        ])
+
+        # Backups over the last 30 days (all devices).
+        activity_svg = "<p class='muted'>no run history</p>"
+        change_svg = ""
+        if self.runstore is not None:
+            runs = self.runstore.recent_runs(None, limit=5000)
+            buckets = self._day_buckets(runs, days=30, now=now)
+            activity_svg = charts.vbars(
+                [(lbl, total) for lbl, total, _c, _f in buckets],
+                colors=[charts.CHANGE] * len(buckets), unit=" runs")
+            change_svg = charts.vbars(
+                [(lbl, changed) for lbl, _t, changed, _f in buckets],
+                colors=[charts.OK] * len(buckets), unit=" changes")
+
+        # Policy findings by severity.
+        from .policy import check_all
+        findings = [f for g in check_all(self.config, self.store).values()
+                    for f in g]
+        sev_counts = {}
+        for f in findings:
+            sev_counts[f.severity] = sev_counts.get(f.severity, 0) + 1
+        order = ["critical", "high", "medium", "low"]
+        sev_colors = {"critical": charts.FAIL, "high": charts.FAIL,
+                      "medium": charts.WARN, "low": charts.MUTED}
+        policy_svg = charts.vbars(
+            [(s, sev_counts.get(s, 0)) for s in order],
+            colors=[sev_colors[s] for s in order], height=130)
+
+        blob_mib = (self.blobstore.total_size() / 1048576
+                    if self.blobstore else 0)
+
+        def card(title, inner):
+            return (
+                "<div style='border:1px solid #dde3e8;border-radius:8px;"
+                "padding:1rem;flex:1 1 22rem;min-width:20rem' class='card'>"
+                f"<h3 style='margin-top:0'>{title}</h3>{inner}</div>"
+            )
+
+        body = (
+            "<h2>Overview dashboard</h2>"
+            "<div style='display:flex;gap:1rem;flex-wrap:wrap'>"
+            + card("Coverage",
+                   f"<div style='display:flex;align-items:center;gap:1rem'>"
+                   f"{cov}<div>{len(devices)} devices<br>"
+                   f"<span class='muted'>{covered} covered · {never} never</span>"
+                   "</div></div>")
+            + card("Device status", status_bar + status_legend)
+            + card("Backups / day (30d)", activity_svg)
+            + card("Changes / day (30d)", change_svg or
+                   "<p class='muted'>no data</p>")
+            + card("Policy findings by severity", policy_svg)
+            + card("Storage",
+                   f"<p style='font-size:1.6rem;font-weight:bold;margin:.2rem 0'>"
+                   f"{blob_mib:.1f} MiB</p><span class='muted'>offloaded to "
+                   "the blob store</span>")
+            + "</div>"
+            + "<p class='muted' style='margin-top:1rem'>Charts are inline "
+              "SVG — no external scripts. See per-device pages for device "
+              "history graphs.</p>"
+        )
+        return _page("otitbup — dashboard", body)
 
     def health(self, ctx: dict | None = None) -> bytes:
         from .auth import role_rank
@@ -1024,29 +1147,38 @@ class WebUI:
         timeline_block = ""
         if self.runstore is not None:
             import datetime as _dt
-            runs = self.runstore.recent_runs(device.qualified_name, limit=60)
+            runs = self.runstore.recent_runs(device.qualified_name, limit=200)
             if runs:
+                from . import charts
                 cells = ""
-                for run in reversed(runs):   # oldest -> newest
+                for run in reversed(runs[:60]):   # oldest -> newest
                     when = _dt.datetime.fromtimestamp(
                         run["started_at"], _dt.timezone.utc
                     ).strftime("%Y-%m-%d %H:%M")
                     if not run["ok"]:
-                        color, sym = "#b3261e", "fail"
+                        color, sym = charts.FAIL, "fail"
                     elif run["changed"]:
-                        color, sym = "#0b57d0", "change"
+                        color, sym = charts.CHANGE, "change"
                     else:
-                        color, sym = "#1b7a2f", "ok"
+                        color, sym = charts.OK, "ok"
                     cells += (
                         f"<span title='{when}: {sym}' style='display:inline-"
                         f"block;width:10px;height:18px;margin:1px;background:"
                         f"{color};border-radius:2px'></span>"
                     )
+                # Runs-per-day bar chart for this device (last 30 days).
+                buckets = self._day_buckets(runs, days=30)
+                runs_chart = charts.vbars(
+                    [(lbl, total) for lbl, total, _c, _f in buckets],
+                    colors=[charts.CHANGE] * len(buckets),
+                    width=460, height=120, unit=" runs")
                 timeline_block = (
                     "<h3>Health timeline "
                     "<span class='muted' style='font-weight:normal'>"
                     "(oldest → newest; green ok, blue change, red fail)"
                     "</span></h3><p>" + cells + "</p>"
+                    + "<p class='muted' style='margin:.2rem 0'>runs per day "
+                      "(30d)</p>" + runs_chart
                 )
             import time
             now = time.time()
@@ -1461,6 +1593,8 @@ class _Handler(BaseHTTPRequestHandler):
         content: bytes | None = None
         if path in ("/", "/index.html"):
             content = self.ui.index()
+        elif path == "/dashboard":
+            content = self.ui.dashboard()
         elif path == "/health":
             content = self.ui.health(ctx={"role": role, "csrf": csrf})
         elif path == "/search":

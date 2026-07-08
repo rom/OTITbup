@@ -118,6 +118,25 @@ def test_activity_page_links_devices(server):
     assert store.last_commit_hash(device)[:7] in text
 
 
+def test_dashboard_page_has_charts(server):
+    base, _, _ = server
+    status, _, body = _get(base + "/dashboard")
+    text = body.decode()
+    assert status == 200
+    assert "Overview dashboard" in text
+    assert "<svg" in text                 # inline SVG charts
+    assert "Coverage" in text and "Device status" in text
+
+
+def test_device_page_has_run_chart(server):
+    base, _, device = server
+    _, _, body = _get(base + "/device/" + device.qualified_name)
+    text = body.decode()
+    assert "Health timeline" in text
+    assert "runs per day" in text
+    assert "<svg" in text                 # per-device SVG bar chart
+
+
 def test_strategy_page(server):
     base, _, _ = server
     status, _, body = _get(base + "/strategy")
