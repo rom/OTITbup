@@ -223,6 +223,11 @@ def main(argv: list[str] | None = None) -> int:
         "status", help="show per-device backup health from the run store"
     )
 
+    sub.add_parser(
+        "anomalies",
+        help="report statistical anomalies (slow backups, change storms)",
+    )
+
     p_policy = sub.add_parser(
         "policy", help="run config policy checks over the latest backups"
     )
@@ -865,6 +870,24 @@ def main(argv: list[str] | None = None) -> int:
                 f"fails={st.consecutive_failures} {st.last_message}"
             )
         return 0
+
+    if args.command == "anomalies":
+        from . import anomaly
+        from .runstore import default_runstore
+        runstore = default_runstore(config)
+        history = int(config.anomaly.get("history", 50))
+        found = 0
+        for device in config.all_devices():
+            runs = runstore.recent_runs(device.qualified_name, limit=history)
+            for finding in anomaly.analyze(
+                device.qualified_name, runs, config.anomaly
+            ):
+                found += 1
+                print(f"{finding.kind:14s} {finding.device:40s} "
+                      f"{finding.message}")
+        print(f"\n{found} anomaly(ies) across {len(config.all_devices())} "
+              "device(s)", file=sys.stderr)
+        return 0 if not found else 1
 
     if args.command == "policy":
         from .policy import check_all, severity_rank

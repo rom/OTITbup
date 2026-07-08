@@ -189,6 +189,14 @@ class WebUI:
         from .events import NullEventBus
         from .sessions import SessionStore
         self.events = events or NullEventBus()
+        # Attach an in-process broadcaster so the live-activity page can
+        # stream events over SSE. Harmless on a NullEventBus (never emits).
+        if getattr(self.events, "broadcaster", None) is None:
+            from .events import Broadcaster
+            try:
+                self.events.broadcaster = Broadcaster()
+            except AttributeError:
+                pass
         self.sessions = SessionStore()
 
     def all_users(self) -> dict:
@@ -520,8 +528,36 @@ class WebUI:
                 f"<tr data-row><td>{html.escape(date)}</td>"
                 f"<td>{device_cell}</td><td>{commit_cell}</td></tr>"
             )
+        # Live panel: fed by the /events/stream SSE endpoint. Degrades
+        # gracefully — with JS off (or no event bus) the panel stays empty
+        # and the commit table below is the full record.
+        live = (
+            "<h2>Live activity</h2>"
+            "<p class='muted' id='live-status'>connecting to event stream…</p>"
+            "<ul id='live-events' class='live-events'></ul>"
+            "<script>(function(){\n"
+            "  var status=document.getElementById('live-status');\n"
+            "  var list=document.getElementById('live-events');\n"
+            "  if(!window.EventSource){status.textContent="
+            "'live updates need EventSource support';return;}\n"
+            "  var es=new EventSource('/events/stream');\n"
+            "  es.onopen=function(){status.textContent='live — streaming events';};\n"
+            "  es.onerror=function(){status.textContent="
+            "'stream disconnected, retrying…';};\n"
+            "  es.onmessage=function(e){\n"
+            "    var d; try{d=JSON.parse(e.data);}catch(_){return;}\n"
+            "    var li=document.createElement('li');\n"
+            "    li.className='sev-'+(d.severity||'info');\n"
+            "    var t=new Date().toLocaleTimeString();\n"
+            "    li.textContent='['+t+'] '+d.type+': '+d.message;\n"
+            "    list.insertBefore(li,list.firstChild);\n"
+            "    while(list.childNodes.length>50){list.removeChild(list.lastChild);}\n"
+            "  };\n"
+            "})();</script>"
+        )
         body = (
-            f"<h2>Recent backups</h2>"
+            live
+            + f"<h2>Recent backups</h2>"
             "<table><tr><th>When</th><th>Device</th><th>Commit</th></tr>"
             + ("".join(rows) or "<tr><td colspan='3'>no backups yet</td></tr>")
             + "</table>"
@@ -1484,6 +1520,46 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(content)
 
+    def _sse_stream(self) -> None:
+        """Stream live events as Server-Sent Events. Each connected browser
+        gets its own broadcaster subscription; a periodic heartbeat keeps
+        proxies from timing the connection out and detects a dead client."""
+        import json
+        broadcaster = getattr(self.ui.events, "broadcaster", None)
+        if broadcaster is None:
+            return self._send(503, b'{"error":"no event stream"}\n',
+                              "application/json")
+        queue = broadcaster.subscribe()
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            self.wfile.write(b": connected\n\n")
+            self.wfile.flush()
+            import queue as _q
+            while True:
+                try:
+                    event = queue.get(timeout=15)
+                except _q.Empty:
+                    self.wfile.write(b": ping\n\n")   # heartbeat
+                    self.wfile.flush()
+                    continue
+                payload = json.dumps({
+                    "type": event.type, "message": event.message,
+                    "severity": event.severity, "actor": event.actor,
+                    "detail": event.detail,
+                })
+                self.wfile.write(
+                    f"event: {event.type}\ndata: {payload}\n\n".encode())
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass  # client went away
+        finally:
+            broadcaster.unsubscribe(queue)
+
     def _cookie_token(self) -> str | None:
         cookie = self.headers.get("Cookie", "")
         for part in cookie.split(";"):
@@ -1568,7 +1644,7 @@ class _Handler(BaseHTTPRequestHandler):
         # Audit page views (not assets/API/metrics/liveness) for compliance.
         if (
             self.ui.runstore is not None
-            and not path.startswith(("/api/", "/metrics"))
+            and not path.startswith(("/api/", "/metrics", "/events/"))
             and "/artifact/" not in path
         ):
             import time
@@ -1580,6 +1656,10 @@ class _Handler(BaseHTTPRequestHandler):
                 )
             except Exception:
                 pass
+
+        # Live event stream (Server-Sent Events) for the activity page.
+        if path == "/events/stream":
+            return self._sse_stream()
 
         # Machine-readable endpoints.
         if path == "/metrics":

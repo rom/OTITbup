@@ -207,6 +207,22 @@ failure count. Because run *attempts* are persisted, this distinguishes
 
 See also: verify, report, strategy.
 """),
+    _c("anomalies", "Health & compliance",
+       "report statistical anomalies in backup history", """
+`otitbup anomalies` scans each device's run history for signals that it is
+misbehaving *while still succeeding* — the cases plain failure/staleness
+alerts miss. It flags **slow** backups (a run whose duration is a
+statistical outlier versus that device's own baseline) and **change
+storms** (a normally-stable device that has changed on most of its recent
+runs — config flapping, a stuck auto-save, or tampering).
+
+The same checks run automatically after each backup and emit an
+`anomaly.detected` event (alerts + syslog + SNMP + tickets). Tune under the
+`anomaly:` config section (sigma, duration_floor, change_window, …); set
+`anomaly.enabled: false` to disable. Exits non-zero if anomalies are found.
+
+See also: status, activity, verify.
+"""),
     _c("verify", "Health & compliance",
        "re-hash stored backups against their manifests", """
 `otitbup verify [--all-commits]` re-hashes every stored artifact against

@@ -146,4 +146,5 @@ def load_config(path: str | Path) -> AppConfig:
         housekeeping=raw.get("housekeeping") or {},
         encryption=raw.get("encryption") or {},
         desired=raw.get("desired") or {},
+        anomaly=raw.get("anomaly") or {},
     )

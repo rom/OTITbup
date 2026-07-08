@@ -17,7 +17,7 @@ from pathlib import Path
 from .alerts import AlertManager
 from .blobstore import BlobStore
 from .drivers import get_driver
-from .events import (BACKUP_ERROR, BACKUP_START, BACKUP_STOP,
+from .events import (ANOMALY, BACKUP_ERROR, BACKUP_START, BACKUP_STOP,
                      CHANGE_UNEXPECTED, EventBus, NullEventBus)
 from .gitstore import GitStore
 from .models import AppConfig, Device
@@ -245,7 +245,29 @@ class Runner:
             message=result.message,
             expected=result.expected,
             ))
+            self._check_anomalies(device)
         return result
+
+    def _check_anomalies(self, device: Device) -> None:
+        """Look for statistical anomalies in this device's fresh run history
+        (slow-backup and change-storm signals) and emit an ANOMALY event for
+        each — that fans out to alerts, syslog, SNMP, and tickets."""
+        from . import anomaly
+        cfg = self.config.anomaly
+        if cfg.get("enabled") is False:
+            return
+        runs = self.runstore.recent_runs(
+            device.qualified_name, limit=int(cfg.get("history", 50)))
+        for finding in anomaly.analyze(device.qualified_name, runs, cfg):
+            self.events.emit(
+                ANOMALY,
+                f"anomaly on {finding.device}: {finding.message}",
+                severity="warning", detail=finding.device,
+            )
+            self.alerts.notify(
+                f"otitbup: anomaly on {finding.device}",
+                f"{finding.kind}: {finding.message}",
+            )
 
     def _run_hook(self, device: Device, phase: str, ok: bool | None = None):
         """Run a configured pre/post hook (shell command). Hook config
