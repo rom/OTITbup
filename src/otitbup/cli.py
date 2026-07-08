@@ -228,6 +228,13 @@ def main(argv: list[str] | None = None) -> int:
         help="report statistical anomalies (slow backups, change storms)",
     )
 
+    p_guids = sub.add_parser(
+        "guids", help="show device GUIDs; --assign pins persistent ones")
+    p_guids.add_argument(
+        "--assign", action="store_true",
+        help="write a stable UUID into the config for devices without one",
+    )
+
     p_desired = sub.add_parser(
         "desired",
         help="compare live backups against declared config-as-code",
@@ -923,6 +930,32 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n{found} anomaly(ies) across {len(config.all_devices())} "
               "device(s)", file=sys.stderr)
         return 0 if not found else 1
+
+    if args.command == "guids":
+        import uuid as _uuid
+
+        from . import configedit
+        assigned = 0
+        for device in config.all_devices():
+            pinned = bool(device.guid)
+            if args.assign and not pinned:
+                new = str(_uuid.uuid4())
+                try:
+                    configedit.set_device(
+                        args.config, device.site, device.zone, device.name,
+                        {"guid": new})
+                except configedit.ConfigEditError as exc:
+                    print(f"guid assign error: {exc}", file=sys.stderr)
+                    return 2
+                assigned += 1
+                print(f"{device.qualified_name:40s} {new}  (assigned)")
+            else:
+                tag = "pinned" if pinned else "derived"
+                print(f"{device.qualified_name:40s} "
+                      f"{device.effective_guid}  ({tag})")
+        if args.assign:
+            print(f"\nassigned {assigned} persistent GUID(s)", file=sys.stderr)
+        return 0
 
     if args.command == "desired":
         from . import desired as desired_mod

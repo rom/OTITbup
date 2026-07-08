@@ -385,7 +385,7 @@ def _inventory_fields(form: dict, is_device: bool) -> dict:
     Blank values delete the key; retention is nested."""
     fields: dict = {}
     if is_device:
-        keys = ("name", "driver", "address", "schedule", "credentials")
+        keys = ("name", "driver", "address", "schedule", "credentials", "guid")
     else:
         keys = ("maintenance_window", "timezone")
     for key in keys:
@@ -862,6 +862,7 @@ class WebUI:
             + _labeled("address", d.get("address") or "", "10.0.0.1")
             + _labeled("schedule", d.get("schedule") or "", "12h or cron")
             + _labeled("credentials", d.get("credentials") or "", "secret key")
+            + _labeled("guid", d.get("guid") or "", "auto")
             + _labeled("keep_versions", r.get("keep_versions") or "", "0")
             + _labeled("keep_days", r.get("keep_days") or "", "0")
             + "<button type='submit'>Save</button>"
@@ -974,9 +975,12 @@ class WebUI:
                 self.config_path, site, zone, orig, fields), actor)
 
     def action_config_device_add(self, form: dict, actor: str):
+        import uuid
+
         from . import configedit
         site, zone = form.get("site", ""), form.get("zone", "")
-        dev = {"name": form.get("name", ""), "driver": form.get("driver", "")}
+        dev = {"name": form.get("name", ""), "driver": form.get("driver", ""),
+               "guid": str(uuid.uuid4())}
         for key in ("address", "schedule", "credentials"):
             if form.get(key):
                 dev[key] = form[key]
@@ -2077,8 +2081,8 @@ class WebUI:
             raw = self.store.read_file_at(
                 commit, f"{device.path}/manifest.yml"
             )
-            manifest = yaml.safe_load(raw)
-            return manifest if isinstance(manifest, dict) else {}
+            from .gitstore import manifest_artifacts
+            return manifest_artifacts(yaml.safe_load(raw))
         except Exception:
             return {}
 

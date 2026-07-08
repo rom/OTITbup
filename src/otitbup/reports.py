@@ -240,7 +240,7 @@ def _manifest(store: GitStore, device, commit: str) -> dict:
     import yaml
     try:
         raw = store.read_file_at(commit, f"{device.path}/manifest.yml")
-        manifest = yaml.safe_load(raw)
-        return manifest if isinstance(manifest, dict) else {}
+        from .gitstore import manifest_artifacts
+        return manifest_artifacts(yaml.safe_load(raw))
     except Exception:
         return {}

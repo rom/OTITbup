@@ -47,7 +47,7 @@ def test_every_registered_command_is_explainable():
         "reconcile", "netbox", "report", "report-verify", "passwd",
         "certgen", "secrets", "help", "explain",
         "test", "gc", "verify-audit", "token", "anomalies", "desired",
-        "federation", "offsite",
+        "federation", "offsite", "guids",
     }
     missing = known - set(helptext.COMMANDS)
     assert not missing, f"commands missing from help registry: {missing}"

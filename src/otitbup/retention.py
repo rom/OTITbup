@@ -80,9 +80,10 @@ def _offloaded_shas(store: GitStore, device: Device, commit: str) -> set[str]:
         return set()
     if not isinstance(manifest, dict):
         return set()
+    from .gitstore import manifest_artifacts
     return {
         str(entry["sha256"])
-        for entry in manifest.values()
+        for entry in manifest_artifacts(manifest).values()
         if isinstance(entry, dict) and entry.get("offloaded")
         and entry.get("sha256")
     }

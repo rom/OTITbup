@@ -117,6 +117,7 @@ def load_config(path: str | Path) -> AppConfig:
                         dev_raw.get("retention"), f"device {dev_name}"
                     ),
                     hooks=dev_raw.get("hooks") or {},
+                    guid=str(dev_raw.get("guid") or ""),
                 )
                 validate_schedule(device.schedule)
                 if device.qualified_name in seen_devices:
@@ -155,4 +156,5 @@ def load_config(path: str | Path) -> AppConfig:
         desired=desired,
         anomaly=raw.get("anomaly") or {},
         offsite=raw.get("offsite") or {},
+        appliance_id=str(raw.get("appliance_id") or ""),
     )

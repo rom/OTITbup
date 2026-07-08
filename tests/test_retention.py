@@ -107,11 +107,15 @@ def test_write_and_commit_offloads_large_artifacts(tmp_path):
     assert (device_dir / "config.txt").read_bytes() == small  # inline
 
     manifest = yaml.safe_load((device_dir / "manifest.yml").read_text())
-    assert manifest["project.bin"]["offloaded"] is True
-    assert manifest["project.bin"]["size"] == 100
+    artifacts = manifest["artifacts"]
+    assert artifacts["project.bin"]["offloaded"] is True
+    assert artifacts["project.bin"]["size"] == 100
     import hashlib
-    assert manifest["project.bin"]["sha256"] == hashlib.sha256(big).hexdigest()
-    assert "offloaded" not in manifest["config.txt"]
+    assert artifacts["project.bin"]["sha256"] == hashlib.sha256(big).hexdigest()
+    # Provenance travels in the manifest (stable fields) + commit trailers.
+    assert manifest["provenance"]["driver"] == device.driver
+    assert manifest["provenance"]["device_guid"]
+    assert "offloaded" not in artifacts["config.txt"]
 
 
 @pytest.fixture

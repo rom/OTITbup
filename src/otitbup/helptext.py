@@ -207,6 +207,19 @@ failure count. Because run *attempts* are persisted, this distinguishes
 
 See also: verify, report, strategy.
 """),
+    _c("guids", "Health & compliance",
+       "show or assign per-device GUIDs", """
+`otitbup guids [--assign]` lists every device with its GUID — a stable
+identifier that follows the device across renames and appears in each
+backup's provenance (the manifest and the commit trailers). Without a
+pinned `guid:` in the config a device gets a deterministic UUIDv5 derived
+from its qualified name (shown as *derived*); `--assign` writes a random
+UUIDv4 into the config for any device that lacks one (*pinned*), so the
+identity survives a later rename. New devices added via the web Config page
+are auto-assigned a GUID.
+
+See also: verify, report.
+"""),
     _c("anomalies", "Health & compliance",
        "report statistical anomalies in backup history", """
 `otitbup anomalies` scans each device's run history for signals that it is

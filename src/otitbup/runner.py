@@ -345,9 +345,14 @@ class Runner:
             threshold = self.config.retention_for(device).get(
                 "large_file_threshold", 0
             )
+            import datetime
+            captured_at = datetime.datetime.fromtimestamp(
+                started, datetime.UTC).isoformat(timespec="seconds")
             commit = self.store.write_and_commit(
                 device, artifacts,
                 blobstore=self.blobstore, threshold=threshold,
+                appliance=self.config.appliance_id or None,
+                captured_at=captured_at,
             )
             expected = None
             if commit:
