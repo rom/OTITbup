@@ -72,95 +72,148 @@ def _pdf_escape(text: str) -> str:
     return text.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
 
 
+# Report palette (0-1 RGB) matching the web UI charts.
+_DARK = (0.08, 0.09, 0.11)
+_OK = (0.106, 0.478, 0.184)
+_CHANGE = (0.043, 0.341, 0.816)
+_FAIL = (0.702, 0.149, 0.118)
+_WARN = (0.698, 0.416, 0.0)
+_MUTED = (0.596, 0.635, 0.678)
+_LIGHT = (0.955, 0.965, 0.973)
+_WHITE = (1, 1, 1)
+
+
+def _status_counts(config, runstore, now):
+    covered = never = stale = failing = healthy = 0
+    for device in config.all_devices():
+        st = runstore.status(device.qualified_name)
+        if st.last_success is not None:
+            covered += 1
+        if st.last_success is None:
+            never += 1
+        elif st.consecutive_failures > 0:
+            failing += 1
+        elif now - st.last_success > 7 * 86400:
+            stale += 1
+        else:
+            healthy += 1
+    return {"healthy": healthy, "stale": stale, "never": never,
+            "failing": failing, "covered": covered,
+            "total": len(config.all_devices())}
+
+
 def to_pdf(config, store, runstore, now=None) -> bytes:
-    """A minimal single-stream PDF: a monospaced text dump of the report.
-    Enough for a signable, printable, archivable artifact without a PDF
-    library. Long reports paginate every ~60 lines."""
-    generated = datetime.fromtimestamp(
-        now or time.time(), timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    """A richly formatted PDF: title banner, KPI tiles, a status bar chart,
+    and shaded tables — drawn with vector graphics (no PDF library)."""
+    from .pdfcanvas import PAGE_H, PAGE_W, PDFCanvas
+    now = now or time.time()
+    generated = datetime.fromtimestamp(now, timezone.utc).strftime(
+        "%Y-%m-%d %H:%M UTC")
     header, rows = report_rows(config, store, runstore, now)
-    lines = [
-        "OTITbup compliance report",
-        f"Generated {generated}",
-        "",
-        "  ".join(header),
-        "-" * 78,
+    prows = policy_rows(config, store)
+    counts = _status_counts(config, runstore, now)
+
+    c = PDFCanvas()
+    margin = 45
+    y = PAGE_H
+
+    def banner(subtitle):
+        nonlocal y
+        c.rect(0, PAGE_H - 70, PAGE_W, 70, fill=_DARK)
+        c.text(margin, PAGE_H - 40, "OTITbup compliance report",
+               size=20, font="bold", color=_WHITE)
+        c.text(margin, PAGE_H - 58, subtitle, size=10, color=(0.8, 0.85, 0.9))
+        y = PAGE_H - 90
+
+    banner(f"Generated {generated}")
+
+    # KPI tiles.
+    tiles = [
+        ("Covered", f"{counts['covered']}/{counts['total']}", _OK),
+        ("Stale >7d", str(counts["stale"]),
+         _WARN if counts["stale"] else _OK),
+        ("Never", str(counts["never"]),
+         _FAIL if counts["never"] else _OK),
+        ("Failing", str(counts["failing"]),
+         _FAIL if counts["failing"] else _OK),
     ]
-    lines += ["  ".join(r) for r in rows]
-    lines += ["", "Policy findings:", "-" * 78]
-    lines += ["  ".join(p) for p in policy_rows(config, store)] or ["(none)"]
+    tile_w = (PAGE_W - 2 * margin - 3 * 12) / 4
+    for i, (label, value, color) in enumerate(tiles):
+        tx = margin + i * (tile_w + 12)
+        c.rect(tx, y - 56, tile_w, 56, fill=_LIGHT, stroke=(0.87, 0.89, 0.91))
+        c.rect(tx, y - 56, 5, 56, fill=color)          # colour spine
+        c.text(tx + 14, y - 26, value, size=20, font="bold", color=color)
+        c.text(tx + 14, y - 46, label, size=9, color=_MUTED)
+    y -= 78
 
-    # Paginate.
-    pages: list[list[str]] = []
-    for i in range(0, len(lines), 58):
-        pages.append(lines[i:i + 58])
+    # Status bar chart (drawn as vector bars).
+    c.text(margin, y, "Device status", size=12, font="bold")
+    y -= 14
+    chart_h = 90
+    chart_w = PAGE_W - 2 * margin
+    bars = [("healthy", counts["healthy"], _OK), ("stale", counts["stale"], _WARN),
+            ("never", counts["never"], _MUTED), ("failing", counts["failing"], _FAIL)]
+    peak = max((v for _l, v, _c in bars), default=0) or 1
+    bar_w = chart_w / len(bars)
+    base = y - chart_h
+    c.line(margin, base, margin + chart_w, base, color=(0.8, 0.82, 0.85))
+    for i, (label, val, color) in enumerate(bars):
+        bh = (chart_h - 16) * (val / peak)
+        bx = margin + i * bar_w + bar_w * 0.2
+        c.rect(bx, base, bar_w * 0.6, bh, fill=color)
+        c.text_centered(bx + bar_w * 0.3, base + bh + 4, str(val),
+                        size=10, font="bold", color=color)
+        c.text_centered(bx + bar_w * 0.3, base - 12, label, size=9,
+                        color=_MUTED)
+    y = base - 28
 
-    objects: list[bytes] = []
+    # Device table with header fill + zebra striping.
+    def table(title, cols, data, col_x, row_color=None):
+        nonlocal y
+        if y < 120:
+            c.new_page()
+            y = PAGE_H - margin
+        c.text(margin, y, title, size=12, font="bold")
+        y -= 16
+        c.rect(margin, y - 2, PAGE_W - 2 * margin, 16, fill=_DARK)
+        for cx, name in zip(col_x, cols):
+            c.text(margin + cx, y + 2, name, size=8, font="bold", color=_WHITE)
+        y -= 16
+        for ri, row in enumerate(data):
+            if y < 60:
+                c.new_page()
+                y = PAGE_H - margin
+            if ri % 2 == 0:
+                c.rect(margin, y - 2, PAGE_W - 2 * margin, 14, fill=_LIGHT)
+            color = row_color(row) if row_color else (0.1, 0.12, 0.14)
+            for cx, cell in zip(col_x, row):
+                c.text(margin + cx, y + 1, str(cell)[:40], size=8, color=color)
+            y -= 14
+        y -= 14
 
-    def add(obj: bytes) -> int:
-        objects.append(obj)
-        return len(objects)
+    table("Devices", ["Device", "Driver", "Last (d)", "Fails", "Rehearse",
+                      "Baseline"],
+          rows, [0, 190, 300, 360, 410, 470])
 
-    # 1 catalog, 2 pages tree, font, then per page: content + page.
-    font_num = None
-    page_obj_nums = []
-    content_streams = []
-    for page_lines in pages:
-        text = "BT /F1 10 Tf 50 780 Td 12 TL\n"
-        for ln in page_lines:
-            text += f"({_pdf_escape(ln[:110])}) Tj T*\n"
-        text += "ET"
-        content_streams.append(text.encode("latin-1", "replace"))
+    def sev_color(row):
+        return {"critical": _FAIL, "high": _FAIL, "medium": _WARN}.get(
+            row[1], _MUTED)
+    table("Policy findings", ["Device", "Severity", "Rule", "Description"],
+          prows or [["(none)", "", "", ""]],
+          [0, 190, 260, 360], row_color=sev_color)
 
-    # Build object list with correct numbering.
-    # Reserve: obj1 catalog, obj2 pages, obj3 font, then content+page pairs.
-    catalog_num = 1
-    pages_num = 2
-    font_num = 3
-    next_num = 4
-    body_objs: dict[int, bytes] = {}
-    for content in content_streams:
-        c_num = next_num
-        next_num += 1
-        p_num = next_num
-        next_num += 1
-        page_obj_nums.append(p_num)
-        body_objs[c_num] = (
-            b"<< /Length " + str(len(content)).encode() + b" >>\nstream\n"
-            + content + b"\nendstream"
-        )
-        body_objs[p_num] = (
-            b"<< /Type /Page /Parent " + str(pages_num).encode()
-            + b" 0 R /MediaBox [0 0 595 842] /Contents "
-            + str(c_num).encode() + b" 0 R /Resources << /Font << /F1 "
-            + str(font_num).encode() + b" 0 R >> >> >>"
-        )
-    kids = b" ".join(str(n).encode() + b" 0 R" for n in page_obj_nums)
-    body_objs[catalog_num] = (
-        b"<< /Type /Catalog /Pages " + str(pages_num).encode() + b" 0 R >>")
-    body_objs[pages_num] = (
-        b"<< /Type /Pages /Kids [" + kids + b"] /Count "
-        + str(len(page_obj_nums)).encode() + b" >>")
-    body_objs[font_num] = (
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>")
-
-    out = io.BytesIO()
-    out.write(b"%PDF-1.4\n")
-    offsets = {}
-    for num in sorted(body_objs):
-        offsets[num] = out.tell()
-        out.write(str(num).encode() + b" 0 obj\n" + body_objs[num]
-                  + b"\nendobj\n")
-    xref_pos = out.tell()
-    count = len(body_objs) + 1
-    out.write(b"xref\n0 " + str(count).encode() + b"\n")
-    out.write(b"0000000000 65535 f \n")
-    for num in range(1, count):
-        out.write(f"{offsets[num]:010d} 00000 n \n".encode())
-    out.write(b"trailer\n<< /Size " + str(count).encode()
-              + b" /Root 1 0 R >>\nstartxref\n"
-              + str(xref_pos).encode() + b"\n%%EOF")
-    return out.getvalue()
+    # Footer page numbers.
+    total_pages = len(c._pages)
+    for i in range(total_pages):
+        c._pages_index = i
+        # draw footer directly on each page's op list
+        ops = c._pages[i]
+        ops.append("0.6 0.66 0.72 rg")
+        ops.append(
+            f"BT /F1 8 Tf {PAGE_W - 90:.0f} 24 Td "
+            f"(Page {i + 1} of {total_pages}) Tj ET")
+        ops.append(f"BT /F1 8 Tf {margin} 24 Td (otitbup) Tj ET")
+    return c.render()
 
 
 # ------------------------------------------------------------------ DOCX

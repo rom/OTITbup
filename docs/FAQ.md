@@ -275,3 +275,15 @@ show a popover explaining the feature on hover or keyboard focus.
 Yes, when signed in as operator or admin: a device page has "Back up now",
 "Verify" and "Set baseline" buttons and a note form; the Health page has a
 report generator (format + sign) and (admin) a config-reload button.
+
+### Are there graphs/charts in the web UI?
+Yes. The **Dashboard** page shows a coverage donut, a device-status bar,
+backups-per-day and changes-per-day charts, policy findings by severity,
+and storage. Each device page has a run-health timeline and a
+runs-per-day chart. All charts are inline SVG rendered server-side — no
+JavaScript, no external assets, and they adapt to light/dark themes.
+
+### Is the PDF report just plain text?
+No — the PDF has a title banner, KPI tiles (covered/stale/never/failing),
+a vector bar chart of device status, and shaded tables, all drawn with
+PDF vector operators (no reportlab). It's still stdlib-only and signable.

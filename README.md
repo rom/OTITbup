@@ -232,9 +232,11 @@ changes. They need `otitbup[ssh]`.
 
 ## Web UI
 
-`otitbup serve` — read-only by design (the YAML config stays the source
-of truth): dashboard with summary tiles, per-zone grouping and live
-filtering; a **health** page (coverage, staleness, consecutive failures);
+`otitbup serve` — a **Dashboard** page with inline-SVG graphs (coverage
+donut, device-status bar, backups/day and changes/day, policy findings by
+severity, storage) and per-device history charts; the device list with
+per-zone grouping and live filtering; a **health** page (coverage,
+staleness, consecutive failures);
 **config search** across the latest backup of every device; a **drift**
 page (golden-config baselines); per-device pages with artifact lists,
 history, diffs, run status, annotations, policy findings, rehearsal log,
@@ -278,7 +280,11 @@ page; a retention page; the driver catalog; and an **audit log**
   **Help** page and hover **popover help**.
 - **Signed multi-format reports** — compliance reports in HTML, **CSV,
   PDF and DOCX** (all stdlib), optionally **Ed25519-signed** for auditors
-  (`otitbup report --format pdf --sign`, verify with `report-verify`).
+  (`otitbup report --format pdf --sign`, verify with `report-verify`). The
+  PDF is richly formatted with a title banner, KPI tiles and vector bar
+  charts (hand-drawn — no PDF library).
+- **Graphs** — the web Dashboard and per-device pages render inline-SVG
+  charts (donut, bar, stacked, timeline), server-side and CSP-safe.
 - **3-2-1 / 3-2-1-1-0 strategy** — the Strategy page (and `otitbup
   strategy`) evaluates your backup posture: 3 copies, 2 media, 1 offsite,
   +1 offline, 0 errors — and tells you exactly what's missing. `otitbup

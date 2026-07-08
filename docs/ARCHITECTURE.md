@@ -56,6 +56,8 @@ otitbup.yml (inventory, source of truth, versioned by the operator)
 | `reportfmt.py` | CSV/PDF/DOCX report rendering (stdlib) |
 | `signing.py` | Detached Ed25519 report signatures |
 | `strategy.py` | 3-2-1 / 3-2-1-1-0 backup-strategy evaluation |
+| `charts.py` | Inline-SVG charts (donut/bar/stacked/timeline) for the web UI, theme-aware, CSP-safe |
+| `pdfcanvas.py` | Minimal vector PDF canvas (rects, lines, text, colour) for rich report graphics |
 | `gitstore.py` | Local git repo; per-device commits; `manifest.yml` with sha256 fingerprints (change detection for binaries); optional push to remote |
 | `runner.py` | Orchestration: per-zone concurrency semaphores, maintenance-window checks, change/failure alerts |
 | `daemon.py` | Scheduler loop; per-device interval state in `state.json` |
