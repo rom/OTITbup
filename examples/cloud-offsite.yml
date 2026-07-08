@@ -1,0 +1,82 @@
+# Full 3-2-1-1-0 backup posture with an encrypted cloud offsite copy.
+#
+#   3 copies : local repo + git remote mirror + export/offsite archive
+#   2 media  : appliance disk + remote git server / S3 object store
+#   1 offsite: the S3 copy (and a genuinely off-site git remote)
+#   1 offline: a periodic `otitbup export` tarball on removable media
+#   0 errors : every backup verifies, no device failing (Strategy page)
+#
+# The offsite S3 snapshot is Fernet-encrypted ON THE APPLIANCE before
+# upload, so the cloud only ever holds ciphertext. Drive it with
+#   otitbup offsite genkey            # once; store as offsite.key, keep OFF S3
+#   otitbup offsite push              # encrypted snapshot -> S3
+#   otitbup offsite restore <device>  # hash-verified bundle, no device writes
+# Needs otitbup[crypto] (and otitbup[sftp] only if you use the sftp transport).
+
+data_dir: ./data
+
+git:
+  push: true                                   # copy 2 / offsite git mirror
+  remote: git@git.offsite.example:ot/backups.git
+
+retention:
+  keep_versions: 30
+  keep_days: 365
+  large_file_threshold: 1048576                # >=1 MiB offloads to the blob store
+
+encryption:
+  # Encrypt the offloaded large-artifact blob store at rest (Fernet).
+  # Content-addressing is by PLAINTEXT sha256, so dedup is unaffected.
+  # Generate: python -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())"
+  blob_key_file: /etc/otitbup/blob.key         # or blob_key: / OTITBUP_BLOB_KEY
+
+strategy:
+  offsite: true                                # git.remote is genuinely off-site
+  offline:
+    path: /mnt/usb/otitbup-export.tar.gz       # `otitbup export --out ...` target
+    max_age_days: 7                            # how fresh it must be to count
+
+offsite:
+  # Encrypted whole-backup snapshot (repo + blobs + run store) to the cloud.
+  key_file: /etc/otitbup/offsite.key           # the ONLY thing that can decrypt;
+                                               # keep it off the remote
+  transport: s3                                # file | sftp | s3
+  bucket: ot-backups
+  prefix: otitbup/
+  region: eu-central-1
+  endpoint: https://s3.eu-central-1.amazonaws.com
+  access_key: AKIAEXAMPLE                       # or env OTITBUP_OFFSITE_S3_KEY
+  secret_key_file: /etc/otitbup/s3.secret       # or OTITBUP_OFFSITE_S3_SECRET
+  verify_tls: true
+
+alerts:
+  stale_days: 7
+
+sites:
+  - name: plant-a
+    zones:
+      - name: cell-1
+        maintenance_window: "18:00-06:00"
+        timezone: Europe/Berlin
+        max_concurrent: 1
+        devices:
+          - name: plc-01
+            driver: siemens_s7
+            address: 10.20.0.10
+            schedule: "0 2 * * *"              # cron: 02:00 daily
+            options:
+              rack: 0
+              slot: 2
+
+          - name: plc-01-exports
+            driver: generic_file               # versioned TIA project exports
+            schedule: 1h
+            options:
+              path: /srv/exports/plc-01
+              patterns: ["**/*.zap*"]
+
+          - name: line-sw-01
+            driver: cisco_ios
+            address: 10.10.0.1
+            schedule: 1h
+            credentials: line-sw-01

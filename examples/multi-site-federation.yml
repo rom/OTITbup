@@ -1,0 +1,63 @@
+# Central appliance in a Purdue-model, multi-site deployment.
+# This box does NOT poll field devices directly. Two per-site COLLECTOR
+# appliances (one per plant) back up their own equipment and this central
+# appliance rolls up their health over a scoped read-only API
+# (`otitbup federation`). Backup BYTES federate separately over plain git:
+# every collector pushes to a shared remote (see git.push below), so the
+# control plane (health) and data plane (backups) stay split.
+#
+# The `sites:` list here is the central box's own small inventory (e.g. the
+# DMZ jump host / historian) — it may also be empty. The real fleet lives
+# on the collectors.
+#
+# --- collector-side snippet (runs on collector-a.plant.local) ------------
+# # otitbup.yml on each collector: it backs up its plant AND pushes bytes
+# # to the shared git remote, and exposes the health API the central box
+# # reads. Mint its token on the collector with:
+# #   otitbup token create central --role viewer --scopes "*"
+# git:
+# #   push: true
+# #   remote: git@git.corp.example:ot/backups.git   # the SHARED remote
+# webui:
+# #   host: 0.0.0.0            # reachable by the central appliance (use TLS!)
+# #   port: 8080
+# sites:
+# #   - name: plant-a
+# #     zones: [ ... this plant's PLCs/RTUs/switches ... ]
+# -------------------------------------------------------------------------
+
+data_dir: ./data
+
+git:
+  push: true
+  remote: git@git.corp.example:ot/backups.git   # shared remote all sites push to
+
+federation:
+  role: central
+  collectors:
+    - name: plant-a
+      url: https://collector-a.plant.local:8080
+      token_file: /etc/otitbup/plant-a.token      # scoped viewer token
+      verify_tls: true
+    - name: plant-b
+      url: https://collector-b.plant.local:8080
+      token_file: /etc/otitbup/plant-b.token
+      verify_tls: true
+
+webui:
+  host: 127.0.0.1
+  port: 8080
+
+sites:
+  - name: central-dmz
+    zones:
+      - name: services
+        devices:
+          - name: historian-01
+            driver: generic_sftp        # fetch historian export files (SFTP)
+            address: 10.0.0.5
+            schedule: 1d
+            credentials: historian-01
+            options:
+              paths:
+                - /var/lib/historian/exports
