@@ -255,23 +255,48 @@ class EventBus:
         cfg = self.cfg["syslog"]
         facility = _FACILITIES.get(cfg.get("facility", "local0"), 16)
         level = _SYSLOG_LEVEL.get(event.severity, 6)
+        protocol = str(cfg.get("protocol", "udp")).lower()
+        address = cfg.get("address", "127.0.0.1")
+        port = int(cfg.get("port", 514))
+        message = (f"{event.type} {event.message}"
+                   + (f" actor={event.actor}" if event.actor else ""))
         try:
+            if protocol == "tls":
+                self._syslog_tls(cfg, address, port, facility, level, message)
+                return
+            socktype = (socket.SOCK_STREAM if protocol == "tcp"
+                        else socket.SOCK_DGRAM)
             handler = SysLogHandler(
-                address=(cfg.get("address", "127.0.0.1"),
-                         int(cfg.get("port", 514))),
-                facility=facility,
-            )
+                address=(address, port), facility=facility, socktype=socktype)
             record = logging.LogRecord(
-                "otitbup", logging.INFO, "", 0,
-                f"{event.type} {event.message}"
-                + (f" actor={event.actor}" if event.actor else ""),
-                None, None,
-            )
+                "otitbup", logging.INFO, "", 0, message, None, None)
             record.levelno = level  # map to syslog severity
             handler.emit(record)
             handler.close()
         except Exception as exc:
             log.warning("syslog sink failed: %s", exc)
+
+    def _syslog_tls(self, cfg, address, port, facility, level, message):
+        """Send one syslog message over TLS (RFC 5425), octet-framed
+        (RFC 6587). Uses a verified TLS context by default; set
+        syslog.cafile for a private CA, or syslog.verify: false to skip
+        verification (not recommended)."""
+        import ssl
+        pri = facility * 8 + level
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        host = socket.gethostname()
+        # RFC 5424 header + message; RFC 6587 octet counting for stream.
+        line = f"<{pri}>1 {stamp} {host} otitbup - - - {message}"
+        frame = f"{len(line.encode())} {line}".encode()
+        if cfg.get("verify") is False:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+        else:
+            ctx = ssl.create_default_context(cafile=cfg.get("cafile") or None)
+        with socket.create_connection((address, port), timeout=10) as raw:
+            with ctx.wrap_socket(raw, server_hostname=address) as tls:
+                tls.sendall(frame)
 
     def _to_snmp(self, event: Event) -> None:
         cfg = self.cfg["snmp_trap"]

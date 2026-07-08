@@ -18,6 +18,7 @@ import html
 import logging
 import posixpath
 import re
+import threading
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -57,6 +58,68 @@ _STYLE = """
     --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
   }
 }
+/* Selectable colour themes (via <html data-theme>); these override the
+   OS-driven auto light/dark above. */
+:root[data-theme="light"] {
+  --bg:#eef1f6; --surface:#fff; --text:#10151c; --muted:#5b6672;
+  --border:#e4e9f0; --line:#eef2f7; --hover:#f3f6fb; --th-bg:#f7f9fc;
+  --field:#fff; --accent:#2563eb; --accent-ink:#1d4ed8; --accent-soft:#e7efff;
+  --teal:#0ea5a4; --ok:#167a37; --ok-soft:#e6f4ea; --warn:#b26a00;
+  --warn-soft:#fbf0dd; --danger:#c02636; --danger-soft:#fdeaec;
+  --danger-border:#f0c2c7;
+  --shadow:0 1px 2px rgba(16,24,40,.05),0 12px 30px -18px rgba(16,24,40,.22);
+  --shadow-sm:0 1px 2px rgba(16,24,40,.06);
+}
+:root[data-theme="dark"] {
+  --bg:#0d1015; --surface:#161b22; --text:#e6eaf0; --muted:#98a2ad;
+  --border:#262d37; --line:#20262f; --hover:#1c222b; --th-bg:#1a2029;
+  --field:#11151b; --accent:#6ea8fe; --accent-ink:#8bbcff;
+  --accent-soft:#1b2740; --teal:#2dd4bf; --ok:#5cbd6c; --ok-soft:#16281a;
+  --warn:#e0a54a; --warn-soft:#2e2413; --danger:#f2848d; --danger-soft:#2f1a1d;
+  --danger-border:#5a2a2f;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 14px 34px -20px rgba(0,0,0,.75);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.4);
+}
+:root[data-theme="sky"] {
+  --bg:#e9f2fb; --surface:#fff; --text:#0f2233; --muted:#5a7085;
+  --border:#d3e3f2; --line:#e6f0f9; --hover:#eef6fd; --th-bg:#edf5fc;
+  --field:#fff; --accent:#0284c7; --accent-ink:#036ba1; --accent-soft:#d6ecfb;
+  --teal:#0891b2; --ok:#0f766e; --ok-soft:#d7f0ec; --warn:#b45309;
+  --warn-soft:#fbeddb; --danger:#be123c; --danger-soft:#fbe0e6;
+  --danger-border:#f3c2ce;
+  --shadow:0 1px 2px rgba(3,105,161,.08),0 14px 32px -18px rgba(3,105,161,.28);
+  --shadow-sm:0 1px 2px rgba(3,105,161,.1);
+}
+:root[data-theme="desert"] {
+  --bg:#f4ecdd; --surface:#fffdf7; --text:#3b2f1e; --muted:#8a7a5f;
+  --border:#e6d8c0; --line:#f0e7d5; --hover:#f7f0e2; --th-bg:#f6efe0;
+  --field:#fffdf7; --accent:#b45309; --accent-ink:#92400e;
+  --accent-soft:#f3e3cb; --teal:#a16207; --ok:#5f7d1f; --ok-soft:#eaf0d6;
+  --warn:#b7791f; --warn-soft:#f6ead0; --danger:#b23a2e; --danger-soft:#f6ddd7;
+  --danger-border:#e6c3ba;
+  --shadow:0 1px 2px rgba(120,80,20,.08),0 14px 32px -18px rgba(120,80,20,.3);
+  --shadow-sm:0 1px 2px rgba(120,80,20,.1);
+}
+:root[data-theme="autumn"] {
+  --bg:#1c1512; --surface:#271d18; --text:#f1e4d8; --muted:#b39d89;
+  --border:#3a2c23; --line:#31251d; --hover:#31251d; --th-bg:#2f2219;
+  --field:#1f1712; --accent:#ea7a3c; --accent-ink:#f2925c;
+  --accent-soft:#3a271a; --teal:#c98a2b; --ok:#8bbf5a; --ok-soft:#25301a;
+  --warn:#e0a54a; --warn-soft:#332616; --danger:#f0836f; --danger-soft:#331d18;
+  --danger-border:#5a2f26;
+  --shadow:0 1px 2px rgba(0,0,0,.35),0 14px 34px -20px rgba(0,0,0,.8);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.45);
+}
+:root[data-theme="spring"] {
+  --bg:#eaf6ec; --surface:#fff; --text:#12271a; --muted:#5c7564;
+  --border:#d3e8d8; --line:#e6f2e9; --hover:#eef8f0; --th-bg:#edf7ef;
+  --field:#fff; --accent:#16a34a; --accent-ink:#15803d; --accent-soft:#d6f0dd;
+  --teal:#0d9488; --ok:#15803d; --ok-soft:#d8f0de; --warn:#a16207;
+  --warn-soft:#f3ecd0; --danger:#be123c; --danger-soft:#fbe0e6;
+  --danger-border:#f0c2cd;
+  --shadow:0 1px 2px rgba(16,90,40,.08),0 14px 32px -18px rgba(16,90,40,.26);
+  --shadow-sm:0 1px 2px rgba(16,90,40,.1);
+}
 * { box-sizing: border-box; }
 body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
        margin: 0; color: var(--text); background: var(--bg);
@@ -86,6 +149,14 @@ nav a:hover { background: var(--hover); color: var(--text);
               text-decoration: none; }
 nav a.active { background: var(--accent-soft); color: var(--accent-ink);
                font-weight: 600; }
+.who { display: inline-flex; align-items: center; gap: .35rem;
+       color: var(--muted); font-size: .8rem; padding-left: .7rem;
+       margin-left: .2rem; border-left: 1px solid var(--border);
+       white-space: nowrap; }
+.who b { color: var(--text); font-weight: 600; }
+.who .role { font-size: .68rem; text-transform: uppercase; letter-spacing: .04em;
+       background: var(--accent-soft); color: var(--accent-ink);
+       padding: .05rem .4rem; border-radius: 999px; font-weight: 600; }
 
 /* Content surface */
 main { max-width: 80rem; margin: 1.5rem auto; padding: 1.6rem 1.9rem;
@@ -255,22 +326,42 @@ document.getElementById('filter').addEventListener('input', function () {
 """
 
 
+# Per-request context (each request runs in its own thread) so _page can
+# render the signed-in user and the configured theme without threading them
+# through every page method.
+_CTX = threading.local()
+
+
+def _who_chip() -> str:
+    identity = getattr(_CTX, "identity", None)
+    if not identity:
+        return ""
+    user = html.escape(str(identity.get("username", "")))
+    role = html.escape(str(identity.get("role", "")))
+    return (f"<span class='who'>signed in as <b>{user}</b>"
+            f"<span class='role'>{role}</span></span>")
+
+
 def _page(title: str, body: str) -> bytes:
+    theme = getattr(_CTX, "theme", None) or ""
+    theme_attr = (f" data-theme='{html.escape(theme)}'"
+                  if theme and theme != "auto" else "")
     return (
-        f"<!doctype html><html><head><meta charset='utf-8'>"
+        f"<!doctype html><html{theme_attr}><head><meta charset='utf-8'>"
         f"<meta name='viewport' content='width=device-width, initial-scale=1'>"
         f"<link rel='icon' type='image/svg+xml' href='/favicon.svg'>"
         f"<title>{html.escape(title)}</title><style>{_STYLE}</style></head>"
         f"<body><header class='appbar'><div class='bar'><h1>{_BRAND}</h1>"
-        f"<nav><a href='/'>Devices</a><a href='/dashboard'>Dashboard</a>"
+        f"<nav><a href='/dashboard'>Dashboard</a><a href='/'>Devices</a>"
         f"<a href='/health'>Health</a>"
         f"<a href='/search'>Search</a><a href='/drift'>Drift</a>"
-        f"<a href='/activity'>Activity</a><a href='/policy'>Policy</a>"
+        f"<a href='/policy'>Policy</a>"
         f"<a href='/retention'>Retention</a><a href='/strategy'>Strategy</a>"
-        f"<a href='/drivers'>Drivers</a><a href='/audit'>Audit</a>"
+        f"<a href='/drivers'>Drivers</a>"
+        f"<a href='/activity'>Backup log</a><a href='/audit'>Audit log</a>"
         f"<a href='/users'>Users</a><a href='/config'>Config</a>"
         f"<a href='/help'>Help</a>"
-        f"<a href='/logout'>Logout</a></nav></div></header>"
+        f"<a href='/logout'>Logout</a>{_who_chip()}</nav></div></header>"
         f"<main>{body}</main>"
         "<script>(function(){var p=location.pathname;"
         "document.querySelectorAll('nav a').forEach(function(a){"
@@ -328,163 +419,211 @@ def _csrf(token: str) -> str:
 
 # Admin-editable global config sections. Each field is
 # (dotted-path-within-section, label, type). type: str | int | bool.
+# Selectable colour themes for the web UI (applied via <html data-theme>).
+_THEMES = ("auto", "light", "dark", "sky", "desert", "autumn", "spring")
+
+# Admin-editable global config. Each field is
+# (dotted-path, label, type, example) where type is
+# str | int | float | bool | csv | "choice:a|b|c", and example is the
+# placeholder / default shown in an empty field (or the default choice).
+# `id` disambiguates two forms that write the same config section.
 _SETTINGS_FORMS = [
     {"section": "offsite", "title": "Offsite copy (external server / cloud)",
      "fields": [
-         ("transport", "Transport (file | sftp | s3)", "str"),
-         ("interval_days", "Auto-push every N days (0=off)", "float"),
-         ("key_file", "Encryption key file", "str"),
-         ("dir", "file: directory / mount", "str"),
-         ("host", "sftp: host", "str"), ("port", "sftp: port", "int"),
-         ("username", "sftp: username", "str"),
-         ("ssh_key_file", "sftp: SSH key file", "str"),
-         ("path", "sftp: remote path", "str"),
-         ("bucket", "s3: bucket", "str"), ("prefix", "s3: prefix", "str"),
-         ("region", "s3: region", "str"), ("endpoint", "s3: endpoint", "str"),
-         ("access_key", "s3: access key", "str"),
-         ("secret_key_file", "s3: secret key file", "str"),
+         ("transport", "Transport", "choice:file|sftp|s3", "s3"),
+         ("interval_days", "Auto-push every N days (0=off)", "float", "1"),
+         ("key_file", "Encryption key file", "str", "/etc/otitbup/offsite.key"),
+         ("dir", "file: directory / mount", "str", "/mnt/offsite/otitbup"),
+         ("host", "sftp: host", "str", "backup.example.com"),
+         ("port", "sftp: port", "int", "22"),
+         ("username", "sftp: username", "str", "otitbup"),
+         ("ssh_key_file", "sftp: SSH key file", "str",
+          "/etc/otitbup/id_ed25519"),
+         ("path", "sftp: remote path", "str", "/srv/otitbup"),
+         ("bucket", "s3: bucket", "str", "ot-backups"),
+         ("prefix", "s3: prefix", "str", "otitbup/"),
+         ("region", "s3: region", "str", "eu-central-1"),
+         ("endpoint", "s3: endpoint", "str",
+          "https://s3.eu-central-1.amazonaws.com"),
+         ("access_key", "s3: access key", "str", "AKIA..."),
+         ("secret_key_file", "s3: secret key file", "str",
+          "/etc/otitbup/s3.secret"),
      ]},
-    {"section": "webui", "title": "Web UI & SSO",
+    {"id": "webui", "section": "webui", "title": "Web UI",
      "fields": [
-         ("host", "Bind host", "str"), ("port", "Bind port", "int"),
-         ("trusted_header", "SSO trusted user header", "str"),
-         ("trusted_role_header", "SSO trusted role header", "str"),
-         ("trusted_default_role", "SSO default role", "str"),
-         ("tls.cert_file", "TLS certificate file", "str"),
-         ("tls.key_file", "TLS key file", "str"),
+         ("host", "Bind host", "str", "127.0.0.1"),
+         ("port", "Bind port", "int", "8080"),
+         ("theme", "Colour theme", "choice:" + "|".join(_THEMES), "auto"),
+         ("tls.cert_file", "TLS certificate file", "str", "webui-cert.pem"),
+         ("tls.key_file", "TLS key file", "str", "webui-key.pem"),
      ]},
-    {"section": "ldap", "title": "LDAP / Active Directory login",
+    {"id": "sso", "section": "webui", "title": "Single sign-on (SSO)",
      "fields": [
-         ("url", "LDAP URL", "str"),
-         ("user_dn_template", "User DN template", "str"),
-         ("group_base", "Group search base", "str"),
-         ("default_role", "Default role", "str"),
+         ("trusted_header", "Trusted user header (from auth proxy)", "str",
+          "X-Forwarded-User"),
+         ("trusted_role_header", "Trusted role header", "str",
+          "X-Forwarded-Role"),
+         ("trusted_default_role", "Default role for SSO users",
+          "choice:viewer|operator|admin", "viewer"),
+     ]},
+    {"section": "ldap", "title": "LDAP / Active Directory login (SSO)",
+     "fields": [
+         ("url", "LDAP URL", "str", "ldaps://dc.example.com"),
+         ("user_dn_template", "User DN template", "str",
+          "uid={username},ou=people,dc=example,dc=com"),
+         ("group_base", "Group search base", "str",
+          "ou=groups,dc=example,dc=com"),
+         ("default_role", "Default role", "choice:viewer|operator|admin",
+          "viewer"),
      ]},
     {"section": "events", "title": "Events (syslog / SNMP traps)",
      "fields": [
-         ("syslog.address", "syslog address", "str"),
-         ("syslog.port", "syslog port", "int"),
-         ("syslog.facility", "syslog facility", "str"),
-         ("snmp_trap.address", "SNMP trap address", "str"),
-         ("snmp_trap.port", "SNMP trap port", "int"),
-         ("snmp_trap.community", "SNMP community", "str"),
-         ("snmp_trap.enterprise_oid", "enterprise OID", "str"),
+         ("syslog.address", "syslog address", "str", "10.0.0.1"),
+         ("syslog.port", "syslog port", "int", "514"),
+         ("syslog.protocol", "syslog transport", "choice:udp|tcp|tls", "udp"),
+         ("syslog.facility", "syslog facility", "str", "local0"),
+         ("syslog.cafile", "syslog TLS CA bundle (tls only)", "str",
+          "/etc/ssl/certs/ca-bundle.crt"),
+         ("snmp_trap.address", "SNMP trap address", "str", "10.0.0.2"),
+         ("snmp_trap.port", "SNMP trap port", "int", "162"),
+         ("snmp_trap.community", "SNMP community", "str", "public"),
+         ("snmp_trap.enterprise_oid", "enterprise OID", "str",
+          "1.3.6.1.4.1.99999"),
      ]},
     {"section": "logging", "title": "Logging",
      "fields": [
-         ("level", "Level (debug|info|warning|error)", "str"),
-         ("format", "Format (text|json)", "str"),
-         ("file", "Log file (rotates)", "str"),
-         ("max_bytes", "Max bytes", "int"),
-         ("backups", "Rotations kept", "int"),
+         ("level", "Level", "choice:debug|info|warning|error", "info"),
+         ("format", "Format", "choice:text|json", "text"),
+         ("file", "Log file (rotates)", "str",
+          "/var/log/otitbup/otitbup.log"),
+         ("max_bytes", "Max bytes", "int", "10485760"),
+         ("backups", "Rotations kept", "int", "5"),
      ]},
     {"section": "netbox", "title": "Integration: NetBox",
-     "fields": [("url", "URL", "str"), ("token", "API token", "str")]},
+     "fields": [("url", "URL", "str", "https://netbox.example.com"),
+                ("token", "API token", "str", "0123456789abcdef")]},
     {"section": "tickets", "title": "Integration: ticketing",
      "fields": [
-         ("backend", "Backend (servicenow|jira|rt|generic)", "str"),
-         ("url", "URL", "str"), ("username", "Username", "str"),
-         ("password", "Password / API token", "str"),
+         ("backend", "Backend", "choice:servicenow|jira|rt|generic",
+          "servicenow"),
+         ("url", "URL", "str", "https://example.service-now.com"),
+         ("username", "Username", "str", "svc-otitbup"),
+         ("password", "Password / API token", "str", ""),
      ]},
     {"section": "encryption", "title": "Encryption at rest",
      "fields": [
-         ("blob_key_file", "Blob-store key file", "str"),
-         ("compress", "Compress blobs before encrypting", "bool"),
+         ("blob_key_file", "Blob-store key file", "str",
+          "/etc/otitbup/blob.key"),
+         ("compress", "Compress blobs before encrypting", "bool", ""),
      ]},
     {"section": "capture", "title": "Capture-quality guards",
      "fields": [
-         ("min_bytes", "Reject captures smaller than (bytes)", "int"),
-         ("expect_match", "Required content (regex)", "str"),
+         ("min_bytes", "Reject captures smaller than (bytes)", "int", "512"),
+         ("expect_match", "Required content (regex)", "str", "hostname"),
      ]},
     {"section": "integrity", "title": "Integrity scrubbing",
      "fields": [
-         ("interval_days", "Scrub every N days (0=off)", "float"),
-         ("all_commits", "Verify whole history", "bool"),
-         ("fsck", "Run git fsck", "bool"),
-         ("signatures", "Verify commit signatures", "bool"),
+         ("interval_days", "Scrub every N days (0=off)", "float", "7"),
+         ("all_commits", "Verify whole history", "bool", ""),
+         ("fsck", "Run git fsck", "bool", ""),
+         ("signatures", "Verify commit signatures", "bool", ""),
      ]},
     {"section": "rehearsal", "title": "Scheduled restore rehearsals",
-     "fields": [("interval_days", "Rehearse every N days (0=off)", "float")]},
+     "fields": [("interval_days", "Rehearse every N days (0=off)", "float",
+                 "30")]},
     {"section": "git", "title": "Git remote & signed history",
      "fields": [
-         ("remote", "Push remote", "str"),
-         ("push", "Push after each backup", "bool"),
-         ("sign.key_file", "Commit signing key (SSH)", "str"),
+         ("remote", "Push remote", "str",
+          "git@gitlab.example.com:ot/backups.git"),
+         ("push", "Push after each backup", "bool", ""),
+         ("sign.key_file", "Commit signing key (SSH)", "str",
+          "/etc/otitbup/commit-signing-key"),
      ]},
     {"section": "secrets", "title": "Secrets backend",
      "fields": [
-         ("backend", "Backend (plainfile|encryptedfile|vault|cyberark)",
-          "str"),
-         ("path", "File path", "str"),
-         ("key_file", "Encryption key file", "str"),
-         ("url", "Vault/CyberArk URL", "str"),
-         ("mount", "Vault mount", "str"),
-         ("token_file", "Vault token file", "str"),
+         ("backend", "Backend",
+          "choice:plainfile|encryptedfile|vault|cyberark", "encryptedfile"),
+         ("path", "File path", "str", "secrets.yml"),
+         ("key_file", "Encryption key file", "str", "otitbup.key"),
+         ("url", "Vault/CyberArk URL", "str", "https://vault.example:8200"),
+         ("mount", "Vault mount", "str", "secret"),
+         ("token_file", "Vault token file", "str", "vault.token"),
      ]},
     {"section": "retention", "title": "Retention (global defaults)",
      "fields": [
-         ("keep_versions", "Keep newest N backups", "int"),
-         ("keep_days", "Keep backups newer than N days", "int"),
-         ("large_file_threshold", "Blob offload threshold (bytes)", "int"),
-         ("lock_days", "Retention lock: keep last N days (WORM)", "int"),
+         ("keep_versions", "Keep newest N backups", "int", "30"),
+         ("keep_days", "Keep backups newer than N days", "int", "365"),
+         ("large_file_threshold", "Blob offload threshold (bytes)", "int",
+          "1048576"),
+         ("lock_days", "Retention lock: keep last N days (WORM)", "int", "90"),
      ]},
     {"section": "alerts", "title": "Alerts",
      "fields": [
-         ("stale_days", "Stale after N days (0=off)", "int"),
-         ("min_interval", "Rate-limit window (s)", "int"),
-         ("webhooks", "Webhook URLs (comma-separated)", "csv"),
-         ("email.smtp_host", "SMTP host", "str"),
-         ("email.from", "From address", "str"),
-         ("email.to", "Recipients (comma-separated)", "csv"),
+         ("stale_days", "Stale after N days (0=off)", "int", "7"),
+         ("min_interval", "Rate-limit window (s)", "int", "3600"),
+         ("webhooks", "Webhook URLs (comma-separated)", "csv",
+          "https://chat.example.com/hook"),
+         ("email.smtp_host", "SMTP host", "str", "mail.example.com"),
+         ("email.from", "From address", "str", "otitbup@example.com"),
+         ("email.to", "Recipients (comma-separated)", "csv",
+          "ot-team@example.com"),
      ]},
     {"section": "retry", "title": "Retry on transient failures",
      "fields": [
-         ("attempts", "Attempts per device (1=no retry)", "int"),
-         ("backoff", "Backoff seconds (doubles each retry)", "float"),
+         ("attempts", "Attempts per device (1=no retry)", "int", "3"),
+         ("backoff", "Backoff seconds (doubles each retry)", "float", "2.0"),
      ]},
     {"section": "hooks", "title": "Pre/post hooks (global)",
      "fields": [
-         ("pre", "Pre-backup shell command", "str"),
-         ("post", "Post-backup shell command", "str"),
+         ("pre", "Pre-backup shell command", "str",
+          "/usr/local/bin/notify start $OTITBUP_DEVICE"),
+         ("post", "Post-backup shell command", "str",
+          "/usr/local/bin/notify done $OTITBUP_DEVICE $OTITBUP_OK"),
      ]},
     {"section": "anomaly", "title": "Anomaly detection",
      "fields": [
-         ("enabled", "Enabled", "bool"),
-         ("sigma", "Duration z-score threshold", "float"),
-         ("duration_floor", "Ignore runs faster than (s)", "float"),
-         ("change_window", "Change-storm window", "int"),
-         ("change_recent", "Recent change-rate trigger", "float"),
-         ("change_baseline", "Max baseline change-rate", "float"),
-         ("flap_window", "Flapping window", "int"),
-         ("flap_transitions", "Flapping transitions", "int"),
-         ("trend_window", "Slow-trend window", "int"),
-         ("trend_ratio", "Slow-trend multiplier", "float"),
+         ("enabled", "Enabled", "bool", ""),
+         ("sigma", "Duration z-score threshold", "float", "3.0"),
+         ("duration_floor", "Ignore runs faster than (s)", "float", "5.0"),
+         ("change_window", "Change-storm window", "int", "5"),
+         ("change_recent", "Recent change-rate trigger", "float", "0.8"),
+         ("change_baseline", "Max baseline change-rate", "float", "0.2"),
+         ("flap_window", "Flapping window", "int", "6"),
+         ("flap_transitions", "Flapping transitions", "int", "3"),
+         ("trend_window", "Slow-trend window", "int", "5"),
+         ("trend_ratio", "Slow-trend multiplier", "float", "2.0"),
+         ("size_drop", "Size-drop fraction of median", "float", "0.5"),
      ]},
     {"section": "housekeeping", "title": "Git housekeeping",
      "fields": [
-         ("gc_interval_days", "git gc every N days (0=off)", "int"),
-         ("gc_aggressive", "Aggressive gc", "bool"),
+         ("gc_interval_days", "git gc every N days (0=off)", "int", "7"),
+         ("gc_aggressive", "Aggressive gc", "bool", ""),
      ]},
     {"section": "desired", "title": "Config-as-code (desired state)",
      "fields": [
-         ("dir", "Desired-config directory", "str"),
-         ("strip_trailing_ws", "Ignore trailing whitespace", "bool"),
+         ("dir", "Desired-config directory", "str", "./desired"),
+         ("strip_trailing_ws", "Ignore trailing whitespace", "bool", ""),
      ]},
     {"section": "reports", "title": "Scheduled compliance reports",
      "fields": [
-         ("interval", "Interval (e.g. 7d; empty=off)", "str"),
-         ("period_days", "Report period (days)", "int"),
-         ("out", "Output path", "str"),
+         ("interval", "Interval (e.g. 7d; empty=off)", "str", "7d"),
+         ("period_days", "Report period (days)", "int", "30"),
+         ("out", "Output path", "str", "compliance-report.html"),
      ]},
     {"section": "strategy", "title": "3-2-1 strategy",
      "fields": [
-         ("offsite", "Git remote is genuinely off-site", "bool"),
-         ("offline.path", "Offline export path", "str"),
-         ("offline.max_age_days", "Offline max age (days)", "int"),
+         ("offsite", "Git remote is genuinely off-site", "bool", ""),
+         ("offline.path", "Offline export path", "str",
+          "/mnt/usb/otitbup-export.tar.gz"),
+         ("offline.max_age_days", "Offline max age (days)", "int", "7"),
      ]},
     {"section": "federation", "title": "Federation (central roll-up)",
-     "fields": [("role", "Role (e.g. central)", "str")]},
+     "fields": [("role", "Role", "str", "central")]},
 ]
+
+
+def _form_id(spec: dict) -> str:
+    return spec.get("id", spec["section"])
 
 
 def _dig(data: dict, dotted: str):
@@ -894,13 +1033,17 @@ class WebUI:
         for spec in _SETTINGS_FORMS:
             current = raw.get(spec["section"]) or {}
             inputs = []
-            for dotted, label, ftype in spec["fields"]:
+            for field in spec["fields"]:
+                dotted, label, ftype = field[0], field[1], field[2]
+                example = field[3] if len(field) > 3 else ""
                 value = _dig(current, dotted)
-                inputs.append(self._config_input(dotted, label, ftype, value))
+                inputs.append(self._config_input(
+                    dotted, label, ftype, value, example))
             sections.append(
                 f"<details><summary>{html.escape(spec['title'])}</summary>"
                 f"<form method='post' action='/config/global'>{_csrf(csrf)}"
-                f"<input type='hidden' name='section' value='{spec['section']}'>"
+                f"<input type='hidden' name='section' "
+                f"value='{_form_id(spec)}'>"
                 "<table class='cfg'>" + "".join(inputs) + "</table>"
                 "<button type='submit'>Save</button></form></details>"
             )
@@ -949,18 +1092,29 @@ class WebUI:
                 "<a href='/help/sitecollector'>SITECOLLECTOR</a>.</p>"
                 + "".join(rows) + add)
 
-    def _config_input(self, name: str, label: str, ftype: str, value) -> str:
+    def _config_input(self, name: str, label: str, ftype: str, value,
+                      example: str = "") -> str:
         if ftype == "csv" and isinstance(value, (list, tuple)):
             value = ", ".join(str(v) for v in value)
         safe = html.escape(str(value)) if value not in (None, "") else ""
+        ph = f" placeholder='{html.escape(example)}'" if example else ""
         if ftype == "bool":
             checked = " checked" if value in (True, "true", "1", 1) else ""
             field = (f"<input type='checkbox' name='{name}' value='1'"
                      f"{checked}>")
+        elif ftype.startswith("choice:"):
+            opts = ftype.split(":", 1)[1].split("|")
+            cur = str(value) if value not in (None, "") else example
+            options = "".join(
+                f"<option value='{html.escape(o)}'"
+                f"{' selected' if o == cur else ''}>{html.escape(o)}</option>"
+                for o in opts)
+            field = f"<select name='{name}'>{options}</select>"
         elif ftype in ("int", "float"):
-            field = (f"<input name='{name}' value='{safe}' inputmode='numeric'>")
+            field = (f"<input name='{name}' value='{safe}'{ph} "
+                     "inputmode='numeric'>")
         else:
-            field = f"<input name='{name}' value='{safe}'>"
+            field = f"<input name='{name}' value='{safe}'{ph}>"
         return (f"<tr><td><label>{html.escape(label)}</label></td>"
                 f"<td>{field}</td></tr>")
 
@@ -1101,12 +1255,14 @@ class WebUI:
 
     def action_config_global(self, section: str, form: dict, actor: str):
         from . import configedit
-        spec = next((s for s in _SETTINGS_FORMS
-                     if s["section"] == section), None)
+        # `section` is the form id (disambiguates the two webui forms).
+        spec = next((s for s in _SETTINGS_FORMS if _form_id(s) == section), None)
         if spec is None:
             return False, "unknown settings section", "/config"
+        real_section = spec["section"]
         fields: dict = {}
-        for dotted, _label, ftype in spec["fields"]:
+        for field in spec["fields"]:
+            dotted, ftype = field[0], field[2]
             if ftype == "bool":
                 _nest(dotted, form.get(dotted) == "1", fields)
                 continue
@@ -1120,8 +1276,9 @@ class WebUI:
                     return False, f"{dotted} must be a number", "/config"
             _nest(dotted, raw_val, fields)
         return self._do_config(
-            lambda: (configedit.set_global(self.config_path, section, fields)
-                     or f"saved {section} settings"),
+            lambda: (configedit.set_global(self.config_path, real_section,
+                                           fields)
+                     or f"saved {spec['title']} settings"),
             actor)
 
     def action_config_device(self, form: dict, actor: str):
@@ -2433,6 +2590,9 @@ class _Handler(BaseHTTPRequestHandler):
         raw = self.path.split("?", 1)
         path = unquote(raw[0])
         query = parse_qs(raw[1]) if len(raw) > 1 else {}
+        # Per-request render context (theme + who is signed in).
+        _CTX.theme = self.ui.config.webui.get("theme")
+        _CTX.identity = None
         if path == "/healthz":
             return self._send(200, b'{"status":"ok"}\n', "application/json")
         if path in ("/favicon.svg", "/favicon.ico"):
@@ -2440,6 +2600,10 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(
                 200, _FAVICON_SVG, "image/svg+xml",
                 headers={"Cache-Control": "public, max-age=86400"})
+        if path == "/logout":
+            # Logout is idempotent and safe over GET (a menu link) — clears
+            # the session cookie and returns to the login page.
+            return self._handle_logout()
         if path == "/login":
             return self._send(200, self.ui.login_page(
                 next_url=query.get("next", ["/"])[0]))
@@ -2457,6 +2621,7 @@ class _Handler(BaseHTTPRequestHandler):
                 )
             return self._send(200, self.ui.login_page(next_url=path))
         self._identity = identity
+        _CTX.identity = identity
         role = identity["role"] if identity else "admin"
         csrf = identity["token"] if identity and identity["via"] == "session" else ""
 
@@ -2574,6 +2739,8 @@ class _Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length).decode("utf-8", "replace") if length else ""
         form = {k: v[0] for k, v in parse_qs(raw).items()}
         path = unquote(self.path.split("?", 1)[0])
+        _CTX.theme = self.ui.config.webui.get("theme")
+        _CTX.identity = None
 
         # Login/logout are their own auth flow.
         if path == "/login":
@@ -2582,6 +2749,7 @@ class _Handler(BaseHTTPRequestHandler):
             return self._handle_logout()
 
         identity = self._identify()
+        _CTX.identity = identity
 
         # Write API (JSON): Bearer token or session; no CSRF for token auth.
         if path.startswith("/api/"):

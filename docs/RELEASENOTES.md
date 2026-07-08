@@ -9,6 +9,25 @@ branch; `0.1.0` is the current package version.
 
 ## Unreleased
 
+### Added / changed — web UI polish & configurability
+
+- **Colour themes.** `webui.theme` selects `auto` (default, follows the OS),
+  `light`, `dark`, `sky`, `desert`, `autumn`, or `spring`; editable from the
+  Config page.
+- **Syslog transport is selectable** for the events sink: `events.syslog.
+  protocol` = `udp` (default), `tcp`, or `tls` (RFC 5425/6587; honours
+  `cafile`/`verify`).
+- **Config editor** now pre-fills sane example/default placeholders on nearly
+  every field, renders dropdowns for fixed-choice settings (transport,
+  theme, syslog protocol, roles, log level/format, …), and splits the former
+  "Web UI & SSO" panel into separate **Web UI** and **SSO** sections.
+- The menu bar shows **who is signed in** (username + role).
+- **Menu order:** Dashboard now comes before Devices; the two log views are
+  labelled **Backup log** and **Audit log**.
+- **Fixed:** clicking **Logout** in the menu (a GET link) rendered a
+  "not found" page — logout is now handled over GET and redirects to the
+  sign-in page.
+
 ### Added — data integrity, preservation & chain of custody
 
 A hardening batch focused on proving backups are correct, complete and

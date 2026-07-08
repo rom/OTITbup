@@ -64,6 +64,7 @@ encryption:               # encryption at rest for large offloaded artifacts
 webui:
   host: 127.0.0.1
   port: 8080
+  # theme: auto           # auto | light | dark | sky | desert | autumn | spring
   # Generate with: otitbup passwd
   # auth:
   #   username: admin
@@ -126,7 +127,10 @@ events:                   # fan out operational events to syslog / SNMP traps
   # syslog:
   #   address: 10.0.0.1
   #   port: 514
+  #   protocol: udp        # udp | tcp | tls  (RFC 5425 over TLS)
   #   facility: local0
+  #   # cafile: /etc/ssl/certs/ca-bundle.crt   # for protocol: tls
+  #   # verify: true                            # tls cert verification
   # snmp_trap:
   #   address: 10.0.0.2
   #   port: 162
