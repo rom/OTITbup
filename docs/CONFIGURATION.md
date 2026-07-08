@@ -114,7 +114,7 @@ and OT presets such as `juniper_junos`, `arista_eos`, `fortinet_fortigate`,
 `commands`, `port`, `scrub` set in `options` overrides the preset for that
 device. Web/SFTP/DNP3 appliance drivers exist alongside them (e.g.
 `yokogawa_web`, `honeywell_web`, `fanuc_cnc`, `bachmann_m1`,
-`br_automation`, `emerson_roc`); `otitbup drivers` lists all 105.
+`br_automation`, `emerson_roc`); `otitbup drivers` lists all 124.
 
 ## retention
 

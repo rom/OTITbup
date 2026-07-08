@@ -1,0 +1,115 @@
+# Hardened appliance for a regulated / high-assurance OT site.
+# Turns on every integrity and access control the tool offers:
+#   - Fernet-encrypted secrets AND blob store at rest (LUKS for the rest)
+#   - SSH-signed backup commits (tamper-evident, verifiable authorship)
+#   - RBAC users with per-site/zone scopes, plus LDAP + trusted-header SSO
+#   - a tamper-evident hash-chained audit log (otitbup verify-audit)
+#   - operational events fanned out to syslog AND SNMP traps
+#   - restrictive maintenance windows, strictly sequential polling
+# See examples/hardening-checklist.md for the companion checklist.
+
+data_dir: ./data
+
+secrets:
+  backend: encryptedfile        # or vault / cyberark for centralised secrets
+  path: secrets.enc
+  key_file: /etc/otitbup/secrets.key    # or OTITBUP_KEY in the unit's env
+
+git:
+  push: true
+  remote: git@git.corp.example:ot/backups.git
+  sign:
+    key_file: /etc/otitbup/commit-signing-ed25519   # SSH key; signs every commit
+    # verify later with: git log --show-signature
+
+encryption:
+  blob_key_file: /etc/otitbup/blob.key    # Fernet-encrypt offloaded artifacts
+  # The git repo, runstore.db and secrets are NOT covered here — the
+  # appliance disk MUST be LUKS-encrypted for defence in depth.
+
+webui:
+  host: 127.0.0.1               # keep bound to loopback; expose via the proxy
+  port: 8080
+  tls:
+    cert_file: webui-cert.pem   # otitbup certgen, or CA-issued PEMs
+    key_file: webui-key.pem
+  # Least-privilege users with scopes (globs over site/zone/name). Generate
+  # each hash with: otitbup passwd --username <name>
+  users:
+    - {username: secadmin, password_hash: "pbkdf2_sha256$600000$REPLACE$REPLACE", role: admin,    scopes: "*"}
+    - {username: pa-op,    password_hash: "pbkdf2_sha256$600000$REPLACE$REPLACE", role: operator, scopes: "plant-a/*"}
+    - {username: auditor,  password_hash: "pbkdf2_sha256$600000$REPLACE$REPLACE", role: viewer,   scopes: "*"}
+  # Enterprise SSO: an upstream proxy terminates OIDC/SAML and sets a header.
+  # ONLY enable behind such a proxy — the header is spoofable if the UI is
+  # reachable directly (which is why host stays on 127.0.0.1 above).
+  trusted_header: X-Forwarded-User
+  trusted_role_header: X-Forwarded-Role
+  trusted_default_role: viewer
+
+# Direct LDAP/AD login as a fallback (local users tried first). Needs
+# otitbup[ldap]. Groups map to roles.
+ldap:
+  url: ldaps://dc.corp.example
+  user_dn_template: "uid={username},ou=people,dc=corp,dc=example"
+  group_base: "ou=groups,dc=corp,dc=example"
+  default_role: viewer
+  role_map:
+    ot-admins: admin
+    ot-ops: operator
+
+# The scoped write API (POST /api/device/<qn>/{backup,verify}) is always
+# available; mint least-privilege Bearer tokens with, e.g.:
+#   otitbup token create ci --role operator --scopes "plant-a/*" --days 90
+# Tokens are stored sha256-hashed and shown once. Nothing to enable here.
+api: {}
+
+alerts:
+  stale_days: 3
+  min_interval: 3600
+  syslog:
+    address: 10.0.0.1
+    port: 514
+
+events:                         # tamper-evident audit is always on; also
+  syslog:                       # stream every operational event to the SIEM
+    address: 10.0.0.1
+    port: 514
+    facility: local0
+  snmp_trap:
+    address: 10.0.0.2
+    port: 162
+    community: ot-monitoring
+    enterprise_oid: 1.3.6.1.4.1.99999   # replace with YOUR IANA enterprise OID
+
+policy:
+  rules:
+    - id: no-telnet
+      description: telnet management enabled
+      severity: high
+      match: "transport input telnet"
+    - id: no-snmp-public
+      description: default SNMP community 'public'
+      severity: high
+      match: "snmp-server community public"
+
+sites:
+  - name: plant-a
+    zones:
+      - name: cell-1
+        maintenance_window: "02:00-04:00"   # narrow, off-peak window only
+        timezone: Europe/Berlin
+        max_concurrent: 1                    # strictly sequential (OT-safe)
+        devices:
+          - name: plc-01
+            driver: siemens_s7
+            address: 10.20.0.10
+            schedule: "0 3 * * *"            # cron: 03:00 daily, inside window
+            options:
+              rack: 0
+              slot: 2
+
+          - name: core-sw-01
+            driver: cisco_ios
+            address: 10.10.0.1
+            schedule: 2h
+            credentials: core-sw-01

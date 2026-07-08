@@ -79,6 +79,19 @@ code { font-size: .85rem; }
 .help:hover .pop, .help:focus .pop { visibility: visible; opacity: 1; }
 .ok { color: #1b7a2f; } .miss { color: #b3261e; }
 .strat { font-size: 1.05rem; padding: .3rem 0; }
+details { margin: .4rem 0; } summary { cursor: pointer; padding: .2rem 0; }
+table.cfg td { border: none; padding: .25rem .5rem; }
+table.cfg input { width: 22rem; max-width: 100%; }
+.cfg-inline { display: flex; flex-wrap: wrap; gap: .5rem; align-items: end;
+        margin: .4rem 0 .8rem; padding: .5rem; border: 1px solid #dde3e8;
+        border-radius: 6px; }
+label.inl { display: flex; flex-direction: column; font-size: .72rem;
+        color: #5b6570; text-transform: uppercase; letter-spacing: .03em; }
+label.inl input, label.inl select { width: 8rem; font-size: .85rem;
+        padding: .3rem; border: 1px solid #dde3e8; border-radius: 5px;
+        background: inherit; color: inherit; text-transform: none;
+        letter-spacing: normal; }
+button.danger { color: #b3261e; }
 .doc { line-height: 1.6; } .doc h1 { display: block; font-size: 1.5rem; }
 .doc h2 { border-bottom: 1px solid #dde3e8; padding-bottom: .3rem; }
 .doc blockquote { border-left: 3px solid #dde3e8; margin: .8rem 0;
@@ -121,7 +134,8 @@ def _page(title: str, body: str) -> bytes:
         f"<a href='/activity'>Activity</a><a href='/policy'>Policy</a>"
         f"<a href='/retention'>Retention</a><a href='/strategy'>Strategy</a>"
         f"<a href='/drivers'>Drivers</a><a href='/audit'>Audit</a>"
-        f"<a href='/users'>Users</a><a href='/help'>Help</a>"
+        f"<a href='/users'>Users</a><a href='/config'>Config</a>"
+        f"<a href='/help'>Help</a>"
         f"<a href='/logout'>Logout</a></nav></header>"
         f"{body}</body></html>"
     ).encode()
@@ -169,6 +183,148 @@ def _device_link_name(qualified_name: str) -> str:
 
 def _csrf(token: str) -> str:
     return f"<input type='hidden' name='csrf' value='{html.escape(token)}'>"
+
+
+# Admin-editable global config sections. Each field is
+# (dotted-path-within-section, label, type). type: str | int | bool.
+_SETTINGS_FORMS = [
+    {"section": "offsite", "title": "Offsite copy (external server / cloud)",
+     "fields": [
+         ("transport", "Transport (file | sftp | s3)", "str"),
+         ("key_file", "Encryption key file", "str"),
+         ("dir", "file: directory / mount", "str"),
+         ("host", "sftp: host", "str"), ("port", "sftp: port", "int"),
+         ("username", "sftp: username", "str"),
+         ("ssh_key_file", "sftp: SSH key file", "str"),
+         ("path", "sftp: remote path", "str"),
+         ("bucket", "s3: bucket", "str"), ("prefix", "s3: prefix", "str"),
+         ("region", "s3: region", "str"), ("endpoint", "s3: endpoint", "str"),
+         ("access_key", "s3: access key", "str"),
+         ("secret_key_file", "s3: secret key file", "str"),
+     ]},
+    {"section": "webui", "title": "Web UI & SSO",
+     "fields": [
+         ("host", "Bind host", "str"), ("port", "Bind port", "int"),
+         ("trusted_header", "SSO trusted user header", "str"),
+         ("trusted_role_header", "SSO trusted role header", "str"),
+         ("trusted_default_role", "SSO default role", "str"),
+         ("tls.cert_file", "TLS certificate file", "str"),
+         ("tls.key_file", "TLS key file", "str"),
+     ]},
+    {"section": "ldap", "title": "LDAP / Active Directory login",
+     "fields": [
+         ("url", "LDAP URL", "str"),
+         ("user_dn_template", "User DN template", "str"),
+         ("group_base", "Group search base", "str"),
+         ("default_role", "Default role", "str"),
+     ]},
+    {"section": "events", "title": "Events (syslog / SNMP traps)",
+     "fields": [
+         ("syslog.address", "syslog address", "str"),
+         ("syslog.port", "syslog port", "int"),
+         ("syslog.facility", "syslog facility", "str"),
+         ("snmp_trap.address", "SNMP trap address", "str"),
+         ("snmp_trap.port", "SNMP trap port", "int"),
+         ("snmp_trap.community", "SNMP community", "str"),
+         ("snmp_trap.enterprise_oid", "enterprise OID", "str"),
+     ]},
+    {"section": "logging", "title": "Logging",
+     "fields": [
+         ("level", "Level (debug|info|warning|error)", "str"),
+         ("format", "Format (text|json)", "str"),
+         ("file", "Log file (rotates)", "str"),
+         ("max_bytes", "Max bytes", "int"),
+         ("backups", "Rotations kept", "int"),
+     ]},
+    {"section": "netbox", "title": "Integration: NetBox",
+     "fields": [("url", "URL", "str"), ("token", "API token", "str")]},
+    {"section": "tickets", "title": "Integration: ticketing",
+     "fields": [
+         ("backend", "Backend (servicenow|jira|rt|generic)", "str"),
+         ("url", "URL", "str"), ("username", "Username", "str"),
+         ("password", "Password / API token", "str"),
+     ]},
+    {"section": "encryption", "title": "Encryption at rest",
+     "fields": [("blob_key_file", "Blob-store key file", "str")]},
+    {"section": "git", "title": "Git remote & signed history",
+     "fields": [
+         ("remote", "Push remote", "str"),
+         ("push", "Push after each backup", "bool"),
+         ("sign.key_file", "Commit signing key (SSH)", "str"),
+     ]},
+]
+
+
+def _dig(data: dict, dotted: str):
+    """Read a dotted path (a.b.c) out of a nested dict; '' if absent."""
+    cur = data
+    for part in dotted.split("."):
+        if not isinstance(cur, dict):
+            return ""
+        cur = cur.get(part)
+        if cur is None:
+            return ""
+    return cur
+
+
+def _nest(dotted: str, value, into: dict) -> None:
+    """Set into[a][b][c] = value for a dotted path 'a.b.c'."""
+    parts = dotted.split(".")
+    cur = into
+    for part in parts[:-1]:
+        cur = cur.setdefault(part, {})
+    cur[parts[-1]] = value
+
+
+def _labeled(name: str, value, placeholder: str) -> str:
+    """A small labelled text input for the inline inventory forms."""
+    safe = html.escape(str(value)) if value not in (None, "") else ""
+    return (f"<label class='inl'>{html.escape(name)}"
+            f"<input name='{name}' value='{safe}' "
+            f"placeholder='{html.escape(placeholder)}'></label>")
+
+
+def _driver_select(name: str, current: str, drivers: list[str]) -> str:
+    opts = ["<option value=''>— driver —</option>"]
+    for drv in drivers:
+        sel = " selected" if drv == current else ""
+        opts.append(f"<option value='{html.escape(drv)}'{sel}>"
+                    f"{html.escape(drv)}</option>")
+    return (f"<label class='inl'>driver<select name='{name}'>"
+            + "".join(opts) + "</select></label>")
+
+
+def _retention_from_form(form: dict) -> dict:
+    """Pull retention integer fields out of a submitted form (blank -> unset)."""
+    out: dict = {}
+    for key in ("keep_versions", "keep_days", "large_file_threshold"):
+        val = form.get(key, "")
+        if val not in ("", None):
+            try:
+                out[key] = int(val)
+            except ValueError:
+                pass
+    return out
+
+
+def _inventory_fields(form: dict, is_device: bool) -> dict:
+    """Build the fields dict for a device or zone edit from a submitted form.
+    Blank values delete the key; retention is nested."""
+    fields: dict = {}
+    if is_device:
+        keys = ("name", "driver", "address", "schedule", "credentials")
+    else:
+        keys = ("maintenance_window", "timezone")
+    for key in keys:
+        if key in form:
+            fields[key] = form.get(key, "")
+    if not is_device and form.get("max_concurrent"):
+        try:
+            fields["max_concurrent"] = int(form["max_concurrent"])
+        except ValueError:
+            pass
+    fields["retention"] = _retention_from_form(form)
+    return fields
 
 
 def _help(text: str) -> str:
@@ -477,6 +633,292 @@ class WebUI:
             actor=actor, detail=username,
         )
         return True, f"password changed for {username}"
+
+    # -------------------------------------------------- config editor
+
+    def _config_editable(self) -> bool:
+        return bool(self.config_path)
+
+    def config_page(self, csrf: str) -> bytes:
+        """Admin config editor: global settings plus per-site/zone/device
+        inventory editing. Writes back to the YAML config (validated,
+        with a .bak), then reloads."""
+        from . import configedit
+        if not self._config_editable():
+            return _page("otitbup — configuration",
+                         "<h2>Configuration</h2><p class='sev-high'>The web "
+                         "process was started without <code>-c &lt;config&gt;"
+                         "</code>, so it cannot locate the config file to "
+                         "edit.</p>")
+        try:
+            raw = configedit.load_raw(self.config_path)
+        except Exception as exc:
+            return _page("otitbup — configuration",
+                         f"<h2>Configuration</h2><p class='sev-high'>cannot "
+                         f"read config: {html.escape(str(exc))}</p>")
+
+        # Global settings sections.
+        sections = []
+        for spec in _SETTINGS_FORMS:
+            current = raw.get(spec["section"]) or {}
+            inputs = []
+            for dotted, label, ftype in spec["fields"]:
+                value = _dig(current, dotted)
+                inputs.append(self._config_input(dotted, label, ftype, value))
+            sections.append(
+                f"<details><summary>{html.escape(spec['title'])}</summary>"
+                f"<form method='post' action='/config/global'>{_csrf(csrf)}"
+                f"<input type='hidden' name='section' value='{spec['section']}'>"
+                "<table class='cfg'>" + "".join(inputs) + "</table>"
+                "<button type='submit'>Save</button></form></details>"
+            )
+
+        body = [
+            "<h2>Configuration</h2>",
+            "<p class='muted'>Admin-only. Changes are validated, written to "
+            "the config file (previous kept as <code>.bak</code>) and reloaded"
+            ". Comments in the file are not preserved on save. "
+            "<a href='/users'>User management &rarr;</a></p>",
+            "<h3>Global settings</h3>",
+            *sections,
+            self._inventory_editor(raw, csrf),
+        ]
+        return _page("otitbup — configuration", "".join(body))
+
+    def _config_input(self, name: str, label: str, ftype: str, value) -> str:
+        safe = html.escape(str(value)) if value not in (None, "") else ""
+        if ftype == "bool":
+            checked = " checked" if value in (True, "true", "1", 1) else ""
+            field = (f"<input type='checkbox' name='{name}' value='1'"
+                     f"{checked}>")
+        elif ftype == "int":
+            field = (f"<input name='{name}' value='{safe}' inputmode='numeric'>")
+        else:
+            field = f"<input name='{name}' value='{safe}'>"
+        return (f"<tr><td><label>{html.escape(label)}</label></td>"
+                f"<td>{field}</td></tr>")
+
+    def _inventory_editor(self, raw: dict, csrf: str) -> str:
+        from .drivers import available_drivers
+        drivers = available_drivers()
+        out = ["<h3>Inventory</h3>"]
+        for site in raw.get("sites", []) or []:
+            sname = site.get("name", "")
+            out.append(f"<details><summary><b>site: "
+                       f"{html.escape(sname)}</b></summary>")
+            out.append(self._retention_form(
+                "/config/site", {"site": sname}, site.get("retention") or {},
+                csrf, extra=[]))
+            for zone in site.get("zones", []) or []:
+                zname = zone.get("name", "")
+                out.append(f"<details><summary>zone: "
+                           f"{html.escape(zname)}</summary>")
+                out.append(self._zone_form(sname, zname, zone, csrf))
+                for dev in zone.get("devices", []) or []:
+                    out.append(self._device_form(
+                        sname, zname, dev, drivers, csrf))
+                out.append(self._device_add_form(sname, zname, drivers, csrf))
+                out.append("</details>")
+            out.append(self._zone_add_form(sname, csrf))
+            out.append("</details>")
+        out.append(self._site_add_form(csrf))
+        return "".join(out)
+
+    def _zone_form(self, site, zone, z, csrf) -> str:
+        r = z.get("retention") or {}
+        return (
+            "<form method='post' action='/config/zone' class='cfg-inline'>"
+            + _csrf(csrf)
+            + f"<input type='hidden' name='site' value='{html.escape(site)}'>"
+            + f"<input type='hidden' name='zone' value='{html.escape(zone)}'>"
+            + _labeled("maintenance_window",
+                       z.get("maintenance_window") or "", "18:00-06:00")
+            + _labeled("timezone", z.get("timezone") or "", "Europe/Berlin")
+            + _labeled("max_concurrent", z.get("max_concurrent") or "", "1")
+            + _labeled("keep_versions", r.get("keep_versions") or "", "0")
+            + _labeled("keep_days", r.get("keep_days") or "", "0")
+            + "<button type='submit'>Save zone</button></form>"
+        )
+
+    def _device_form(self, site, zone, d, drivers, csrf) -> str:
+        r = d.get("retention") or {}
+        name = d.get("name", "")
+        return (
+            "<form method='post' action='/config/device' class='cfg-inline'>"
+            + _csrf(csrf)
+            + f"<input type='hidden' name='site' value='{html.escape(site)}'>"
+            + f"<input type='hidden' name='zone' value='{html.escape(zone)}'>"
+            + f"<input type='hidden' name='orig' value='{html.escape(name)}'>"
+            + f"<b>{html.escape(name)}</b> "
+            + _labeled("name", name, "name")
+            + _driver_select("driver", d.get("driver", ""), drivers)
+            + _labeled("address", d.get("address") or "", "10.0.0.1")
+            + _labeled("schedule", d.get("schedule") or "", "12h or cron")
+            + _labeled("credentials", d.get("credentials") or "", "secret key")
+            + _labeled("keep_versions", r.get("keep_versions") or "", "0")
+            + _labeled("keep_days", r.get("keep_days") or "", "0")
+            + "<button type='submit'>Save</button>"
+            + "<button type='submit' formaction='/config/device-delete' "
+            "class='danger' "
+            "onclick=\"return confirm('Delete device?')\">Delete</button>"
+            "</form>"
+        )
+
+    def _device_add_form(self, site, zone, drivers, csrf) -> str:
+        return (
+            "<form method='post' action='/config/device-add' class='cfg-inline'>"
+            + _csrf(csrf)
+            + f"<input type='hidden' name='site' value='{html.escape(site)}'>"
+            + f"<input type='hidden' name='zone' value='{html.escape(zone)}'>"
+            + "add device: " + _labeled("name", "", "name")
+            + _driver_select("driver", "", drivers)
+            + _labeled("address", "", "address")
+            + _labeled("schedule", "", "12h")
+            + _labeled("credentials", "", "secret key")
+            + "<button type='submit'>Add device</button></form>"
+        )
+
+    def _zone_add_form(self, site, csrf) -> str:
+        return (
+            "<form method='post' action='/config/zone-add' class='cfg-inline'>"
+            + _csrf(csrf)
+            + f"<input type='hidden' name='site' value='{html.escape(site)}'>"
+            + "add zone: " + _labeled("zone", "", "zone name")
+            + "<button type='submit'>Add zone</button></form>"
+        )
+
+    def _site_add_form(self, csrf) -> str:
+        return (
+            "<form method='post' action='/config/site-add' class='cfg-inline'>"
+            + _csrf(csrf) + "add site: " + _labeled("site", "", "site name")
+            + "<button type='submit'>Add site</button></form>"
+        )
+
+    def _retention_form(self, action, hidden, r, csrf, extra) -> str:
+        h = "".join(
+            f"<input type='hidden' name='{k}' value='{html.escape(str(v))}'>"
+            for k, v in hidden.items())
+        return (
+            f"<form method='post' action='{action}' class='cfg-inline'>"
+            + _csrf(csrf) + h
+            + "retention: " + _labeled("keep_versions", r.get("keep_versions")
+                                       or "", "0")
+            + _labeled("keep_days", r.get("keep_days") or "", "0")
+            + _labeled("large_file_threshold",
+                       r.get("large_file_threshold") or "", "1048576")
+            + "<button type='submit'>Save</button></form>"
+        )
+
+    # ----------------------------------------------- config edit actions
+
+    def _do_config(self, fn, actor: str, back: str = "/config"):
+        """Run a configedit mutation, then reload. Returns (ok, msg, back)."""
+        from . import configedit
+        if not self._config_editable():
+            return False, "config path unknown (started without -c)", back
+        try:
+            detail = fn()
+        except configedit.ConfigEditError as exc:
+            return False, str(exc), back
+        except Exception as exc:
+            return False, f"edit failed: {exc}", back
+        ok, msg = self.reload_config()
+        if self.runstore is not None:
+            import time
+            try:
+                self.runstore.audit(time.time(), "config.edit", actor=actor,
+                                    detail=detail or "")
+            except Exception:
+                pass
+        return True, (detail or msg), back
+
+    def action_config_global(self, section: str, form: dict, actor: str):
+        from . import configedit
+        spec = next((s for s in _SETTINGS_FORMS
+                     if s["section"] == section), None)
+        if spec is None:
+            return False, "unknown settings section", "/config"
+        fields: dict = {}
+        for dotted, _label, ftype in spec["fields"]:
+            if ftype == "bool":
+                _nest(dotted, form.get(dotted) == "1", fields)
+            else:
+                raw_val = form.get(dotted, "")
+                if ftype == "int" and raw_val not in ("", None):
+                    try:
+                        raw_val = int(raw_val)
+                    except ValueError:
+                        return False, f"{dotted} must be a number", "/config"
+                _nest(dotted, raw_val, fields)
+        return self._do_config(
+            lambda: (configedit.set_global(self.config_path, section, fields)
+                     or f"saved {section} settings"),
+            actor)
+
+    def action_config_device(self, form: dict, actor: str):
+        from . import configedit
+        site, zone = form.get("site", ""), form.get("zone", "")
+        orig = form.get("orig", "")
+        fields = _inventory_fields(form, is_device=True)
+        return self._do_config(
+            lambda: "saved device " + configedit.set_device(
+                self.config_path, site, zone, orig, fields), actor)
+
+    def action_config_device_add(self, form: dict, actor: str):
+        from . import configedit
+        site, zone = form.get("site", ""), form.get("zone", "")
+        dev = {"name": form.get("name", ""), "driver": form.get("driver", "")}
+        for key in ("address", "schedule", "credentials"):
+            if form.get(key):
+                dev[key] = form[key]
+        if not dev["name"] or not dev["driver"]:
+            return False, "name and driver are required", "/config"
+        return self._do_config(
+            lambda: "added device " + configedit.add_device(
+                self.config_path, site, zone, dev), actor)
+
+    def action_config_device_delete(self, form: dict, actor: str):
+        from . import configedit
+        site, zone = form.get("site", ""), form.get("zone", "")
+        name = form.get("orig", "")
+        return self._do_config(
+            lambda: (configedit.delete_device(self.config_path, site, zone,
+                                              name)
+                     or f"deleted {site}/{zone}/{name}"), actor)
+
+    def action_config_zone(self, form: dict, actor: str):
+        from . import configedit
+        site, zone = form.get("site", ""), form.get("zone", "")
+        fields = _inventory_fields(form, is_device=False)
+        return self._do_config(
+            lambda: (configedit.set_zone(self.config_path, site, zone, fields)
+                     or f"saved zone {site}/{zone}"), actor)
+
+    def action_config_site(self, form: dict, actor: str):
+        from . import configedit
+        site = form.get("site", "")
+        fields = {"retention": _retention_from_form(form)}
+        return self._do_config(
+            lambda: (configedit.set_site(self.config_path, site, fields)
+                     or f"saved site {site}"), actor)
+
+    def action_config_zone_add(self, form: dict, actor: str):
+        from . import configedit
+        site, zone = form.get("site", ""), form.get("zone", "")
+        if not zone:
+            return False, "zone name required", "/config"
+        return self._do_config(
+            lambda: (configedit.add_zone(self.config_path, site, zone)
+                     or f"added zone {site}/{zone}"), actor)
+
+    def action_config_site_add(self, form: dict, actor: str):
+        from . import configedit
+        site = form.get("site", "")
+        if not site:
+            return False, "site name required", "/config"
+        return self._do_config(
+            lambda: (configedit.add_site(self.config_path, site)
+                     or f"added site {site}"), actor)
 
     # ------------------------------------------------------------ pages
 
@@ -1512,6 +1954,19 @@ class _Handler(BaseHTTPRequestHandler):
         self.ui = ui
         super().__init__(*args, **kwargs)
 
+    def handle(self):
+        """A client that closes its connection abruptly (a closed browser
+        tab, a dropped SSE stream, a load-balancer health probe) makes the
+        stdlib server raise ConnectionResetError/BrokenPipeError from deep
+        inside request parsing and dump a full traceback. That is benign
+        network noise, not a fault — swallow it and log a single debug line
+        instead of a scary stack trace."""
+        try:
+            super().handle()
+        except (ConnectionResetError, BrokenPipeError,
+                ConnectionAbortedError, TimeoutError) as exc:
+            log.debug("client connection dropped: %s", exc)
+
     def log_message(self, fmt, *args):  # route to logging, not stderr
         log.debug(fmt, *args)
 
@@ -1744,14 +2199,17 @@ class _Handler(BaseHTTPRequestHandler):
 
         # Role-gated pages (admin only).
         from .auth import role_rank
-        if path in ("/audit", "/users"):
+        if path in ("/audit", "/users", "/config"):
             if self.ui.users and role_rank(role) < role_rank("admin"):
                 return self._send(
                     403, _page("forbidden", "<p>admin role required</p>")
                 )
-            page = self.ui.audit() if path == "/audit" else self.ui.users_page(
-                identity or {}, csrf
-            )
+            if path == "/audit":
+                page = self.ui.audit()
+            elif path == "/config":
+                page = self.ui.config_page(csrf)
+            else:
+                page = self.ui.users_page(identity or {}, csrf)
             return self._send(200, page)
 
         content: bytes | None = None
@@ -1935,6 +2393,30 @@ class _Handler(BaseHTTPRequestHandler):
                 return False, "admin role required", "/"
             ok, msg = self.ui.reload_config()
             return ok, msg, "/"
+        if path.startswith("/config/"):
+            if not need("admin"):
+                return False, "admin role required", "/config"
+            handlers = {
+                "/config/global": lambda: self.ui.action_config_global(
+                    form.get("section", ""), form, actor),
+                "/config/device": lambda: self.ui.action_config_device(
+                    form, actor),
+                "/config/device-add": lambda: self.ui.action_config_device_add(
+                    form, actor),
+                "/config/device-delete":
+                    lambda: self.ui.action_config_device_delete(form, actor),
+                "/config/zone": lambda: self.ui.action_config_zone(form, actor),
+                "/config/site": lambda: self.ui.action_config_site(form, actor),
+                "/config/zone-add": lambda: self.ui.action_config_zone_add(
+                    form, actor),
+                "/config/site-add": lambda: self.ui.action_config_site_add(
+                    form, actor),
+            }
+            handler = handlers.get(path)
+            if handler is None:
+                return None, "", "/config"
+            ok, msg, back = handler()
+            return ok, msg, back
         if path == "/report":
             if not need("operator"):
                 return False, "operator role required", "/health"

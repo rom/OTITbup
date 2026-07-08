@@ -1,0 +1,102 @@
+# Electrical substation: protection IEDs, RTUs and station-bus gear.
+# Substations are latency-sensitive and protocol-fragile, so every zone
+# runs strictly sequential (max_concurrent: 1) and is polled off-peak in
+# the station's local timezone. Fidelity varies by protocol: IEC 61850 MMS
+# and DNP3 give identity + change fingerprint (version the full relay
+# settings via engineering-tool exports with generic_file); the RTU500 and
+# SICAM web servers expose status/parameter pages.
+
+data_dir: ./data
+
+secrets:
+  backend: encryptedfile    # substation creds: keep them Fernet-encrypted
+  path: secrets.enc
+  key_file: otitbup.key     # or set OTITBUP_KEY in the service environment
+
+retention:
+  keep_versions: 100        # relay settings change rarely but matter forever
+  keep_days: 3650
+
+alerts:
+  stale_days: 14            # daily-polled RTUs; two weeks silent = investigate
+
+sites:
+  - name: substation-north
+    timezone: America/Chicago       # inherited by zones without their own
+    zones:
+      - name: protection            # bay protection relays / IEDs
+        maintenance_window: "23:00-04:00"
+        max_concurrent: 1           # never open two IED sessions at once
+        devices:
+          - name: relay-bay1
+            driver: iec61850_mms    # MMS Identify (vendor/model/rev) — experimental
+            address: 10.50.1.11
+            schedule: 1d
+
+          - name: relay-bay2
+            driver: iec61850_mms
+            address: 10.50.1.12
+            schedule: 1d
+
+          - name: relay-bay1-scl    # the real settings: SCL/CID export folder
+            driver: generic_file
+            schedule: 6h
+            options:
+              path: /srv/exports/relay-bay1
+              patterns: ["**/*.scd", "**/*.cid", "**/*.icd"]
+
+          - name: sel-rtac-01
+            driver: sel_terminal    # SEL RTAC / relays over SSH (ID/STA/SHO)
+            address: 10.50.1.20
+            schedule: 1d
+            credentials: sel-rtac-01
+
+      - name: rtus                  # station RTUs / gateways
+        maintenance_window: "23:00-04:00"
+        max_concurrent: 1
+        devices:
+          - name: dnp3-rtu-01
+            driver: generic_dnp3    # any DNP3 outstation (stdlib)
+            address: 10.50.2.10
+            schedule: 1d
+            options:
+              outstation: 1
+              master: 3
+
+          - name: rtu520-01
+            driver: abb_rtu520      # ABB RTU500-series web server
+            address: 10.50.2.20
+            schedule: 1d
+            credentials: rtu520-01
+            options:
+              urls:
+                - "https://{address}/status"      # match your firmware's paths
+              verify_tls: false                   # device self-signed cert
+
+          - name: sicam-01
+            driver: siemens_sicam   # SICAM A8000 web endpoints
+            address: 10.50.2.30
+            schedule: 1d
+            credentials: sicam-01
+            options:
+              urls:
+                - "https://{address}/diag/parameters"
+              verify_tls: false
+
+          - name: flowcomp-01
+            driver: emerson_roc     # Emerson ROC/FloBoss over DNP3
+            address: 10.50.2.40
+            schedule: 1d
+            options:
+              outstation: 4
+              master: 3
+
+      - name: station-net           # station-bus switch (managed)
+        maintenance_window: "23:00-04:00"
+        max_concurrent: 1
+        devices:
+          - name: stn-sw-01
+            driver: ruggedcom_ros   # RUGGEDCOM ROS (config.csv) — needs otitbup[ssh]
+            address: 10.50.0.1
+            schedule: 4h
+            credentials: stn-sw-01

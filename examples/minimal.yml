@@ -1,0 +1,26 @@
+# Smallest useful otitbup config: one site, one zone, two devices.
+# Everything else takes its default (retention, plainfile secrets, loopback
+# web UI, sequential polling). Copy this, edit the two addresses, add a
+# secrets.yml if a device needs a login, then `otitbup validate && backup`.
+
+data_dir: ./data          # backup git repo, next to this file
+
+sites:
+  - name: plant
+    zones:
+      - name: line-1
+        # No maintenance_window: polled any time. max_concurrent defaults
+        # to 1 (strictly sequential — the OT-safe default).
+        devices:
+          - name: plc-01
+            driver: schneider_modbus      # stdlib-only, no extra install
+            address: 10.0.0.10
+            schedule: 12h                 # interval form: Ns/Nm/Nh/Nd
+
+          - name: rtu-01
+            driver: generic_dnp3          # any DNP3 outstation (stdlib)
+            address: 10.0.0.20
+            schedule: 1d
+            options:
+              outstation: 1
+              master: 3

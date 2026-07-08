@@ -1,0 +1,120 @@
+# IT/OT network fleet: switches, routers and firewalls only.
+# Every device uses a vendor SSH profile (netmiko device_type + the right
+# capture commands + volatile-line scrubbing are preset) and a credential
+# from secrets.yml. Needs otitbup[ssh]. Scheduling keeps backup traffic in
+# a nightly maintenance window; the zone caps concurrency so we never open
+# more than two sessions into the management network at once.
+
+data_dir: ./data
+
+secrets:
+  backend: plainfile        # switch to encryptedfile/vault/cyberark later
+  path: secrets.yml
+
+retention:
+  keep_versions: 60         # network configs are tiny; keep plenty
+  keep_days: 730
+
+alerts:
+  stale_days: 3             # switches back up hourly — flag a 3-day gap fast
+  min_interval: 3600
+
+policy:                     # lint captured configs for insecure settings
+  rules:
+    - id: no-telnet
+      description: telnet (unencrypted) management enabled
+      severity: high
+      match: "transport input telnet"
+    - id: require-ntp
+      description: no NTP server configured
+      severity: low
+      absent: "ntp server"
+
+sites:
+  - name: campus
+    zones:
+      - name: core
+        maintenance_window: "01:00-05:00"   # only poll in the change window
+        timezone: Europe/Berlin
+        max_concurrent: 2                    # at most 2 sessions into core
+        devices:
+          - name: core-sw-01
+            driver: cisco_ios
+            address: 10.10.0.1
+            schedule: 1h
+            credentials: core-sw-01
+
+          - name: core-sw-02
+            driver: arista_eos
+            address: 10.10.0.2
+            schedule: 1h
+            credentials: core-sw-02
+
+          - name: dist-rtr-01
+            driver: juniper_junos
+            address: 10.10.0.3
+            schedule: 1h
+            credentials: dist-rtr-01
+
+          - name: agg-sw-01
+            driver: hpe_procurve
+            address: 10.10.0.4
+            schedule: 1h
+            credentials: agg-sw-01
+
+      - name: edge
+        maintenance_window: "01:00-05:00"
+        timezone: Europe/Berlin
+        max_concurrent: 1                    # firewalls: strictly sequential
+        devices:
+          - name: perim-fw-01
+            driver: fortinet_fortigate
+            address: 10.10.1.1
+            schedule: 4h
+            credentials: perim-fw-01
+
+          - name: perim-fw-02
+            driver: paloalto_panos
+            address: 10.10.1.2
+            schedule: 4h
+            credentials: perim-fw-02
+
+          - name: dc-fw-01
+            driver: cisco_asa               # needs enable_secret in secrets
+            address: 10.10.1.3
+            schedule: 4h
+            credentials: dc-fw-01
+
+      - name: ot-cell
+        maintenance_window: "22:00-06:00"   # tighter window near production
+        timezone: Europe/Berlin
+        max_concurrent: 1
+        devices:
+          - name: cell-sw-01
+            driver: siemens_scalance        # SCALANCE X/XB/XC/XR
+            address: 10.20.0.1
+            schedule: 2h
+            credentials: cell-sw-01
+
+          - name: ring-sw-01
+            driver: hirschmann_hios         # Hirschmann/Belden BOBCAT/RSP
+            address: 10.20.0.2
+            schedule: 2h
+            credentials: ring-sw-01
+
+          - name: field-sw-01
+            driver: moxa_switch             # Moxa EDS/EDR managed switches
+            address: 10.20.0.3
+            schedule: 2h
+            credentials: field-sw-01
+
+          - name: other-mgd-01
+            driver: generic_ssh             # anything netmiko can reach
+            address: 10.20.0.9
+            schedule: 1d
+            credentials: other-mgd-01
+            options:
+              device_type: hp_comware
+              commands:
+                - display current-configuration
+                - display version
