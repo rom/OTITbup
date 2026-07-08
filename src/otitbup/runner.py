@@ -17,8 +17,8 @@ from pathlib import Path
 from .alerts import AlertManager
 from .blobstore import BlobStore
 from .drivers import get_driver
-from .events import (BACKUP_ERROR, BACKUP_START, BACKUP_STOP, EventBus,
-                     NullEventBus)
+from .events import (BACKUP_ERROR, BACKUP_START, BACKUP_STOP,
+                     CHANGE_UNEXPECTED, EventBus, NullEventBus)
 from .gitstore import GitStore
 from .models import AppConfig, Device
 from .runstore import RunRecord, RunStore, default_runstore
@@ -116,6 +116,13 @@ class Runner:
             self.alerts.notify(
                 f"otitbup: UNEXPECTED changes on {names}", body
             )
+            for r in unexpected:
+                # Distinct event so ticketing/SNMP can target it.
+                self.events.emit(
+                    CHANGE_UNEXPECTED,
+                    f"unexpected change on {r.device} (commit {r.commit})",
+                    severity="warning", detail=r.device,
+                )
         if expected:
             names = ", ".join(r.device for r in expected)
             body = "\n".join(

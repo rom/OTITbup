@@ -1,0 +1,28 @@
+# Runs the scheduler and the web UI as two services sharing one state
+# volume (the git repo, blob store and run store live under /var/lib/otitbup).
+#   docker compose -f packaging/docker/docker-compose.yml up -d
+services:
+  daemon:
+    build:
+      context: ../..
+      dockerfile: packaging/docker/Dockerfile
+    command: ["daemon"]
+    restart: unless-stopped
+    volumes:
+      - otitbup-state:/var/lib/otitbup
+      - ./config:/etc/otitbup:ro
+
+  web:
+    build:
+      context: ../..
+      dockerfile: packaging/docker/Dockerfile
+    command: ["serve", "--host", "0.0.0.0"]
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - otitbup-state:/var/lib/otitbup
+      - ./config:/etc/otitbup:ro
+
+volumes:
+  otitbup-state:

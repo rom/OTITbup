@@ -229,6 +229,23 @@ PROFILES: dict[str, dict[str, Any]] = {
         "commands": ["ID", "STA", "SHO"],
         "scrub": [r"Date\s*[=:]", r"Time\s*[=:]", r"[Uu]ptime"],
     },
+    # ------------------------------------------------------- Netcontrol
+    "netcontrol_rtu": {
+        # Netcontrol Netcon 100/500/3000 substation RTUs/gateways expose a
+        # Linux-style CLI over SSH. Config lives in files; adjust the
+        # commands to your firmware. These devices also speak DNP3,
+        # IEC 60870-5-104 and IEC 61850 (use generic_dnp3 / iec61850_mms)
+        # and have a web interface (generic_http).
+        "description": "Netcontrol Netcon RTUs/gateways (SSH CLI) — also "
+                       "reachable via generic_dnp3 / iec61850_mms / "
+                       "generic_http",
+        "device_type": "linux",
+        "commands": [
+            "cat /etc/netcon/version 2>/dev/null || cat /etc/version",
+            "cat /etc/netcon/*.conf 2>/dev/null",
+        ],
+        "scrub": [r"[Uu]ptime", r"[Tt]imestamp"],
+    },
     # ------------------------------------------------------------- Omron
     "omron_switch": {
         # Omron industrial ethernet switches; many models are web-managed

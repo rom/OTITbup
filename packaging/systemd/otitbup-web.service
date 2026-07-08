@@ -1,0 +1,25 @@
+[Unit]
+Description=otitbup web UI
+Documentation=https://github.com/rom/OTITbup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=otitbup
+Group=otitbup
+WorkingDirectory=/var/lib/otitbup
+ExecStart=/opt/otitbup/venv/bin/otitbup -c /etc/otitbup/otitbup.yml serve
+Restart=on-failure
+RestartSec=10
+
+# Liveness: systemd/monitoring can poll http(s)://<host>:<port>/healthz
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/otitbup
+StateDirectory=otitbup
+
+[Install]
+WantedBy=multi-user.target

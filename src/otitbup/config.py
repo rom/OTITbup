@@ -132,4 +132,5 @@ def load_config(path: str | Path) -> AppConfig:
         policy=raw.get("policy") or {},
         reports=raw.get("reports") or {},
         events=raw.get("events") or {},
+        tickets=raw.get("tickets") or {},
     )

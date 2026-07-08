@@ -138,6 +138,13 @@ def test_retention_page_shows_policies(server):
     assert "Offload threshold" in text
 
 
+def test_device_page_shows_health_timeline(server):
+    base, _, device = server
+    # The server fixture recorded a run, so the timeline renders.
+    _, _, body = _get(base + "/device/" + device.qualified_name)
+    assert "Health timeline" in body.decode()
+
+
 def test_device_page_shows_retention_policy(server):
     base, _, _ = server
     _, _, body = _get(base + "/device/plant-a/cell-1/plc-01")
