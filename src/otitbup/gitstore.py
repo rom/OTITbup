@@ -182,6 +182,33 @@ class GitStore:
             check=False,
         )
 
+    def diff_between(self, device: Device, base: str, head: str) -> str:
+        """Diff a device's tree between any two commits (base..head)."""
+        return self._git(
+            "diff", "--stat", "--patch", base, head, "--", device.path,
+            check=False,
+        )
+
+    def search(
+        self, pattern: str, commit: str = "HEAD", ignore_case: bool = True,
+    ) -> list[tuple[str, int, str]]:
+        """git grep over the given commit's tree — i.e. across the latest
+        backup of every device. Returns (repo_path, line_no, line)."""
+        args = ["grep", "-n", "-I"]
+        if ignore_case:
+            args.append("-i")
+        args += ["-e", pattern, commit]
+        out = self._git(*args, check=False)
+        results = []
+        for line in out.splitlines():
+            # Format: <commit>:<path>:<lineno>:<text>
+            parts = line.split(":", 3)
+            if len(parts) == 4:
+                _c, path, lineno, text = parts
+                if lineno.isdigit():
+                    results.append((path, int(lineno), text))
+        return results
+
     def history(self, device: Device | None = None, limit: int = 20) -> str:
         args = ["log", f"-{limit}", "--format=%h  %ad  %s", "--date=iso"]
         if device:

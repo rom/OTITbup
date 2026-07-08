@@ -202,6 +202,83 @@ def test_policy_page(server):
     assert "policy" in body.decode().lower()
 
 
+def test_search_page(server):
+    base, store, device = server
+    store.write_and_commit(device, [Artifact(
+        name="show_running_config.txt", data=b"hostname plc-01\nvlan 77\n")])
+    status, _, body = _get(base + "/search?q=vlan+77")
+    text = body.decode()
+    assert status == 200
+    assert "vlan 77" in text
+    assert "match" in text.lower()
+
+
+def test_drift_page(server):
+    base, _, _ = server
+    status, _, body = _get(base + "/drift")
+    assert status == 200
+    assert "drift" in body.decode().lower()
+
+
+def test_compare_view(server):
+    base, store, device = server
+    commits = store.device_commits(device)
+    assert len(commits) >= 2
+    base_c, head_c = commits[1][0], commits[0][0]
+    status, _, body = _get(
+        base + f"/device/{device.qualified_name}/compare?base={base_c}&head={head_c}"
+    )
+    assert status == 200
+    assert "v2" in body.decode()
+
+
+def test_audit_log_records_and_shows(server):
+    base, _, _ = server
+    _get(base + "/health")            # generate an auditable view
+    status, _, body = _get(base + "/audit")
+    assert status == 200
+    assert "/health" in body.decode()
+
+
+def test_multiuser_auth_and_role_gate(config_file, tmp_path):
+    from otitbup.auth import hash_password
+    from otitbup.runstore import RunStore
+    config = load_config(config_file)
+    store = GitStore(config.data_dir)
+    store.ensure_repo()
+    users = {
+        "admin": {"password_hash": hash_password("ap", 1000), "role": "admin"},
+        "viewer": {"password_hash": hash_password("vp", 1000), "role": "viewer"},
+    }
+    ui = WebUI(config, store, users=users, runstore=RunStore(tmp_path / "r.db"))
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), partial(_Handler, ui))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+    def _req(user, pw, path):
+        req = urllib.request.Request(
+            base + path,
+            headers={"Authorization": "Basic " + __import__("base64")
+                     .b64encode(f"{user}:{pw}".encode()).decode()},
+        )
+        return opener.open(req, timeout=5)
+
+    try:
+        # viewer can see /health but not /audit (admin only).
+        assert _req("viewer", "vp", "/health").status == 200
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _req("viewer", "vp", "/audit")
+        assert exc.value.code == 403
+        assert _req("admin", "ap", "/audit").status == 200
+        # bad password -> 401
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _req("viewer", "wrong", "/health")
+        assert exc.value.code == 401
+    finally:
+        httpd.shutdown()
+
+
 def test_unknown_routes_404(server):
     base, _, _ = server
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))

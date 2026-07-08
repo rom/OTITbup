@@ -20,6 +20,7 @@ pip install -e .[ssh]          # + netmiko for network equipment
 cp examples/otitbup.yml examples/secrets.yml .
 $EDITOR otitbup.yml secrets.yml
 
+otitbup init                   # scaffold a starter otitbup.yml + secrets.yml
 otitbup validate               # check the config
 otitbup list                   # show the inventory
 otitbup drivers                # list all drivers with descriptions
@@ -44,6 +45,12 @@ otitbup report --out report.html        # HTML compliance report
 otitbup dr-plan plant-a        # HTML disaster-recovery runbook for a site
 otitbup net-restore core-sw-01 [--apply]   # push a stored config (dry run default)
 otitbup rehearse plc-01 --by me         # record a restore-rehearsal result
+otitbup backup --site plant-a --zone cell-1     # back up a site/zone subset
+otitbup diff plc-01 --from <commit>     # diff any two commits
+otitbup search "vlan 30"                # search across the latest config of all devices
+otitbup baseline set plc-01             # approve current config as the golden baseline
+otitbup baseline drift                  # devices that have drifted from baseline
+otitbup reconcile 10.20.0.0/24          # inventory vs. network (coverage gaps)
 ```
 
 ### Encrypted secrets
@@ -144,13 +151,16 @@ changes. They need `otitbup[ssh]`.
 `otitbup serve` — read-only by design (the YAML config stays the source
 of truth): dashboard with summary tiles, per-zone grouping and live
 filtering; a **health** page (coverage, staleness, consecutive failures);
-per-device pages with artifact lists, history, diffs, run status,
-annotations, policy findings, rehearsal log and effective retention;
-per-commit diff views; raw artifact viewing; activity feed; a **policy**
-page; a retention page; and the driver catalog. Machine-readable
-endpoints: `/metrics` (Prometheus), `/api/status` · `/api/devices` ·
-`/api/policy` · `/api/device/<name>` (JSON), and `/healthz` (liveness,
-no auth). Optional HTTP Basic auth and TLS.
+**config search** across the latest backup of every device; a **drift**
+page (golden-config baselines); per-device pages with artifact lists,
+history, diffs, run status, annotations, policy findings, rehearsal log,
+baseline drift and effective retention; per-commit and **any-two-commit
+compare** diff views; raw artifact viewing; activity feed; a **policy**
+page; a retention page; the driver catalog; and an **audit log**
+(admin-only). Machine-readable endpoints: `/metrics` (Prometheus),
+`/api/status` · `/api/devices` · `/api/policy` · `/api/device/<name>`
+(JSON), and `/healthz` (liveness, no auth). Optional HTTP Basic auth
+(single user or **multiple users with roles**) and TLS.
 
 ## Operations, compliance & recovery
 

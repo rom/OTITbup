@@ -44,6 +44,10 @@ otitbup.yml (inventory, source of truth, versioned by the operator)
 | `metrics.py` | Prometheus text metrics and JSON status |
 | `reports.py` | HTML compliance reports and per-site DR runbooks |
 | `netrestore.py` | Automated restore for network gear (netmiko), dry-run default, pre/post verify; PLCs stay guided |
+| `baseline.py` | Golden-config baselines and drift (latest vs. approved commit) |
+| `reconcile.py` | Inventory reconciliation: inventory vs. network scan (unmanaged / unreachable) |
+| `filelock.py` | Cross-process advisory lock (flock) around the backup critical section |
+| `scaffold.py` | `otitbup init` — starter config/secrets scaffolding |
 | `gitstore.py` | Local git repo; per-device commits; `manifest.yml` with sha256 fingerprints (change detection for binaries); optional push to remote |
 | `runner.py` | Orchestration: per-zone concurrency semaphores, maintenance-window checks, change/failure alerts |
 | `daemon.py` | Scheduler loop; per-device interval state in `state.json` |

@@ -219,14 +219,32 @@ webui:
 ```
 
 `cert_file`/`key_file` resolve relative to the config file's directory.
-Binding beyond loopback without `auth` logs a loud warning. The UI is
+Binding beyond loopback without auth logs a loud warning. The UI is
 strictly read-only.
+
+**Multiple users with roles.** Instead of (or alongside) the single
+`auth` block, list users with roles — `viewer` < `operator` < `admin`:
+
+```yaml
+webui:
+  users:
+    - {username: alice, password_hash: pbkdf2_sha256$..., role: admin}
+    - {username: bob,   password_hash: pbkdf2_sha256$..., role: viewer}
+```
+
+Generate each hash with `otitbup passwd --username <name>`. Every
+authenticated page view is recorded in the audit log (visible at `/audit`,
+**admin only**). A single `auth` user is treated as `admin`. Roles gate
+the audit log today and any future write actions; the read-only pages are
+visible to all roles.
 
 ## alerts
 
 ```yaml
 alerts:
   stale_days: 7          # alert if no successful backup in N days (0 = off)
+  min_interval: 3600     # suppress a repeat of the SAME alert within N s
+                         # (rate-limiting; persists across runs; 0 = off)
   webhooks:
     - https://hooks.example.com/otitbup   # JSON POST per alert
   syslog:
