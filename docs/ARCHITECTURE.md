@@ -51,7 +51,11 @@ otitbup.yml (inventory, source of truth, versioned by the operator)
 | `events.py` | Event bus: audit + Python log + syslog + SNMPv2c traps (stdlib BER encoder) |
 | `sessions.py` | In-memory web sessions (cookie login/logout, CSRF token) |
 | `snmp.py` | Minimal SNMPv2c GET client + BER decoder (fingerprint driver, discovery enrichment) |
-| `tickets.py` | Ticketing hooks (ServiceNow/Jira/generic) fired from the event bus |
+| `tickets.py` | Ticketing hooks (ServiceNow/Jira/RT/generic) fired from the event bus |
+| `netbox.py` | NetBox CMDB integration: reconcile inventory / import proposal |
+| `reportfmt.py` | CSV/PDF/DOCX report rendering (stdlib) |
+| `signing.py` | Detached Ed25519 report signatures |
+| `strategy.py` | 3-2-1 / 3-2-1-1-0 backup-strategy evaluation |
 | `gitstore.py` | Local git repo; per-device commits; `manifest.yml` with sha256 fingerprints (change detection for binaries); optional push to remote |
 | `runner.py` | Orchestration: per-zone concurrency semaphores, maintenance-window checks, change/failure alerts |
 | `daemon.py` | Scheduler loop; per-device interval state in `state.json` |

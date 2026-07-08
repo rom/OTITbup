@@ -256,6 +256,210 @@ PROFILES: dict[str, dict[str, Any]] = {
         "commands": ["show running-config"],
         "scrub": _UPTIME_SCRUB,
     },
+    # ============================ Enterprise / carrier / DC network gear ==
+    "juniper_junos": {
+        "description": "Juniper Junos switches/routers/SRX firewalls",
+        "device_type": "juniper_junos",
+        "commands": ["show configuration | display set", "show version"],
+        "scrub": [r"^## Last commit", r"[Uu]ptime"],
+    },
+    "arista_eos": {
+        "description": "Arista EOS switches",
+        "device_type": "arista_eos",
+        "commands": ["show running-config", "show version"],
+        "scrub": _IOS_SCRUB + [r"[Uu]ptime"],
+    },
+    "cisco_nxos": {
+        "description": "Cisco Nexus (NX-OS) data-centre switches",
+        "device_type": "cisco_nxos",
+        "commands": ["show running-config", "show version"],
+        "scrub": _IOS_SCRUB + [r"!Time:", r"[Uu]ptime"],
+    },
+    "cisco_sg": {
+        "description": "Cisco Small Business (SG/CBS) switches",
+        "device_type": "cisco_s300",
+        "commands": ["show running-config"],
+        "scrub": _IOS_SCRUB,
+    },
+    "hpe_comware": {
+        "description": "HPE/H3C Comware switches",
+        "device_type": "hp_comware",
+        "commands": ["display current-configuration", "display version"],
+        "scrub": [r"[Uu]ptime"],
+    },
+    "hpe_procurve": {
+        "description": "HPE ProCurve/Aruba-OS switches",
+        "device_type": "hp_procurve",
+        "commands": ["show running-config", "show version"],
+        "scrub": _IOS_SCRUB + [r"[Uu]ptime"],
+    },
+    "aruba_cx": {
+        "description": "Aruba CX switches (AOS-CX)",
+        "device_type": "aruba_aoscx",
+        "commands": ["show running-config", "show version"],
+        "scrub": [r"[Uu]ptime"],
+    },
+    "huawei_vrp": {
+        "description": "Huawei VRP switches/routers",
+        "device_type": "huawei",
+        "commands": ["display current-configuration", "display version"],
+        "scrub": [r"[Uu]ptime"],
+    },
+    "mikrotik_routeros": {
+        "description": "MikroTik RouterOS routers/switches",
+        "device_type": "mikrotik_routeros",
+        "commands": ["/export"],
+        "scrub": [r"^# .* by RouterOS", r"[Uu]ptime"],
+    },
+    "extreme_exos": {
+        "description": "Extreme Networks EXOS switches",
+        "device_type": "extreme_exos",
+        "commands": ["show configuration", "show version"],
+        "scrub": [r"[Uu]ptime"],
+    },
+    "dell_os10": {
+        "description": "Dell EMC OS10 switches",
+        "device_type": "dell_os10",
+        "commands": ["show running-configuration", "show version"],
+        "scrub": [r"[Uu]ptime"],
+    },
+    "dell_powerconnect": {
+        "description": "Dell PowerConnect/N-series switches",
+        "device_type": "dell_powerconnect",
+        "commands": ["show running-config"],
+        "scrub": _IOS_SCRUB,
+    },
+    "vyos": {
+        "description": "VyOS routers/firewalls",
+        "device_type": "vyos",
+        "commands": ["show configuration commands"],
+        "scrub": [r"[Uu]ptime"],
+    },
+    # ---------------------------------------------------------- Firewalls
+    "fortinet_fortigate": {
+        "description": "Fortinet FortiGate firewalls",
+        "device_type": "fortinet",
+        "commands": ["show full-configuration"],
+        "scrub": [r"conf_file_ver", r"[Uu]ptime", r"^#conf_file"],
+    },
+    "paloalto_panos": {
+        "description": "Palo Alto Networks PAN-OS firewalls",
+        "device_type": "paloalto_panos",
+        "commands": ["show config running", "show system info"],
+        "scrub": [r"[Uu]ptime"],
+    },
+    "checkpoint_gaia": {
+        "description": "Check Point Gaia firewalls",
+        "device_type": "checkpoint_gaia",
+        "commands": ["show configuration"],
+        "scrub": [r"[Uu]ptime"],
+    },
+    "juniper_srx": {
+        "description": "Juniper SRX firewalls (Junos)",
+        "device_type": "juniper_junos",
+        "commands": ["show configuration | display set"],
+        "scrub": [r"^## Last commit", r"[Uu]ptime"],
+    },
+    "sophos_xg": {
+        "description": "Sophos XG/XGS firewalls (CLI)",
+        "device_type": "generic",
+        "commands": ["system diagnostics show config"],
+        "scrub": [r"[Uu]ptime"],
+    },
+    # ---------------------------------------------- More industrial switches
+    "phoenix_fl_switch": {
+        "description": "Phoenix Contact FL SWITCH managed switches",
+        "device_type": "generic",
+        "commands": ["show running-config", "show version"],
+        "scrub": _IOS_SCRUB + _UPTIME_SCRUB,
+    },
+    "redlion_nt": {
+        "description": "Red Lion N-Tron/NT managed industrial switches",
+        "device_type": "generic",
+        "commands": ["show running-config"],
+        "scrub": _UPTIME_SCRUB,
+    },
+    "antaira": {
+        "description": "Antaira industrial switches",
+        "device_type": "generic",
+        "commands": ["show running-config"],
+        "scrub": _UPTIME_SCRUB,
+    },
+    "korenix": {
+        "description": "Korenix JetNet industrial switches",
+        "device_type": "generic",
+        "commands": ["show running-config"],
+        "scrub": _UPTIME_SCRUB,
+    },
+    "planet_switch": {
+        "description": "Planet industrial/enterprise switches",
+        "device_type": "generic",
+        "commands": ["show running-config"],
+        "scrub": _IOS_SCRUB,
+    },
+    "zyxel": {
+        "description": "Zyxel managed switches",
+        "device_type": "zyxel_os",
+        "commands": ["show running-config"],
+        "scrub": _IOS_SCRUB,
+    },
+    "teltonika": {
+        "description": "Teltonika cellular routers/gateways (RutOS CLI)",
+        "device_type": "generic",
+        "commands": ["uci show", "cat /etc/config/network"],
+        "scrub": [r"[Uu]ptime"],
+    },
+    # ---------------------------------------------------- More RTUs (CLI)
+    "ge_d20": {
+        "description": "GE/Emerson D20/D25 RTUs (CLI; also DNP3/IEC-104)",
+        "device_type": "generic",
+        "commands": ["show config", "show version"],
+        "scrub": _UPTIME_SCRUB + [r"[Dd]ate", r"[Tt]ime"],
+    },
+    "novatech_orion": {
+        "description": "NovaTech Orion/OrionLX RTUs (Linux CLI; also DNP3/"
+                       "IEC-61850)",
+        "device_type": "linux",
+        "commands": ["cat /etc/orion/version 2>/dev/null || uname -a"],
+        "scrub": _UPTIME_SCRUB,
+    },
+    "smp_gateway": {
+        "description": "Eaton/Cooper SMP gateway RTUs (also DNP3/IEC-61850)",
+        "device_type": "generic",
+        "commands": ["show configuration"],
+        "scrub": _UPTIME_SCRUB,
+    },
+    "survalent_rtu": {
+        "description": "Survalent SmartVU/RTU (CLI; also DNP3)",
+        "device_type": "generic",
+        "commands": ["show config"],
+        "scrub": _UPTIME_SCRUB,
+    },
+    # -------------------------------- Serial-to-ethernet gateways (CLI)
+    "lantronix": {
+        "description": "Lantronix serial device servers (CLI over SSH)",
+        "device_type": "generic",
+        "commands": ["show", "show config"],
+        "scrub": _UPTIME_SCRUB,
+    },
+    "digi_connect": {
+        "description": "Digi Connect/One serial servers (CLI over SSH)",
+        "device_type": "generic",
+        "commands": ["show config", "display device"],
+        "scrub": _UPTIME_SCRUB,
+    },
+    "perle_iolan": {
+        "description": "Perle IOLAN serial device servers (CLI)",
+        "device_type": "generic",
+        "commands": ["show configuration"],
+        "scrub": _UPTIME_SCRUB,
+    },
+    "sena_serial": {
+        "description": "Sena/Digi serial device servers (CLI)",
+        "device_type": "generic",
+        "commands": ["show config"],
+        "scrub": _UPTIME_SCRUB,
+    },
 }
 
 

@@ -96,3 +96,36 @@ class GenericSCADADriver(GenericSFTPDriver):
     """Vendor-neutral SCADA project fetch over SFTP. Set options.paths."""
 
     name = "generic_scada"
+
+
+class WonderwareDriver(GenericSFTPDriver):
+    """AVEVA/Wonderware InTouch/System Platform project (Galaxy) files via
+    SFTP. Set options.paths to the project/aaPKG location."""
+
+    name = "wonderware"
+
+
+class IFixDriver(GenericSFTPDriver):
+    """GE/Emerson iFIX SCADA project tree via SFTP. Set options.paths."""
+
+    name = "ifix"
+
+
+class CitectDriver(GenericSFTPDriver):
+    """AVEVA Citect/Plant SCADA project tree via SFTP. Set options.paths."""
+
+    name = "citect"
+
+
+class WinccOADriver(GenericSFTPDriver):
+    """Siemens WinCC OA (ETM PVSS) project tree via SFTP. Set options.paths."""
+
+    name = "wincc_oa"
+
+
+class KepwareDriver(GenericSFTPDriver):
+    """PTC KEPServerEX / Kepware config. The server runs on Windows and its
+    project is a .opf/.json file — fetch it via SFTP (or drop exports into a
+    generic_file watch folder). Set options.paths to the project file."""
+
+    name = "kepware"

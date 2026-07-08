@@ -67,6 +67,19 @@ code { font-size: .85rem; }
                 text-transform: uppercase; letter-spacing: .04em; }
 .sev-critical, .sev-high { color: #b3261e; font-weight: 600; }
 .sev-medium { color: #b26a00; } .sev-low { color: #5b6570; }
+.help { position: relative; display: inline-block; cursor: help;
+        width: 15px; height: 15px; line-height: 15px; text-align: center;
+        border-radius: 50%; background: #dde3e8; color: #33404d;
+        font-size: 11px; font-weight: 600; margin-left: .3rem; }
+.help .pop { visibility: hidden; opacity: 0; position: absolute; z-index: 10;
+        left: 50%; transform: translateX(-50%); bottom: 150%; width: 15rem;
+        background: #14181c; color: #f0f3f6; padding: .5rem .7rem;
+        border-radius: 6px; font-size: .8rem; font-weight: normal;
+        line-height: 1.4; text-align: left; transition: opacity .1s;
+        box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+.help:hover .pop, .help:focus .pop { visibility: visible; opacity: 1; }
+.ok { color: #1b7a2f; } .miss { color: #b3261e; }
+.strat { font-size: 1.05rem; padding: .3rem 0; }
 @media (prefers-color-scheme: dark) {
   body { background: #14181c; color: #e3e7eb; }
   th, td { border-color: #2c333a; } th { color: #98a2ad; }
@@ -101,9 +114,10 @@ def _page(title: str, body: str) -> bytes:
         f"<nav><a href='/'>Devices</a><a href='/health'>Health</a>"
         f"<a href='/search'>Search</a><a href='/drift'>Drift</a>"
         f"<a href='/activity'>Activity</a><a href='/policy'>Policy</a>"
-        f"<a href='/retention'>Retention</a>"
+        f"<a href='/retention'>Retention</a><a href='/strategy'>Strategy</a>"
         f"<a href='/drivers'>Drivers</a><a href='/audit'>Audit</a>"
-        f"<a href='/users'>Users</a><a href='/logout'>Logout</a></nav></header>"
+        f"<a href='/users'>Users</a><a href='/help'>Help</a>"
+        f"<a href='/logout'>Logout</a></nav></header>"
         f"{body}</body></html>"
     ).encode()
 
@@ -118,6 +132,14 @@ def _device_link_name(qualified_name: str) -> str:
 
 def _csrf(token: str) -> str:
     return f"<input type='hidden' name='csrf' value='{html.escape(token)}'>"
+
+
+def _help(text: str) -> str:
+    """A small ? icon with a hover/focus popover explaining a feature."""
+    return (
+        f"<span class='help' tabindex='0'>?"
+        f"<span class='pop'>{html.escape(text)}</span></span>"
+    )
 
 
 def _result_page(ok: bool, message: str, back_url: str) -> bytes:
@@ -309,14 +331,33 @@ class WebUI:
         )
         return True, f"baseline set to {commit[:10]}"
 
-    def action_report(self) -> tuple[bool, str]:
-        from .reports import compliance_report
+    def action_report(
+        self, fmt: str = "html", sign: bool = False
+    ) -> tuple[bool, str]:
         if self.runstore is None:
             return False, "unavailable"
-        html_doc = compliance_report(self.config, self.store, self.runstore)
-        out = Path(self.config.data_dir).parent / "compliance-report.html"
-        out.write_text(html_doc)
-        return True, f"report written to {out}"
+        base = Path(self.config.data_dir).parent
+        out = base / f"compliance-report.{fmt}"
+        if fmt == "html":
+            from .reports import compliance_report
+            out.write_text(compliance_report(
+                self.config, self.store, self.runstore))
+        else:
+            from .reportfmt import FORMATS, render
+            if fmt not in FORMATS:
+                return False, f"unknown format {fmt}"
+            data, _ct, _ext = render(fmt, self.config, self.store,
+                                     self.runstore)
+            out.write_bytes(data)
+        message = f"report written to {out}"
+        if sign:
+            from .signing import SigningError, sign_file
+            try:
+                sign_file(out, base / "report-signing.key")
+                message += " (signed)"
+            except SigningError as exc:
+                return True, message + f" — not signed: {exc}"
+        return True, message
 
     def reload_config(self) -> tuple[bool, str]:
         if not self.config_path:
@@ -544,9 +585,22 @@ class WebUI:
         )
         controls = ""
         if role_rank(role) >= role_rank("operator"):
-            controls += _button("/report", "Generate compliance report", csrf)
+            controls += (
+                "<form method='post' action='/report' style='display:inline'>"
+                + _csrf(csrf)
+                + "<select name='format'><option>html</option>"
+                "<option>pdf</option><option>csv</option>"
+                "<option>docx</option></select> "
+                "<label><input type='checkbox' name='sign' value='1'> sign"
+                "</label> <button type='submit'>Generate report</button>"
+                "</form>" + _help(
+                    "Writes a compliance report (coverage, changes, policy "
+                    "findings) next to the data dir. PDF/DOCX/CSV are "
+                    "stdlib-generated; 'sign' adds an Ed25519 signature.")
+            )
         if role_rank(role) >= role_rank("admin"):
             controls += " " + _button("/reload", "Re-read config file", csrf)
+            controls += _help("Re-reads otitbup.yml without a restart.")
         if controls:
             controls = "<p>" + controls + "</p>"
         body = (
@@ -664,7 +718,11 @@ class WebUI:
             "</div></div>"
         )
         body = (
-            "<h2>Golden-config drift</h2>" + tiles
+            "<h2>Golden-config drift "
+            + _help("Drift is the difference between a device's latest "
+                    "backup and its approved baseline commit. Set a baseline "
+                    "from the device page or `otitbup baseline set`.")
+            + "</h2>" + tiles
             + "<table><tr><th>Device</th><th>State</th><th>Baseline</th>"
               "<th>Latest</th></tr>" + rows + "</table>"
             + "<p class='muted'>set a baseline with "
@@ -801,6 +859,100 @@ class WebUI:
               "--apply</code> — git history is never rewritten</p>"
         )
         return _page("otitbup — retention", body)
+
+    def strategy(self) -> bytes:
+        from .strategy import evaluate
+        if self.runstore is None:
+            return _page("otitbup — strategy",
+                         "<p class='muted'>run store unavailable</p>")
+        result = evaluate(self.config, self.store, self.runstore,
+                          blobstore=self.blobstore)
+        rows = ""
+        for check in result.checks:
+            mark = ("<span class='ok'>✔</span>" if check.ok
+                    else "<span class='miss'>✘</span>")
+            rem = (f"<br><span class='muted'>→ {html.escape(check.remediation)}"
+                   "</span>" if not check.ok and check.remediation else "")
+            rows += (
+                f"<div class='strat'>{mark} {html.escape(check.label)} "
+                f"<span class='muted'>· {html.escape(check.detail)}</span>"
+                f"{rem}</div>"
+            )
+        def badge(ok):
+            return ("<span class='badge'>SATISFIED</span>" if ok
+                    else "<span class='badge never'>NOT met</span>")
+        body = (
+            "<h2>Backup strategy "
+            + _help("3 copies of your data, on 2 different media, 1 offsite. "
+                    "3-2-1-1-0 adds 1 offline/air-gapped copy and 0 errors "
+                    "(backups verify). otitbup maps these to the local repo, "
+                    "a git remote mirror, and an offline export archive.")
+            + "</h2>"
+            f"<div class='tiles'><div class='tile'><b>{result.copies}</b>"
+            "<span>copies</span></div>"
+            f"<div class='tile'><b>{result.media}</b><span>media</span></div>"
+            f"<div class='tile'>{badge(result.satisfies_321)}"
+            "<span>3-2-1</span></div>"
+            f"<div class='tile'>{badge(result.satisfies_32110)}"
+            "<span>3-2-1-1-0</span></div></div>"
+            + rows
+            + "<p class='muted'>Take an offline copy with "
+              "<code>otitbup export</code>; enable a remote mirror with "
+              "<code>git.push</code> + <code>git.remote</code>; declare the "
+              "offline copy under <code>strategy.offline</code>.</p>"
+        )
+        return _page("otitbup — strategy", body)
+
+    def help_page(self) -> bytes:
+        sections = [
+            ("Getting started",
+             "The inventory (otitbup.yml) is the source of truth: sites → "
+             "zones → devices. Every collector is read-only toward devices. "
+             "Run backups from the CLI or, as an operator, from a device "
+             "page here."),
+            ("Devices & health",
+             "The Devices page lists everything with a live filter. Health "
+             "shows coverage, staleness and failures. A device page shows "
+             "artifacts, history, per-commit and two-backup diffs, run "
+             "timeline, notes, baseline drift and rehearsals."),
+            ("Search",
+             "Search runs across the latest backup of every device — a VLAN, "
+             "IP, tag or username, or a regex — filterable by site/zone."),
+            ("Change management",
+             "Unexpected changes (outside a maintenance window) alert as the "
+             "unauthorized-change signal. Set a baseline to track golden-"
+             "config drift. Add a note to a backup to record why it changed."),
+            ("Policy & compliance",
+             "Policy lints captured configs for insecure settings. Generate "
+             "compliance reports (HTML/CSV/PDF/DOCX, optionally signed) from "
+             "the Health page or `otitbup report`."),
+            ("Retention & strategy",
+             "Large artifacts offload to a deduplicated blob store and expire "
+             "by policy. The Strategy page evaluates your 3-2-1 / 3-2-1-1-0 "
+             "posture and tells you what's missing."),
+            ("Recovery",
+             "Export a hash-verified restore bundle per device; network gear "
+             "can be restored automatically (dry-run first). DR runbooks and "
+             "restore rehearsals are tracked per site/device."),
+            ("Roles",
+             "viewer: read-only. operator: back up, verify, note, baseline, "
+             "report. admin: reload config, manage users, view the audit "
+             "log. Every action and page view is audited."),
+            ("Integrations",
+             "Prometheus /metrics and JSON /api/* for dashboards; syslog and "
+             "SNMP traps and ServiceNow/Jira/RT tickets for events; NetBox "
+             "reconciliation for coverage."),
+        ]
+        blocks = "".join(
+            f"<h3>{html.escape(t)}</h3><p>{html.escape(b)}</p>"
+            for t, b in sections
+        )
+        body = (
+            "<h2>Help</h2>"
+            "<p class='muted'>Full guides: USAGE.md, CONFIGURATION.md and "
+            "FAQ.md in the docs directory.</p>" + blocks
+        )
+        return _page("otitbup — help", body)
 
     def drivers(self) -> bytes:
         from .drivers import driver_descriptions
@@ -1319,6 +1471,10 @@ class _Handler(BaseHTTPRequestHandler):
             )
         elif path == "/drift":
             content = self.ui.drift()
+        elif path == "/strategy":
+            content = self.ui.strategy()
+        elif path == "/help":
+            content = self.ui.help_page()
         elif path == "/policy":
             content = self.ui.policy()
         elif path == "/activity":
@@ -1432,7 +1588,10 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/report":
             if not need("operator"):
                 return False, "operator role required", "/health"
-            ok, msg = self.ui.action_report()
+            ok, msg = self.ui.action_report(
+                fmt=form.get("format", "html"),
+                sign=form.get("sign") == "1",
+            )
             return ok, msg, "/health"
         if path == "/users/create":
             if not need("admin"):

@@ -92,11 +92,22 @@ events:                   # fan out operational events to syslog / SNMP traps
                                           # (MIB: mibs/OTITBUP-MIB.txt)
 
 tickets:                  # open a ticket on selected events
-  # backend: servicenow                # servicenow | jira | generic
+  # backend: servicenow                # servicenow | jira | rt | generic
   # url: https://example.service-now.com
   # username: svc-otitbup
   # password: change-me
   # on: [backup.error, change.unexpected]
+
+netbox:                   # reconcile inventory against NetBox (otitbup netbox)
+  # url: https://netbox.example.com
+  # token: your-api-token
+  # filters: {status: active}
+
+strategy:                 # 3-2-1 / 3-2-1-1-0 evaluation (Strategy page)
+  # offsite: true                       # the git remote is genuinely off-site
+  # offline:
+  #   path: /mnt/usb/otitbup-export.tar.gz   # `otitbup export` target
+  #   max_age_days: 7
 
 sites:
   - name: plant-a

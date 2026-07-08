@@ -164,14 +164,19 @@ JSON.
 otitbup verify                      # re-hash latest backups vs. manifests
 otitbup verify --all-commits        # walk full history + report orphan blobs
 otitbup policy                      # config policy findings across devices
-otitbup report --out report.html    # HTML compliance report
+otitbup report                      # HTML compliance report
+otitbup report --format pdf         # or csv / docx (all stdlib)
+otitbup report --format pdf --sign  # + detached Ed25519 signature
+otitbup report-verify report.pdf    # verify a signed report
 ```
 
 Policy rules (built-in + custom `match`/`absent` regex rules) flag
 insecure configuration — telnet, SNMP `public`, weak passwords — turning
 the backup archive into a compliance scan. The compliance report covers
 coverage, unexpected/unannotated changes, policy findings and rehearsal
-status.
+status; it renders to HTML, CSV, PDF and DOCX, and `--sign` adds an
+Ed25519 signature (with a companion `.pubkey`) so auditors can confirm it
+wasn't altered.
 
 ## 10. Retention
 
@@ -184,6 +189,19 @@ Text configs stay in git forever; artifacts ≥ `large_file_threshold` are
 offloaded to a deduplicated blob store and expire by `keep_versions` /
 `keep_days`, set globally and overridable per site/zone/device. Git history
 is never rewritten. Run `--apply` from cron.
+
+### Backup strategy (3-2-1 / 3-2-1-1-0)
+
+```bash
+otitbup strategy                    # evaluate the strategy, show what's missing
+otitbup export --out /mnt/usb/otitbup-export.tar.gz   # the offline/offsite copy
+```
+
+The **Strategy** page and `otitbup strategy` grade your deployment against
+the 3-2-1 rule (3 copies, 2 media, 1 offsite) and 3-2-1-1-0 (+1 offline,
+0 errors). otitbup maps the copies to the local repo, a git remote mirror
+(`git.push`+`git.remote`), and a portable `otitbup export` archive; declare
+the offline copy under `strategy.offline` so it counts.
 
 ## 11. Restore & disaster recovery
 
@@ -216,6 +234,14 @@ devices (in inventory, no response) — coverage you can prove. Add
 `--enrich` to discovery to probe each finding's identity (vendor/model via
 SNMP or the matching identity driver) and annotate the proposal.
 
+**NetBox** — if NetBox is your source of truth, reconcile against it or
+import from it:
+
+```bash
+otitbup netbox reconcile    # devices in NetBox not backed up, and vice versa
+otitbup netbox import       # write an inventory proposal from NetBox
+```
+
 ## 13. The web UI
 
 ```bash
@@ -225,11 +251,14 @@ otitbup serve                          # http(s)://<host>:<port>
 ```
 
 Pages: **Devices** (dashboard, per-zone grouping, live filter), **Health**
-(coverage/staleness/failures), **Search** (config search with site/zone
-filters), **Drift**, **Activity**, **Policy**, **Retention**, **Drivers**,
-**Users** (admin), **Audit** (admin), and rich per-device pages (artifacts,
-history, per-commit and any-two-commit diffs, run status, notes, baseline
-drift, rehearsals).
+(coverage/staleness/failures, generate signed reports, reload config),
+**Search** (config search with site/zone filters), **Drift**,
+**Strategy** (3-2-1 / 3-2-1-1-0 evaluation), **Activity**, **Policy**,
+**Retention**, **Drivers**, **Users** (admin), **Audit** (admin), and a
+built-in **Help** page. Rich per-device pages carry artifacts, history,
+per-commit and any-two-commit diffs, a run-health timeline, notes,
+baseline drift and rehearsals. Hover the small **?** icons for inline
+popover help.
 
 **Read/write, by role** — sign in (cookie session, CSRF-protected):
 
@@ -300,7 +329,8 @@ HTTP clients needing no extra dependencies. See CONFIGURATION.md.
 | `baseline set|clear|drift` | golden-config drift |
 | `retention [--apply]` | prune large-artifact blobs |
 | `restore` / `net-restore [--apply]` / `dr-plan` / `rehearse` | recovery |
-| `discover` / `reconcile` | find devices; prove coverage |
-| `report` | HTML compliance report |
+| `discover [--enrich]` / `reconcile` / `netbox` | find devices; prove coverage |
+| `report [--format --sign]` / `report-verify` | signed HTML/CSV/PDF/DOCX reports |
+| `export` / `strategy` | offline archive; 3-2-1 evaluation |
 | `passwd` / `certgen` | web UI credentials and TLS |
 | `secrets genkey|encrypt|decrypt` | secrets management |

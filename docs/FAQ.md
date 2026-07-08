@@ -191,3 +191,87 @@ placeholder `99999` with your IANA enterprise number).
 Automated restore is network-gear only (`cisco_ios`, `cisco_asa`,
 `generic_ssh`). For PLCs/RTUs use `otitbup restore` to export a guided
 bundle.
+
+## Reports & audit
+
+### What report formats are supported?
+HTML, CSV, PDF and DOCX — all generated with the standard library (no
+reportlab or python-docx). `otitbup report --format pdf` (or `csv`/`docx`).
+
+### Can reports be signed for auditors?
+Yes. `otitbup report --format pdf --sign` writes a detached Ed25519
+signature (`.sig`) and the public key (`.pubkey`) beside the report.
+Anyone verifies with `otitbup report-verify <report>`. Tampering with even
+one byte makes verification fail. The signing key is generated on first
+use (mode 0600).
+
+### Can I schedule reports?
+Yes — set `reports.interval` and the daemon emits one on a cadence; it can
+also email it via the alert channels.
+
+## Backup strategy (3-2-1)
+
+### Does otitbup implement the 3-2-1 rule?
+It helps you meet and *prove* it. The Strategy page (and `otitbup
+strategy`) evaluates: 3 copies, 2 media, 1 offsite, +1 offline, 0 errors.
+The copies are the local repo, a git remote mirror, and a portable
+`otitbup export` archive.
+
+### How do I make the third (offline/offsite) copy?
+`otitbup export --out /mnt/usb/otitbup-export.tar.gz` bundles the git repo,
+blob store and run store into one archive to copy to removable or offsite
+media. Point `strategy.offline.path` at it so the Strategy page counts it,
+and set `git.push`+`git.remote` for the offsite mirror.
+
+### What's the difference between 3-2-1 and 3-2-1-1-0?
+3-2-1-1-0 adds one **offline/air-gapped** copy (ransomware can't reach it)
+and requires **0 errors** — every backup verifies and no device is
+failing. otitbup checks both extra conditions on the Strategy page.
+
+## Integrations
+
+### Which ticketing systems are supported?
+ServiceNow, Jira, Request Tracker (RT), and a generic JSON webhook (for
+any CMDB or automation). Configure `tickets.backend` and the event types
+that should open a ticket.
+
+### How does the NetBox integration work?
+`otitbup netbox reconcile` compares your inventory against NetBox devices
+and reports coverage gaps both ways. `otitbup netbox import` turns NetBox
+devices into an inventory proposal (driver guessed from platform) for you
+to review. It reads NetBox; it never edits your inventory automatically.
+
+### Can I feed device status back to a CMDB?
+Use the JSON API (`/api/status`, `/api/devices`, `/api/device/<name>`) or
+a generic ticket/webhook — a CMDB job can poll the API on a schedule.
+
+## Devices (more)
+
+### Which network vendors are supported now?
+Cisco (IOS/NX-OS/SG/ASA), Juniper (Junos/SRX), Arista, HPE/Aruba, Huawei,
+MikroTik, Extreme, Dell, Zyxel, Fortinet, Palo Alto, Check Point, Sophos,
+VyOS, plus the industrial lines (SCALANCE, RUGGEDCOM, Hirschmann/Belden,
+Moxa, Westermo, Advantech, Phoenix Contact, Red Lion, Korenix, Antaira,
+Planet, Netgear, Teltonika). Run `otitbup drivers`.
+
+### Which serial-to-ethernet / protocol gateways are supported?
+Moxa NPort and MGate, Lantronix, Digi, Perle, Sena, Advantech EKI, HMS
+Anybus, ProSoft, Red Lion, and HMS eWON — via CLI or web export depending
+on the model. Use `generic_gateway` for anything else web-managed.
+
+### Can I add my own vendor without writing code?
+Often yes: `generic_ssh` (set `device_type` + `commands`), `generic_http`
+(set `urls`), `generic_sftp` (set `paths`), `snmp_fingerprint`,
+`generic_opcua`/`generic_enip`/`generic_dnp3`, or `generic_file` for
+engineering-tool exports.
+
+## Web UI (more)
+
+### Is there in-app help?
+Yes — a **Help** page in the nav, and small **?** icons throughout that
+show a popover explaining the feature on hover or keyboard focus.
+
+### Can I trigger a backup or generate a report from the browser?
+Yes, when signed in as operator or admin: a device page has "Back up now",
+"Verify" and "Set baseline" buttons and a note form; the Health page has a
+report generator (format + sign) and (admin) a config-reload button.

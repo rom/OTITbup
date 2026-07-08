@@ -213,10 +213,51 @@ def main(argv: list[str] | None = None) -> int:
     p_maint.add_argument("--reason")
 
     p_report = sub.add_parser(
-        "report", help="write an HTML compliance report"
+        "report", help="write a compliance report (html/csv/pdf/docx)"
     )
-    p_report.add_argument("--out", default="compliance-report.html")
+    p_report.add_argument("--out", help="output path (default by format)")
     p_report.add_argument("--days", type=int, default=30)
+    p_report.add_argument(
+        "--format", choices=["html", "csv", "pdf", "docx"], default="html"
+    )
+    p_report.add_argument(
+        "--sign", action="store_true", help="sign the report (Ed25519)"
+    )
+    p_report.add_argument(
+        "--key-file", default="report-signing.key",
+        help="signing key (generated if absent)",
+    )
+
+    p_rverify = sub.add_parser(
+        "report-verify", help="verify a signed report"
+    )
+    p_rverify.add_argument("report")
+    p_rverify.add_argument("--sig", help="default: <report>.sig")
+    p_rverify.add_argument("--pubkey", help="default: <report>.pubkey")
+
+    p_export = sub.add_parser(
+        "export",
+        help="write a portable archive (repo+blobs+runstore) for offsite/"
+             "offline storage — the 3-2-1 third copy",
+    )
+    p_export.add_argument("--out", default="otitbup-export.tar.gz")
+
+    p_strategy = sub.add_parser(
+        "strategy", help="evaluate the 3-2-1 / 3-2-1-1-0 backup strategy"
+    )
+
+    p_netbox = sub.add_parser(
+        "netbox", help="reconcile inventory against NetBox, or import from it"
+    )
+    p_netbox.add_argument(
+        "action", choices=["reconcile", "import"], nargs="?",
+        default="reconcile",
+    )
+    p_netbox.add_argument("--url", help="NetBox URL (or config netbox.url)")
+    p_netbox.add_argument("--token", help="NetBox API token")
+    p_netbox.add_argument("--out", default="netbox-import.yml")
+    p_netbox.add_argument("--site", default="netbox")
+    p_netbox.add_argument("--zone", default="imported")
 
     p_dr = sub.add_parser(
         "dr-plan", help="write an HTML disaster-recovery runbook for a site"
@@ -753,15 +794,108 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "report":
-        from .reports import compliance_report
         from .runstore import default_runstore
         store = GitStore(config.data_dir)
         store.ensure_repo()
-        content = compliance_report(
-            config, store, default_runstore(config), period_days=args.days
-        )
-        Path(args.out).write_text(content)
-        print(f"compliance report written to {args.out}")
+        runstore = default_runstore(config)
+        out = args.out or f"compliance-report.{args.format}"
+        if args.format == "html":
+            from .reports import compliance_report
+            Path(out).write_text(compliance_report(
+                config, store, runstore, period_days=args.days))
+        else:
+            from .reportfmt import render
+            data, _ct, _ext = render(args.format, config, store, runstore)
+            Path(out).write_bytes(data)
+        print(f"compliance report written to {out}")
+        if args.sign:
+            from .signing import SigningError, sign_file
+            try:
+                sig = sign_file(out, args.key_file)
+            except SigningError as exc:
+                print(f"signing error: {exc}", file=sys.stderr)
+                return 2
+            print(f"signed: {sig} (+ {out}.pubkey)")
+        return 0
+
+    if args.command == "report-verify":
+        from .signing import SigningError, verify_file
+        sig = args.sig or args.report + ".sig"
+        pubkey = args.pubkey or args.report + ".pubkey"
+        try:
+            ok = verify_file(args.report, sig, pubkey)
+        except (SigningError, OSError) as exc:
+            print(f"verify error: {exc}", file=sys.stderr)
+            return 2
+        print("VALID signature" if ok else "INVALID signature")
+        return 0 if ok else 1
+
+    if args.command == "export":
+        import tarfile
+        base = Path(config.data_dir).parent
+        members = [
+            (Path(config.data_dir), "data"),
+            (base / "blobs", "blobs"),
+            (base / "runstore.db", "runstore.db"),
+        ]
+        with tarfile.open(args.out, "w:gz") as tar:
+            for path, arcname in members:
+                if path.exists():
+                    tar.add(path, arcname=arcname)
+        size = Path(args.out).stat().st_size
+        print(f"export archive written to {args.out} "
+              f"({size / 1048576:.1f} MiB) — copy to offsite/offline media")
+        return 0
+
+    if args.command == "strategy":
+        from .runner import default_blobstore
+        from .runstore import default_runstore
+        from .strategy import evaluate
+        store = GitStore(config.data_dir)
+        store.ensure_repo()
+        result = evaluate(config, store, default_runstore(config),
+                          blobstore=default_blobstore(config))
+        for check in result.checks:
+            mark = "OK  " if check.ok else "MISS"
+            print(f"{mark} {check.label:42s} {check.detail}")
+            if not check.ok and check.remediation:
+                print(f"       -> {check.remediation}")
+        print(f"\n3-2-1:      {'SATISFIED' if result.satisfies_321 else 'NOT met'}")
+        print(f"3-2-1-1-0:  {'SATISFIED' if result.satisfies_32110 else 'NOT met'}")
+        return 0 if result.satisfies_321 else 1
+
+    if args.command == "netbox":
+        from .netbox import (NetBoxClient, NetBoxError, import_proposal,
+                             reconcile_netbox)
+        nb = config.netbox or {}
+        url = args.url or nb.get("url")
+        token = args.token or nb.get("token")
+        if not url or not token:
+            print("netbox: --url and --token (or config netbox.*) required",
+                  file=sys.stderr)
+            return 2
+        client = NetBoxClient(url, token,
+                              verify_tls=nb.get("verify_tls", True))
+        try:
+            if args.action == "reconcile":
+                rec = reconcile_netbox(config, client, nb.get("filters"))
+                print(f"in NetBox, NOT backed up: {len(rec.not_backed_up)}")
+                for d in rec.not_backed_up:
+                    print(f"  {d.name:24s} {d.address or '-':16s} "
+                          f"role={d.role} platform={d.platform}")
+                print(f"backed up, NOT in NetBox: {len(rec.not_in_netbox)}")
+                for name in rec.not_in_netbox:
+                    print(f"  {name}")
+                print(f"matched: {len(rec.matched)}")
+            else:  # import
+                devices = client.devices(nb.get("filters"))
+                Path(args.out).write_text(
+                    import_proposal(devices, args.site, args.zone))
+                print(f"{len(devices)} device(s) -> {args.out} (review "
+                      "before merging)")
+        except NetBoxError as exc:
+            print(f"netbox error: {exc}", file=sys.stderr)
+            return 1
         return 0
 
     if args.command == "dr-plan":
