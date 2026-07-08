@@ -36,9 +36,9 @@ otitbup.yml (inventory, source of truth, versioned by the operator)
 | `discovery.py` | Opt-in sequential TCP probe of known OT/IT ports; emits an inventory-shaped YAML *proposal* for human review — never edits the inventory |
 | `auth.py` | PBKDF2 password hashing and HTTP Basic verification for the web UI |
 | `restore.py` | Guided restore: exports hash-verified artifacts + RESTORE.md checklist with driver-specific vendor-tool instructions; performs no device writes |
-| `blobstore.py` | Content-addressed store for large artifacts (sha256, deduplicated); pointer files go into git |
+| `blobstore.py` | Content-addressed store for large artifacts (sha256, deduplicated); pointer files go into git. Optional at-rest Fernet encryption — addressing is by the **plaintext** hash, so ciphertext-at-rest leaves dedup and manifests unchanged |
 | `retention.py` | Hierarchical retention policies (device > zone > site > global), prune planning/apply; never rewrites git history |
-| `runstore.py` | SQLite: backup run results, restore rehearsals, maintenance state — the source for status, metrics and reports |
+| `runstore.py` | SQLite: backup run results, restore rehearsals, maintenance state — the source for status, metrics and reports. Versioned schema migrations (`PRAGMA user_version`); the `audit` table is **hash-chained** (each row stores prev+entry sha256) so edits/deletes are detectable |
 | `verify.py` | Backup verification job: re-hash artifacts against manifests, check blob integrity |
 | `policy.py` | Config policy/compliance checks (built-in + custom rules) over captured text configs |
 | `metrics.py` | Prometheus text metrics and JSON status |
@@ -48,7 +48,7 @@ otitbup.yml (inventory, source of truth, versioned by the operator)
 | `reconcile.py` | Inventory reconciliation: inventory vs. network scan (unmanaged / unreachable) |
 | `filelock.py` | Cross-process advisory lock (flock) around the backup critical section |
 | `scaffold.py` | `otitbup init` — starter config/secrets scaffolding |
-| `events.py` | Event bus: audit + Python log + syslog + SNMPv2c traps (stdlib BER encoder) |
+| `events.py` | Event bus: audit + Python log + syslog + SNMPv2c traps (stdlib BER encoder); an in-process **Broadcaster** fans live events to subscribed web-UI SSE connections |
 | `sessions.py` | In-memory web sessions (cookie login/logout, CSRF token) |
 | `snmp.py` | Minimal SNMPv2c GET client + BER decoder (fingerprint driver, discovery enrichment) |
 | `tickets.py` | Ticketing hooks (ServiceNow/Jira/RT/generic) fired from the event bus |
@@ -58,7 +58,7 @@ otitbup.yml (inventory, source of truth, versioned by the operator)
 | `strategy.py` | 3-2-1 / 3-2-1-1-0 backup-strategy evaluation |
 | `charts.py` | Inline-SVG charts (donut/bar/stacked/timeline) for the web UI, theme-aware, CSP-safe |
 | `pdfcanvas.py` | Minimal vector PDF canvas (rects, lines, text, colour) for rich report graphics |
-| `gitstore.py` | Local git repo; per-device commits; `manifest.yml` with sha256 fingerprints (change detection for binaries); optional push to remote |
+| `gitstore.py` | Local git repo; per-device commits; `manifest.yml` with sha256 fingerprints (change detection for binaries); optional push to remote; optional **SSH-signed** commits (`git.sign.key_file`) with signature verification |
 | `runner.py` | Orchestration: per-zone concurrency semaphores, maintenance-window checks, change/failure alerts |
 | `daemon.py` | Scheduler loop; per-device interval state in `state.json` |
 | `alerts.py` | Webhook, syslog, email notifiers; failures logged, never fatal |
@@ -82,6 +82,12 @@ otitbup.yml (inventory, source of truth, versioned by the operator)
   referenced as `module.path:ClassName` directly in the config.
 - **State separation**: scheduler state (`state.json`) and secrets live
   next to — not inside — the backup repo, keeping history clean.
+- **Federation splits control plane from data plane** (Purdue model):
+  backup **bytes** move over plain git — each site collector pushes to a
+  shared remote (`git.push`/`git.remote`) — while a central appliance polls
+  each collector's read-only `GET /api/status` over HTTPS with a scoped
+  bearer token to aggregate **health** only. Neither plane depends on the
+  other, so a collector keeps backing up even if the roll-up is offline.
 
 ## The siemens_s7 driver
 

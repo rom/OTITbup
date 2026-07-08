@@ -96,6 +96,23 @@ Each device is committed individually. A backup that detects no change
 makes no commit. Backups are single-writer across processes (a file lock),
 so a manual run and the daemon can't collide.
 
+**Dry run / connectivity test** — collect but never commit, to check
+credentials and reachability:
+
+```bash
+otitbup test                        # dry-run every device
+otitbup test plc-01 --site plant-a  # subset (same selectors as backup)
+otitbup backup --dry-run            # equivalent on the backup command
+```
+
+**Reliability.** Set `retry.attempts` (with `retry.backoff`) to retry
+transient collection failures per device. Define `hooks.pre` / `hooks.post`
+(global, or per device under `device.hooks`) to run a shell command before
+and after each device backup — e.g. flip a maintenance flag in another
+system or notify a chat channel. Hooks get the device context in
+`OTITBUP_*` env vars, run with a 120s timeout, and a failing hook is logged
+but never fails the backup. See CONFIGURATION.md.
+
 ## 5. Scheduling (the daemon)
 
 ```bash
@@ -108,6 +125,23 @@ The daemon honours each device's `schedule` and each zone's
 the next tick (or send `SIGHUP` to force it); a broken edit is rejected and
 the previous config kept. It also emits scheduled compliance reports when
 `reports.interval` is set.
+
+A device's `schedule` is either an interval (`30m`, `12h`, `1d`, `Ns`) or
+a 5-field **cron expression** for wall-clock scheduling:
+
+```yaml
+schedule: "0 2 * * *"     # 02:00 daily
+schedule: "0 */6 * * 1-5" # every 6h, Mon-Fri
+```
+
+Cron fields support `*`, `*/n`, ranges (`1-5`) and lists (`1,3,5`);
+day-of-week Sunday is `0` or `7`. Firing uses the zone's `timezone` (IANA
+name) if set, else the site timezone, else system local — the same
+timezone that interprets `maintenance_window`.
+
+The daemon also runs light **housekeeping** (`git gc`, per
+`housekeeping.gc_interval_days`) and, after each backup, **anomaly
+detection** (see §8).
 
 ## 6. Inspecting backups
 
@@ -144,6 +178,17 @@ otitbup search "10.0.0.1" --case-sensitive
   otitbup baseline drift             # which devices differ from baseline
   otitbup baseline clear plc-01
   ```
+- **Config-as-code (desired state)** — compare live backups against
+  configs you *declare* in a directory (`desired.dir`), versioned next to
+  the inventory:
+  ```bash
+  otitbup desired                    # which devices drift from intended
+  otitbup desired --diff             # unified diffs; exit nonzero if drifted
+  ```
+  A **baseline** approves an actual past backup; **desired** state is what
+  you author as the intended config. The layout is
+  `<desired.dir>/<site>/<zone>/<device>/<artifact-name>`. See
+  CONFIGURATION.md.
 
 ## 8. Health, status & metrics
 
@@ -157,6 +202,19 @@ tool distinguishes "unchanged" from "unreachable". Configure
 N days — the catch-all against silent failure. The web UI `/metrics`
 endpoint exposes Prometheus gauges, and `/api/status` the same data as
 JSON.
+
+### Anomaly detection
+
+```bash
+otitbup anomalies                   # statistical anomalies across devices
+```
+
+Over each device's run history the tool flags **slow backups** (duration
+z-score past `anomaly.sigma`) and **change storms** (a spike in the
+change rate above the device's own baseline). It runs automatically after
+each backup — emitting an `anomaly.detected` event and alert — and on
+demand with `otitbup anomalies`. Tune the thresholds under `anomaly`
+(sigma, history depth, change windows); see CONFIGURATION.md.
 
 ## 9. Policy & compliance
 
@@ -177,6 +235,28 @@ coverage, unexpected/unannotated changes, policy findings and rehearsal
 status; it renders to HTML, CSV, PDF and DOCX, and `--sign` adds an
 Ed25519 signature (with a companion `.pubkey`) so auditors can confirm it
 wasn't altered.
+
+### Integrity & at-rest protection
+
+```bash
+otitbup verify-audit                # verify the tamper-evident audit chain
+```
+
+- **Tamper-evident audit log.** The audit log (SQLite `audit` table) is
+  **hash-chained**: each entry stores the previous entry's hash plus its
+  own (sha256 over `prev_hash|at|actor|role|action|detail`), so any edit or
+  deletion breaks the chain. `otitbup verify-audit` exits 0 when the chain
+  is intact, nonzero (reporting the first bad id) when it isn't.
+- **Signed commits.** Set `git.sign.key_file` to SSH-sign every backup
+  commit, giving a verifiable authorship chain over the whole history
+  (`git log --show-signature`).
+- **Encryption at rest.** Set `encryption.blob_key` (Fernet,
+  `otitbup[crypto]`) to encrypt the large-artifact **blob store** on disk;
+  blobs stay content-addressed by the plaintext hash so dedup and manifests
+  are unchanged. The git repo, `runstore.db` and secrets file are **not**
+  covered by this — use full-disk encryption (LUKS). See CONFIGURATION.md.
+- The runstore uses **versioned migrations** (`PRAGMA user_version`) so
+  upgrades never lose history.
 
 ## 10. Retention
 
@@ -275,6 +355,55 @@ and the CLI. `/healthz` is an unauthenticated liveness probe.
 Machine-readable: `/metrics` (Prometheus), `/api/status`, `/api/devices`,
 `/api/policy`, `/api/device/<name>` (JSON).
 
+**Live activity (SSE).** The **Activity** page has a live panel that
+streams operational events over Server-Sent Events (`GET /events/stream`,
+per-connection subscription with heartbeats). It uses `EventSource` and
+degrades gracefully with JavaScript off (the static feed still renders).
+
+**Scopes & SSO.** A user can be restricted to part of the estate with
+`scopes` (globs over `site/zone/name`) so their write actions only touch
+in-scope devices, and login can be delegated to an upstream OIDC/SAML proxy
+(`webui.trusted_header`) or LDAP/AD. See CONFIGURATION.md.
+
+### API tokens & the write API
+
+Machine callers (CI jobs, orchestrators, a central federation appliance)
+drive backups over a small scoped write API using bearer tokens:
+
+```bash
+otitbup token create ci-runner --role operator --scopes "plant-a/*" --days 90
+otitbup token list                  # names, roles, scopes, expiry
+otitbup token delete ci-runner
+```
+
+The token secret is shown **once** at creation and stored only sha256-
+hashed. Then:
+
+```bash
+curl -X POST -H "Authorization: Bearer <token>" \
+     https://backup.plant.local:8080/api/device/plant-a/cell-1/plc-01/backup
+```
+
+`POST /api/device/<qualified-name>/backup` and `.../verify` require the
+**operator** role and the device in scope, and return JSON
+`{"ok": ..., "message": ...}`. An active cookie session works too; token
+auth needs no CSRF (the token is a header, not a cookie).
+
+### Federation / site collectors
+
+For the Purdue-model / multi-site pattern, a **central** appliance rolls up
+health from per-site **collectors**:
+
+```bash
+otitbup federation                  # aggregate collector health
+```
+
+Configure `federation.collectors` (each with a `url` and a scoped read-only
+token); the central appliance polls each collector's `GET /api/status` over
+HTTPS. That link carries **health only** — backup **bytes** federate
+separately over plain git, each collector pushing to a shared remote
+(`git.push` / `git.remote`). See CONFIGURATION.md.
+
 ## 14. Events: syslog & SNMP traps
 
 Configure `events` (see CONFIGURATION.md) to fan structured events out to
@@ -325,17 +454,24 @@ full description (arguments, examples, related commands) of one command.
 | `help` / `explain <cmd>` | list commands; describe one at length |
 | `init` | scaffold a starter config |
 | `validate` / `list` / `drivers` | check config; list devices; list drivers |
-| `backup [devices] [--site --zone --force]` | run a backup |
+| `backup [devices] [--site --zone --force --dry-run]` | run a backup |
+| `test [devices] [--site --zone]` | dry-run connectivity/credential test (no commit) |
 | `daemon [--once]` | scheduler |
 | `serve [--host --port]` | web UI |
 | `log` / `diff [--from --to]` / `search` | inspect history and configs |
 | `status` / `verify [--all-commits]` / `policy` | health, integrity, compliance |
+| `anomalies` | statistical anomalies (slow backups, change storms) |
 | `annotate` / `maintenance` | change management |
 | `baseline set|clear|drift` | golden-config drift |
+| `desired [--diff]` | drift vs. declared config-as-code (`desired.dir`) |
 | `retention [--apply]` | prune large-artifact blobs |
+| `gc [--aggressive]` | repack/prune the backup git repo |
 | `restore` / `net-restore [--apply]` / `dr-plan` / `rehearse` | recovery |
 | `discover [--enrich]` / `reconcile` / `netbox` | find devices; prove coverage |
 | `report [--format --sign]` / `report-verify` | signed HTML/CSV/PDF/DOCX reports |
 | `export` / `strategy` | offline archive; 3-2-1 evaluation |
+| `federation` | roll up health from federated site collectors |
+| `verify-audit` | verify the tamper-evident audit hash chain |
+| `token create|list|delete` | manage scoped API tokens |
 | `passwd` / `certgen` | web UI credentials and TLS |
 | `secrets genkey|encrypt|decrypt` | secrets management |

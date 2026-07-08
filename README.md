@@ -30,8 +30,15 @@ not.
 - **Recovers**: hash-verified restore bundles and per-site DR runbooks for
   PLCs/RTUs, **automated restore** for network gear (dry-run first), and
   restore-rehearsal tracking.
-- **Read/write web UI** with roles, sessions and an audit log; syslog and
-  **SNMP trap** event fan-out; and a read-only JSON API.
+- **Read/write web UI** with roles, per-site **scopes**, optional SSO
+  (trusted-header/LDAP), a live activity stream, and a scoped write API;
+  syslog and **SNMP trap** event fan-out; and a JSON API.
+- **Hardens the archive**: a tamper-evident, hash-chained **audit log**
+  (`otitbup verify-audit`), optional **SSH-signed commits**, and optional
+  **at-rest encryption** of the large-artifact blob store (Fernet).
+- **Scales across sites**: federated **site collectors** (Purdue model) —
+  git for the backup bytes, a scoped health API for the roll-up — plus
+  statistical **anomaly detection** and config-as-code **desired state**.
 
 ## Documentation
 
@@ -93,6 +100,13 @@ otitbup export --out backup.tar.gz      # portable offsite/offline archive (3-2-
 otitbup strategy                        # evaluate 3-2-1 / 3-2-1-1-0 posture
 otitbup netbox reconcile                # inventory vs. NetBox (or: netbox import)
 otitbup discover 10.20.0.0/24 --enrich  # scan + probe device identity
+otitbup test plc-01                     # dry-run: test creds/reachability, no commit
+otitbup anomalies                       # slow-backup / change-storm outliers
+otitbup desired --diff                  # drift vs. declared config-as-code
+otitbup gc                              # repack/prune the backup git repo
+otitbup verify-audit                    # verify the tamper-evident audit chain
+otitbup token create ci --role operator --scopes "plant-a/*"   # scoped API token
+otitbup federation                      # roll up health from site collectors
 ```
 
 See [docs/USAGE.md](docs/USAGE.md) for a full, task-oriented walkthrough
@@ -248,14 +262,25 @@ page; a retention page; the driver catalog; and an **audit log**
 (admin-only). Machine-readable endpoints: `/metrics` (Prometheus),
 `/api/status` · `/api/devices` · `/api/policy` · `/api/device/<name>`
 (JSON), and `/healthz` (liveness, no auth). Optional HTTP Basic auth
-(single user or **multiple users with roles**) and TLS.
+(single user or **multiple users with roles**) and TLS. Users, sessions and
+API tokens carry **scopes** (globs over `site/zone/name`) that gate write
+actions per part of the estate; login can also be delegated to an upstream
+OIDC/SAML proxy (trusted header) or LDAP/AD. A scoped **write API**
+(`POST /api/device/<name>/backup|verify`, bearer token or session) lets CI
+and other systems trigger backups, and the **Activity** page streams live
+events over SSE.
 
 ## Operations, compliance & recovery
 
 - **Health & metrics** — persisted run results (SQLite) distinguish
   "unchanged" from "unreachable"; `otitbup status`, the Health page,
   Prometheus `/metrics`, and a staleness alert ("no successful backup in
-  N days") make silent failure impossible.
+  N days") make silent failure impossible. **Anomaly detection**
+  (`otitbup anomalies`, and automatically after each backup) flags
+  slow-backup outliers and change storms.
+- **Reliability** — per-device **retries** with backoff for transient
+  failures, pre/post **shell hooks** around each backup, and `otitbup test`
+  / `backup --dry-run` for a commit-free connectivity and credential check.
 - **Verification** — `otitbup verify` re-hashes stored artifacts against
   the manifest recorded at capture time and checks blob integrity.
 - **Change management** — `otitbup annotate` links a change to a work
@@ -265,6 +290,18 @@ page; a retention page; the driver catalog; and an **audit log**
   policy findings and rehearsal status.
 - **Config policy checks** — built-in and custom rules flag insecure
   configuration (telnet, SNMP public, weak passwords) across vendors.
+- **Config-as-code** — declare intended device configs in a directory and
+  measure live drift against them (`otitbup desired [--diff]`), distinct
+  from a golden baseline (an approved *past* backup).
+- **Integrity & at-rest** — a hash-chained, tamper-evident **audit log**
+  (`otitbup verify-audit`); optional **SSH-signed** backup commits
+  (`git.sign`); and optional **Fernet encryption** of the blob store
+  (`encryption.blob_key`) — content-addressing by plaintext hash is
+  preserved, so dedup is unaffected (LUKS still recommended for the rest).
+- **Federation / site collectors** — a central appliance rolls up health
+  from per-site collectors over a scoped read-only API (`otitbup
+  federation`), while backup bytes federate over plain git to a shared
+  remote — the Purdue-model split of control plane from data plane.
 - **Recovery** — guided restore bundles for PLCs/RTUs; **automated
   restore for network gear** (`otitbup net-restore`, dry run by default,
   pre-change capture + post-change verify); per-site **DR runbooks**
