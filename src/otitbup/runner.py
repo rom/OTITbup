@@ -17,6 +17,8 @@ from pathlib import Path
 from .alerts import AlertManager
 from .blobstore import BlobStore
 from .drivers import get_driver
+from .events import (BACKUP_ERROR, BACKUP_START, BACKUP_STOP, EventBus,
+                     NullEventBus)
 from .gitstore import GitStore
 from .models import AppConfig, Device
 from .runstore import RunRecord, RunStore, default_runstore
@@ -49,6 +51,7 @@ class Runner:
         alerts: AlertManager | None = None,
         force: bool = False,
         runstore: RunStore | None = None,
+        events: EventBus | None = None,
     ):
         self.config = config
         self.store = store
@@ -60,6 +63,7 @@ class Runner:
         self.force = force
         self.blobstore = default_blobstore(config)
         self.runstore = runstore or default_runstore(config)
+        self.events = events or NullEventBus()
 
     def backup_devices(self, devices: list[Device]) -> list[BackupResult]:
         from .filelock import FileLock, LockBusy
@@ -170,8 +174,24 @@ class Runner:
                 message=f"skipped: outside maintenance window "
                         f"{zone.maintenance_window}",
             )
+        self.events.emit(
+            BACKUP_START, f"backup started: {device.qualified_name}",
+            detail=device.qualified_name,
+        )
         with limit:
             result = self._collect_and_store(device, started)
+        if not result.ok:
+            self.events.emit(
+                BACKUP_ERROR,
+                f"backup failed: {device.qualified_name}: {result.message}",
+                severity="error", detail=device.qualified_name,
+            )
+        else:
+            self.events.emit(
+                BACKUP_STOP,
+                f"backup finished: {device.qualified_name} ({result.message})",
+                detail=device.qualified_name,
+            )
         self.runstore.record_run(RunRecord(
             device=result.device,
             started_at=started,

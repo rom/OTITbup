@@ -1,15 +1,47 @@
 # OTITbup
 
-OT and IT backup and restore tool that can extract and save configurations,
-settings, logic and code etc from OT equipment (PLC, RTU, gateways, com
-equipment), IT infrastructure equipment (network equipment), in a versioned
-git backup.
+OT and IT backup and restore tool that extracts and versions
+configurations, settings, logic and code from OT equipment (PLCs, RTUs,
+gateways, comms equipment) and IT infrastructure (network switches,
+routers, firewalls) into a **versioned git backup** on an on-prem
+appliance.
 
+It is built for OT reality: every collector is **read-only by contract**,
+polling respects **maintenance windows** and **per-zone rate limits**, and
+it degrades gracefully — capturing full configuration and program files
+where a protocol allows, and identity + a change fingerprint where it does
+not.
+
+## What it does
+
+- **Backs up 40+ device types** across PLCs, RTUs and network gear — from
+  Siemens/Rockwell/Schneider/Mitsubishi/Omron/Beckhoff PLCs and DNP3/SEL
+  RTUs to Cisco/Hirschmann/Moxa/Westermo switches — via native protocols,
+  SSH, SFTP, HTTP, OPC UA, EtherNet/IP and more.
+- **Versions everything in git**, one commit per device per change, with
+  sha256 manifests, hierarchical **retention** and a deduplicated blob
+  store for large project files.
+- **Detects and classifies change**: alerts on *unexpected* changes (the
+  unauthorized-change signal), tracks **golden-config drift** against an
+  approved baseline, and lets you **annotate** changes with a work order.
+- **Proves coverage and health**: persisted run history, staleness
+  alerts, a Prometheus `/metrics` endpoint, config **policy/compliance**
+  checks, scheduled compliance **reports**, and inventory **reconciliation**.
+- **Recovers**: hash-verified restore bundles and per-site DR runbooks for
+  PLCs/RTUs, **automated restore** for network gear (dry-run first), and
+  restore-rehearsal tracking.
+- **Read/write web UI** with roles, sessions and an audit log; syslog and
+  **SNMP trap** event fan-out; and a read-only JSON API.
+
+## Documentation
+
+- [docs/USAGE.md](docs/USAGE.md) — task-oriented guide to using the tool
+- [docs/CONFIGURATION.md](docs/CONFIGURATION.md) — full `otitbup.yml`
+  reference (inventory, secrets, retention, policy, reports, events,
+  web UI auth/TLS/roles, alerts)
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout and design
 - [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) — scope and decisions from
   the requirements interview
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout and design
-- [docs/CONFIGURATION.md](docs/CONFIGURATION.md) — configuration file
-  reference (`otitbup.yml`, secrets, web UI auth/TLS, alerts)
 
 ## Quick start
 
@@ -52,6 +84,9 @@ otitbup baseline set plc-01             # approve current config as the golden b
 otitbup baseline drift                  # devices that have drifted from baseline
 otitbup reconcile 10.20.0.0/24          # inventory vs. network (coverage gaps)
 ```
+
+See [docs/USAGE.md](docs/USAGE.md) for a full, task-oriented walkthrough
+of every command and the web UI.
 
 ### Encrypted secrets
 
@@ -181,7 +216,16 @@ page; a retention page; the driver catalog; and an **audit log**
   restore for network gear** (`otitbup net-restore`, dry run by default,
   pre-change capture + post-change verify); per-site **DR runbooks**
   (`otitbup dr-plan`); and restore-**rehearsal** tracking surfaced in the
-  UI and reports. Optional HTTP Basic auth
+  UI and reports.
+- **Events → syslog & SNMP traps** — every process start/stop, web UI
+  start/stop, backup start/stop/error, config read/reload, login/logout,
+  and user create/delete/password-change is emitted as a structured event
+  to the audit log and, when configured, to **syslog** and **SNMPv2c
+  traps** (stdlib, no extra dependencies).
+- **Read/write web UI** — signed-in operators can start a backup, verify
+  it, add notes, set baselines and generate reports from the browser;
+  admins manage users and re-read the config. Cookie sessions with CSRF,
+  role-based access (viewer/operator/admin), and a full audit log. Optional HTTP Basic auth
 (`otitbup passwd`) and TLS (`otitbup certgen` for a self-signed pair, or
 any PEM cert/key) — see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 

@@ -79,6 +79,17 @@ reports:                  # scheduled compliance reports (from the daemon)
   # period_days: 30
   # out: compliance-report.html
 
+events:                   # fan out operational events to syslog / SNMP traps
+  # syslog:
+  #   address: 10.0.0.1
+  #   port: 514
+  #   facility: local0
+  # snmp_trap:
+  #   address: 10.0.0.2
+  #   port: 162
+  #   community: public
+  #   enterprise_oid: 1.3.6.1.4.1.99999   # replace with YOUR enterprise OID
+
 sites:
   - name: plant-a
     # retention: {keep_days: 730}     # site-level override

@@ -48,11 +48,13 @@ otitbup.yml (inventory, source of truth, versioned by the operator)
 | `reconcile.py` | Inventory reconciliation: inventory vs. network scan (unmanaged / unreachable) |
 | `filelock.py` | Cross-process advisory lock (flock) around the backup critical section |
 | `scaffold.py` | `otitbup init` — starter config/secrets scaffolding |
+| `events.py` | Event bus: audit + Python log + syslog + SNMPv2c traps (stdlib BER encoder) |
+| `sessions.py` | In-memory web sessions (cookie login/logout, CSRF token) |
 | `gitstore.py` | Local git repo; per-device commits; `manifest.yml` with sha256 fingerprints (change detection for binaries); optional push to remote |
 | `runner.py` | Orchestration: per-zone concurrency semaphores, maintenance-window checks, change/failure alerts |
 | `daemon.py` | Scheduler loop; per-device interval state in `state.json` |
 | `alerts.py` | Webhook, syslog, email notifiers; failures logged, never fatal |
-| `webui.py` | Read-only web UI (stdlib http.server): dashboard with tiles/zone grouping/filtering, activity feed, driver catalog, per-device artifacts + history, per-commit diffs, raw artifact viewing; optional HTTP Basic auth and TLS, warns when bound beyond loopback without auth |
+| `webui.py` | Read/write web UI (stdlib http.server): dashboard with tiles/zone grouping/filtering, activity feed, driver catalog, per-device artifacts + history, per-commit diffs, raw artifact viewing; optional HTTP Basic auth and TLS, warns when bound beyond loopback without auth |
 | `tlscert.py` | Self-signed EC P-256 certificate generation for the web UI (`otitbup certgen`) |
 | `cli.py` | `validate`, `list`, `drivers`, `backup`, `diff`, `log`, `daemon`, `serve`, `discover`, `restore`, `passwd`, `certgen`, `secrets genkey/encrypt/decrypt` |
 

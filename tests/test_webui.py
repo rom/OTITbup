@@ -234,10 +234,12 @@ def test_compare_view(server):
 
 def test_audit_log_records_and_shows(server):
     base, _, _ = server
-    _get(base + "/health")            # generate an auditable view
+    _get(base + "/policy")            # generate an auditable view
     status, _, body = _get(base + "/audit")
+    text = body.decode()
     assert status == 200
-    assert "/health" in body.decode()
+    # The audit table row (not just the nav) carries the view + path.
+    assert "view" in text and "/policy" in text
 
 
 def test_multiuser_auth_and_role_gate(config_file, tmp_path):

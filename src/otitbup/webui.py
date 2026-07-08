@@ -20,6 +20,7 @@ import posixpath
 import re
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import quote, unquote
 
 import yaml
@@ -101,7 +102,8 @@ def _page(title: str, body: str) -> bytes:
         f"<a href='/search'>Search</a><a href='/drift'>Drift</a>"
         f"<a href='/activity'>Activity</a><a href='/policy'>Policy</a>"
         f"<a href='/retention'>Retention</a>"
-        f"<a href='/drivers'>Drivers</a><a href='/audit'>Audit</a></nav></header>"
+        f"<a href='/drivers'>Drivers</a><a href='/audit'>Audit</a>"
+        f"<a href='/users'>Users</a><a href='/logout'>Logout</a></nav></header>"
         f"{body}</body></html>"
     ).encode()
 
@@ -114,6 +116,34 @@ def _device_link_name(qualified_name: str) -> str:
     return f"/device/{quote(qualified_name)}"
 
 
+def _csrf(token: str) -> str:
+    return f"<input type='hidden' name='csrf' value='{html.escape(token)}'>"
+
+
+def _result_page(ok: bool, message: str, back_url: str) -> bytes:
+    cls = "badge" if ok else "badge never"
+    label = "OK" if ok else "FAILED"
+    body = (
+        f"<h2>Action result</h2>"
+        f"<p><span class='{cls}'>{label}</span> {html.escape(message)}</p>"
+        f"<p><a href='{html.escape(back_url)}'>&larr; back</a></p>"
+    )
+    return _page("otitbup — result", body)
+
+
+def _button(action: str, label: str, csrf: str, fields: dict | None = None) -> str:
+    hidden = _csrf(csrf) + "".join(
+        f"<input type='hidden' name='{html.escape(k)}' "
+        f"value='{html.escape(str(v))}'>"
+        for k, v in (fields or {}).items()
+    )
+    return (
+        f"<form method='post' action='{html.escape(action)}' "
+        f"style='display:inline'>{hidden}"
+        f"<button type='submit'>{html.escape(label)}</button></form>"
+    )
+
+
 class WebUI:
     def __init__(
         self, config: AppConfig, store: GitStore,
@@ -121,17 +151,245 @@ class WebUI:
         blobstore=None,
         runstore=None,
         users: dict | None = None,
+        events=None,
+        config_path=None,
+        secrets=None,
     ):
         self.config = config
         self.store = store
         self.auth = auth
         self.blobstore = blobstore
         self.runstore = runstore
-        # {username: {password_hash, role}}; empty = no auth required.
+        self.config_path = config_path
+        self.secrets = secrets
+        self._static_users = users
+        from .events import NullEventBus
+        from .sessions import SessionStore
+        self.events = events or NullEventBus()
+        self.sessions = SessionStore()
+
+    def all_users(self) -> dict:
+        """Config-declared users (static) merged with runstore users
+        (GUI-managed). Config users win on conflict and cannot be deleted
+        via the UI."""
         from .auth import build_users
-        self.users = users if users is not None else build_users(
-            auth, config.webui.get("users")
+        if self._static_users is not None:
+            base = dict(self._static_users)
+        else:
+            base = build_users(self.auth, self.config.webui.get("users"))
+        for name, rec in base.items():
+            rec.setdefault("source", "config")
+        if self.runstore is not None:
+            for name, rec in self.runstore.get_users().items():
+                if name not in base:
+                    base[name] = {**rec, "source": "db"}
+        return base
+
+    @property
+    def users(self) -> dict:
+        return self.all_users()
+
+    # ---------------------------------------------------- auth pages
+
+    def login_page(self, error: str = "", next_url: str = "/") -> bytes:
+        msg = (
+            f"<p class='sev-high'>{html.escape(error)}</p>" if error else ""
         )
+        body = (
+            "<h2>Sign in</h2>" + msg
+            + "<form method='post' action='/login'>"
+            f"<input type='hidden' name='next' value='{html.escape(next_url)}'>"
+            "<p><input name='username' placeholder='username' "
+            "autocomplete='username' autofocus></p>"
+            "<p><input name='password' type='password' "
+            "placeholder='password' autocomplete='current-password'></p>"
+            "<p><button type='submit'>Sign in</button></p></form>"
+        )
+        return _page("otitbup — sign in", body)
+
+    def users_page(self, identity: dict, csrf: str) -> bytes:
+        users = self.all_users()
+        rows = ""
+        for name, rec in sorted(users.items()):
+            source = rec.get("source", "config")
+            actions = ""
+            if source == "db":
+                actions = (
+                    f"<form method='post' action='/users/delete' "
+                    f"style='display:inline'>{_csrf(csrf)}"
+                    f"<input type='hidden' name='username' value='"
+                    f"{html.escape(name)}'>"
+                    "<button type='submit'>delete</button></form>"
+                )
+            rows += (
+                f"<tr><td>{html.escape(name)}</td>"
+                f"<td>{html.escape(rec.get('role', 'viewer'))}</td>"
+                f"<td>{html.escape(source)}</td><td>{actions}</td></tr>"
+            )
+        add_form = (
+            "<h3>Add user</h3>"
+            "<form method='post' action='/users/create'>" + _csrf(csrf)
+            + "<input name='username' placeholder='username'> "
+            "<input name='password' type='password' placeholder='password'> "
+            "<select name='role'><option>viewer</option>"
+            "<option>operator</option><option>admin</option></select> "
+            "<button type='submit'>Create</button></form>"
+        )
+        passwd_form = (
+            "<h3>Change a password</h3>"
+            "<form method='post' action='/users/passwd'>" + _csrf(csrf)
+            + "<input name='username' placeholder='username'> "
+            "<input name='password' type='password' placeholder='new password'> "
+            "<button type='submit'>Change</button></form>"
+            "<p class='muted'>config-declared users are managed in the YAML "
+            "file and cannot be edited here</p>"
+        )
+        body = (
+            "<h2>Users</h2>"
+            "<table><tr><th>Username</th><th>Role</th><th>Source</th>"
+            "<th></th></tr>" + rows + "</table>" + add_form + passwd_form
+        )
+        return _page("otitbup — users", body)
+
+    # ------------------------------------------------- write actions
+
+    def action_backup(self, qualified_name: str, actor: str) -> tuple[bool, str]:
+        device = self._find(qualified_name)
+        if not device:
+            return False, "unknown device"
+        from .runner import Runner
+        runner = Runner(
+            self.config, self.store, secrets=self.secrets,
+            runstore=self.runstore, events=self.events, force=True,
+        )
+        results = runner.backup_devices([device])
+        r = results[0]
+        return r.ok, f"{qualified_name}: {r.message}"
+
+    def action_verify(self, qualified_name: str) -> tuple[bool, str]:
+        device = self._find(qualified_name)
+        if not device:
+            return False, "unknown device"
+        commit = self.store.last_commit_hash(device)
+        if not commit:
+            return False, "no backups to verify"
+        problems = self.store.verify_commit(
+            device, commit, blobstore=self.blobstore
+        )
+        if problems:
+            return False, f"{len(problems)} problem(s): " + "; ".join(problems)
+        return True, "verified: all hashes match the manifest"
+
+    def action_note(
+        self, qualified_name: str, commit: str, text: str, actor: str
+    ) -> tuple[bool, str]:
+        device = self._find(qualified_name)
+        if not device:
+            return False, "unknown device"
+        if not _COMMIT_RE.match(commit):
+            commit = self.store.last_commit_hash(device)
+        if not commit:
+            return False, "no commit to annotate"
+        self.store.set_annotation(commit, text)
+        return True, f"note saved on {commit[:10]}"
+
+    def action_baseline(
+        self, qualified_name: str, commit: str, actor: str
+    ) -> tuple[bool, str]:
+        import time
+        device = self._find(qualified_name)
+        if not device or self.runstore is None:
+            return False, "unavailable"
+        if not _COMMIT_RE.match(commit or ""):
+            commit = self.store.last_commit_hash(device)
+        if not commit:
+            return False, "no backup to approve"
+        self.runstore.set_baseline(
+            qualified_name, commit, time.time(), set_by=actor
+        )
+        return True, f"baseline set to {commit[:10]}"
+
+    def action_report(self) -> tuple[bool, str]:
+        from .reports import compliance_report
+        if self.runstore is None:
+            return False, "unavailable"
+        html_doc = compliance_report(self.config, self.store, self.runstore)
+        out = Path(self.config.data_dir).parent / "compliance-report.html"
+        out.write_text(html_doc)
+        return True, f"report written to {out}"
+
+    def reload_config(self) -> tuple[bool, str]:
+        if not self.config_path:
+            return False, "config path unknown (started without -c?)"
+        from .config import ConfigError, load_config
+        from .events import CONFIG_RELOAD
+        try:
+            self.config = load_config(self.config_path)
+        except ConfigError as exc:
+            return False, f"reload failed: {exc}"
+        self.events.emit(
+            CONFIG_RELOAD, "config reloaded from web UI",
+            detail=self.config_path,
+        )
+        return True, f"config reloaded: {len(self.config.all_devices())} devices"
+
+    def action_user_create(
+        self, username: str, password: str, role: str, actor: str
+    ) -> tuple[bool, str]:
+        import time
+        from .auth import ROLES, hash_password
+        from .events import USER_CREATE
+        if self.runstore is None:
+            return False, "unavailable"
+        if not username or not password:
+            return False, "username and password required"
+        if role not in ROLES:
+            return False, f"invalid role (use {', '.join(ROLES)})"
+        if username in self.all_users():
+            return False, "user already exists"
+        self.runstore.add_user(
+            username, hash_password(password), role, time.time()
+        )
+        self.events.emit(
+            USER_CREATE, f"user created: {username} ({role})",
+            actor=actor, detail=username,
+        )
+        return True, f"user {username} created"
+
+    def action_user_delete(
+        self, username: str, actor: str
+    ) -> tuple[bool, str]:
+        from .events import USER_DELETE
+        if self.runstore is None:
+            return False, "unavailable"
+        if self.all_users().get(username, {}).get("source") == "config":
+            return False, "config-declared users cannot be deleted here"
+        if self.runstore.delete_user(username) == 0:
+            return False, "no such db user"
+        self.events.emit(
+            USER_DELETE, f"user deleted: {username}",
+            actor=actor, detail=username,
+        )
+        return True, f"user {username} deleted"
+
+    def action_user_passwd(
+        self, username: str, password: str, actor: str
+    ) -> tuple[bool, str]:
+        from .auth import hash_password
+        from .events import USER_PASSWD
+        if self.runstore is None:
+            return False, "unavailable"
+        if not password:
+            return False, "password required"
+        if self.all_users().get(username, {}).get("source") == "config":
+            return False, "config-declared users are managed in the YAML file"
+        if self.runstore.set_user_password(username, hash_password(password)) == 0:
+            return False, "no such db user"
+        self.events.emit(
+            USER_PASSWD, f"password changed: {username}",
+            actor=actor, detail=username,
+        )
+        return True, f"password changed for {username}"
 
     # ------------------------------------------------------------ pages
 
@@ -229,7 +487,11 @@ class WebUI:
         )
         return _page("otitbup — activity", body)
 
-    def health(self) -> bytes:
+    def health(self, ctx: dict | None = None) -> bytes:
+        from .auth import role_rank
+        ctx = ctx or {}
+        csrf = ctx.get("csrf", "")
+        role = ctx.get("role", "viewer")
         import time
         now = time.time()
         devices = self.config.all_devices()
@@ -280,8 +542,15 @@ class WebUI:
             "" if self.runstore else
             "<p class='muted'>run history unavailable (no run store)</p>"
         )
+        controls = ""
+        if role_rank(role) >= role_rank("operator"):
+            controls += _button("/report", "Generate compliance report", csrf)
+        if role_rank(role) >= role_rank("admin"):
+            controls += " " + _button("/reload", "Re-read config file", csrf)
+        if controls:
+            controls = "<p>" + controls + "</p>"
         body = (
-            "<h2>Backup health</h2>" + tiles + note
+            "<h2>Backup health</h2>" + tiles + controls + note
             + "<input id='filter' type='search' placeholder='Filter…' "
               "autocomplete='off'>"
             + "<table><tr><th>Device</th><th>Status</th><th>Last success</th>"
@@ -294,48 +563,67 @@ class WebUI:
         )
         return _page("otitbup — health", body)
 
-    def search(self, query: str) -> bytes:
-        by_path = {d.path: d for d in self.config.all_devices()}
+    def search(
+        self, query: str, site: str = "", zone: str = "",
+        case_sensitive: bool = False,
+    ) -> bytes:
+        devices = self.config.all_devices()
+        sites = sorted({d.site for d in devices})
+        zones = sorted({d.zone for d in devices})
+        by_path = {d.path: d for d in devices}
         rows = ""
         count = 0
         if query:
-            for repo_path, lineno, text in self.store.search(query):
-                count += 1
-                label = repo_path
-                link = None
-                for path, device in by_path.items():
+            for repo_path, lineno, text in self.store.search(
+                query, ignore_case=not case_sensitive
+            ):
+                device = None
+                artifact = repo_path
+                for path, dev in by_path.items():
                     if repo_path.startswith(path + "/"):
-                        artifact = repo_path[len(path) + 1:]
-                        label = f"{device.qualified_name}:{artifact}"
-                        link = (
-                            f"{_device_link(device)}/artifact/"
-                            f"{quote(artifact)}"
-                        )
+                        device, artifact = dev, repo_path[len(path) + 1:]
                         break
-                cell = (
-                    f"<a href='{link}'>{html.escape(label)}</a>" if link
-                    else html.escape(label)
-                )
+                if site and (not device or device.site != site):
+                    continue
+                if zone and (not device or device.zone != zone):
+                    continue
+                count += 1
+                if device:
+                    label = f"{device.qualified_name}:{artifact}"
+                    link = f"{_device_link(device)}/artifact/{quote(artifact)}"
+                    cell = f"<a href='{link}'>{html.escape(label)}</a>"
+                else:
+                    cell = html.escape(repo_path)
                 rows += (
                     f"<tr data-row><td>{cell}</td><td>{lineno}</td>"
                     f"<td><code>{html.escape(text.strip()[:200])}</code></td></tr>"
                 )
+        opts = lambda values, sel: "".join(  # noqa: E731
+            f"<option{' selected' if v == sel else ''}>{html.escape(v)}"
+            "</option>" for v in [""] + values
+        )
         form = (
             "<form method='get' action='/search'>"
-            f"<input id='filter' type='search' name='q' "
-            f"value='{html.escape(query)}' placeholder='Search configs…' "
-            "autocomplete='off'><button type='submit'>Search</button></form>"
+            f"<input type='search' name='q' value='{html.escape(query)}' "
+            "placeholder='text or regex…' autocomplete='off'> "
+            f"site <select name='site'>{opts(sites, site)}</select> "
+            f"zone <select name='zone'>{opts(zones, zone)}</select> "
+            "<label><input type='checkbox' name='cs' value='1'"
+            + (" checked" if case_sensitive else "")
+            + "> case</label> "
+            "<button type='submit'>Search</button></form>"
         )
         body = (
             "<h2>Config search</h2>" + form
             + (
-                f"<p class='muted'>{count} match(es) across the latest "
-                "backup of every device</p>"
+                f"<p class='muted'>{count} match(es) — latest backup of "
+                "every device (regex supported)</p>"
                 "<table><tr><th>Device : artifact</th><th>Line</th>"
                 "<th>Match</th></tr>" + rows + "</table>"
                 if query else
                 "<p class='muted'>Search the latest configuration of every "
-                "device — e.g. a VLAN id, an IP, a tag or username.</p>"
+                "device — a VLAN id, an IP, a tag, a username, or a regex. "
+                "Filter by site/zone.</p>"
             )
         )
         return _page("otitbup — search", body)
@@ -530,7 +818,11 @@ class WebUI:
         )
         return _page("otitbup — drivers", body)
 
-    def device(self, qualified_name: str) -> bytes | None:
+    def device(self, qualified_name: str, ctx: dict | None = None) -> bytes | None:
+        from .auth import role_rank
+        ctx = ctx or {}
+        can_write = role_rank(ctx.get("role", "viewer")) >= role_rank("operator")
+        csrf = ctx.get("csrf", "")
         device = self._find(qualified_name)
         if not device:
             return None
@@ -658,6 +950,45 @@ class WebUI:
                         "</code></p>"
                     )
 
+        # Write-action bar (operator+): back up now, verify, approve baseline.
+        action_bar = ""
+        note_form = ""
+        compare_form = ""
+        if can_write:
+            dl = _device_link(device)
+            action_bar = (
+                "<p>"
+                + _button(f"{dl}/backup", "Back up now", csrf)
+                + " " + _button(f"{dl}/verify", "Verify backup", csrf)
+                + (
+                    " " + _button(f"{dl}/baseline", "Set baseline", csrf,
+                                  {"commit": commit or ""})
+                    if commit else ""
+                )
+                + "</p>"
+            )
+            note_form = (
+                "<h3>Add note to latest backup</h3>"
+                f"<form method='post' action='{dl}/note'>" + _csrf(csrf)
+                + f"<input type='hidden' name='commit' value='{commit or ''}'>"
+                "<input name='text' placeholder='e.g. MOC-1234: firmware "
+                "upgrade' size='50'> <button type='submit'>Save note</button>"
+                "</form>"
+            )
+        commits = self.store.device_commits(device)
+        if len(commits) >= 2:
+            options = "".join(
+                f"<option value='{c}'>{c[:10]} · {ts}</option>"
+                for c, ts in commits
+            )
+            compare_form = (
+                "<h3>Compare two backups</h3>"
+                f"<form method='get' action='{_device_link(device)}/compare'>"
+                "base <select name='base'>" + options + "</select> "
+                "head <select name='head'>" + options + "</select> "
+                "<button type='submit'>Compare</button></form>"
+            )
+
         diff = self.store.last_diff(device).strip()
         from .retention import describe_policy
         policy_line = describe_policy(self.config.retention_for(device))
@@ -669,6 +1000,7 @@ class WebUI:
             f"window {html.escape(zone.maintenance_window or 'always')} · "
             f"<a href='/retention'>retention</a> "
             f"{html.escape(policy_line)}{status_line}</p>"
+            + action_bar
             + policy_block
             + "<h3>Artifacts (latest backup)</h3>"
             + (
@@ -682,6 +1014,8 @@ class WebUI:
                 + "".join(history_rows) + "</table>"
                 if history_rows else "<p class='muted'>no backups yet</p>"
             )
+            + note_form
+            + compare_form
             + rehearsal_block
             + drift_block
             + "<h3>Latest change</h3>"
@@ -828,75 +1162,99 @@ class _Handler(BaseHTTPRequestHandler):
         return None
 
     def _send(self, status: int, content: bytes,
-              content_type: str = "text/html; charset=utf-8") -> None:
+              content_type: str = "text/html; charset=utf-8",
+              headers: dict | None = None) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(content)))
         self.send_header("X-Content-Type-Options", "nosniff")
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
         self.end_headers()
         self.wfile.write(content)
+
+    def _cookie_token(self) -> str | None:
+        cookie = self.headers.get("Cookie", "")
+        for part in cookie.split(";"):
+            key, _, value = part.strip().partition("=")
+            if key == "otitbup_session":
+                return value
+        return None
+
+    def _identify(self) -> dict | None:
+        """Resolve the request identity: cookie session first (browser),
+        then HTTP Basic (API/CLI/scrapers). Returns {username, role, token,
+        via} or None."""
+        session = self.ui.sessions.get(self._cookie_token())
+        if session:
+            return {
+                "username": session.username, "role": session.role,
+                "token": session.token, "via": "session",
+            }
+        from .auth import authenticate
+        ident = authenticate(self.headers.get("Authorization"), self.ui.users)
+        if ident:
+            ident["via"] = "basic"
+        return ident
+
+    def _redirect(self, location: str, headers: dict | None = None) -> None:
+        self.send_response(303)
+        self.send_header("Location", location)
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def do_GET(self):
         from urllib.parse import parse_qs
         raw = self.path.split("?", 1)
         path = unquote(raw[0])
         query = parse_qs(raw[1]) if len(raw) > 1 else {}
-        # Liveness probe is always reachable so monitoring can poll it.
         if path == "/healthz":
             return self._send(200, b'{"status":"ok"}\n', "application/json")
+        if path == "/login":
+            return self._send(200, self.ui.login_page(
+                next_url=query.get("next", ["/"])[0]))
 
-        # Authenticate (multi-user with roles, or open if no users set).
-        identity = None
-        if self.ui.users:
-            from .auth import authenticate
-            identity = authenticate(
-                self.headers.get("Authorization"), self.ui.users
-            )
-            if identity is None:
-                content = _page("unauthorized", "<p>unauthorized</p>")
-                self.send_response(401)
-                self.send_header("WWW-Authenticate", 'Basic realm="otitbup"')
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(content)))
-                self.end_headers()
-                self.wfile.write(content)
-                return
+        identity = self._identify()
+        # Auth required if any users are configured. A client that SENT
+        # (invalid) Basic credentials gets a 401 challenge; a browser with
+        # no credentials gets the login page.
+        if self.ui.users and identity is None:
+            sent_basic = bool(self.headers.get("Authorization"))
+            if sent_basic or path.startswith("/api/") or path == "/metrics":
+                return self._send(
+                    401, b'{"error":"unauthorized"}\n', "application/json",
+                    headers={"WWW-Authenticate": 'Basic realm="otitbup"'},
+                )
+            return self._send(200, self.ui.login_page(next_url=path))
         self._identity = identity
+        role = identity["role"] if identity else "admin"
+        csrf = identity["token"] if identity and identity["via"] == "session" else ""
 
-        # Audit log (best-effort; page views only, not asset fetches).
-        if self.ui.runstore is not None and not path.startswith(
-            ("/api/", "/metrics")
+        # Audit page views (not assets/API/metrics/liveness) for compliance.
+        if (
+            self.ui.runstore is not None
+            and not path.startswith(("/api/", "/metrics"))
+            and "/artifact/" not in path
         ):
             import time
             try:
                 self.ui.runstore.audit(
                     time.time(), "view",
                     actor=identity["username"] if identity else None,
-                    role=identity["role"] if identity else None,
-                    detail=path,
+                    role=role, detail=path,
                 )
             except Exception:
                 pass
 
-        # Role-gated pages.
-        if path == "/audit":
-            from .auth import role_rank
-            role = identity["role"] if identity else "admin"
-            if self.ui.users and role_rank(role) < role_rank("admin"):
-                return self._send(
-                    403, _page("forbidden", "<p>admin role required</p>")
-                )
-            return self._send(200, self.ui.audit())
-
-        # Machine-readable endpoints (non-HTML).
+        # Machine-readable endpoints.
         if path == "/metrics":
             from .metrics import metrics_text
-            text = metrics_text(
+            return self._send(200, metrics_text(
                 self.ui.config, self.ui.store, self.ui.runstore,
                 self.ui.blobstore,
-            )
-            return self._send(200, text.encode(),
-                              "text/plain; version=0.0.4; charset=utf-8")
+            ).encode(), "text/plain; version=0.0.4; charset=utf-8")
         if path.startswith("/api/"):
             result = self._api(path)
             if result is None:
@@ -909,13 +1267,29 @@ class _Handler(BaseHTTPRequestHandler):
                 "application/json",
             )
 
+        # Role-gated pages (admin only).
+        from .auth import role_rank
+        if path in ("/audit", "/users"):
+            if self.ui.users and role_rank(role) < role_rank("admin"):
+                return self._send(
+                    403, _page("forbidden", "<p>admin role required</p>")
+                )
+            page = self.ui.audit() if path == "/audit" else self.ui.users_page(
+                identity or {}, csrf
+            )
+            return self._send(200, page)
+
         content: bytes | None = None
         if path in ("/", "/index.html"):
             content = self.ui.index()
         elif path == "/health":
-            content = self.ui.health()
+            content = self.ui.health(ctx={"role": role, "csrf": csrf})
         elif path == "/search":
-            content = self.ui.search(query.get("q", [""])[0])
+            content = self.ui.search(
+                query.get("q", [""])[0], site=query.get("site", [""])[0],
+                zone=query.get("zone", [""])[0],
+                case_sensitive=query.get("cs", [""])[0] == "1",
+            )
         elif path == "/drift":
             content = self.ui.drift()
         elif path == "/policy":
@@ -943,10 +1317,136 @@ class _Handler(BaseHTTPRequestHandler):
                 if result is not None:
                     return self._send(200, result[0], result[1])
             elif len(parts) == 3:
-                content = self.ui.device(rest)
+                content = self.ui.device(
+                    rest, ctx={"role": role, "csrf": csrf}
+                )
         if content is not None:
             return self._send(200, content)
         self._send(404, _page("not found", "<p>not found</p>"))
+
+    def do_POST(self):
+        from urllib.parse import parse_qs
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        raw = self.rfile.read(length).decode("utf-8", "replace") if length else ""
+        form = {k: v[0] for k, v in parse_qs(raw).items()}
+        path = unquote(self.path.split("?", 1)[0])
+
+        # Login/logout are their own auth flow.
+        if path == "/login":
+            return self._handle_login(form)
+        if path == "/logout":
+            return self._handle_logout()
+
+        identity = self._identify()
+        if self.ui.users and identity is None:
+            return self._send(401, _page("unauthorized", "<p>sign in</p>"))
+        actor = identity["username"] if identity else "anonymous"
+        role = identity["role"] if identity else "admin"
+
+        # CSRF: cookie-session POSTs must echo the session token.
+        if identity and identity["via"] == "session":
+            if form.get("csrf") != identity["token"]:
+                return self._send(403, _page("forbidden", "<p>bad CSRF token</p>"))
+
+        from .auth import role_rank
+        ok, message, back = self._dispatch_post(path, form, actor, role, role_rank)
+        if ok is None:
+            return self._send(404, _page("not found", "<p>not found</p>"))
+        return self._send(
+            200, _result_page(ok, message, back)
+        )
+
+    def _handle_login(self, form: dict) -> None:
+        from .auth import authenticate
+        from .events import LOGIN
+        next_url = form.get("next", "/")
+        header = "Basic " + __import__("base64").b64encode(
+            f"{form.get('username', '')}:{form.get('password', '')}".encode()
+        ).decode()
+        ident = authenticate(header, self.ui.users)
+        if ident is None:
+            return self._send(200, self.ui.login_page(
+                error="invalid username or password", next_url=next_url))
+        session = self.ui.sessions.create(ident["username"], ident["role"])
+        self.ui.events.emit(
+            LOGIN, f"login: {ident['username']} ({ident['role']})",
+            actor=ident["username"], detail=ident["username"],
+        )
+        self._redirect(next_url if next_url.startswith("/") else "/", headers={
+            "Set-Cookie":
+                f"otitbup_session={session.token}; HttpOnly; SameSite=Strict; "
+                "Path=/",
+        })
+
+    def _handle_logout(self) -> None:
+        from .events import LOGOUT
+        token = self._cookie_token()
+        session = self.ui.sessions.destroy(token)
+        if session:
+            self.ui.events.emit(
+                LOGOUT, f"logout: {session.username}",
+                actor=session.username, detail=session.username,
+            )
+        self._redirect("/login", headers={
+            "Set-Cookie":
+                "otitbup_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
+        })
+
+    def _dispatch_post(self, path, form, actor, role, role_rank):
+        """Returns (ok|None, message, back_url). ok is None for 404."""
+        def need(level):
+            return not self.ui.users or role_rank(role) >= role_rank(level)
+
+        if path == "/reload":
+            if not need("admin"):
+                return False, "admin role required", "/"
+            ok, msg = self.ui.reload_config()
+            return ok, msg, "/"
+        if path == "/report":
+            if not need("operator"):
+                return False, "operator role required", "/health"
+            ok, msg = self.ui.action_report()
+            return ok, msg, "/health"
+        if path == "/users/create":
+            if not need("admin"):
+                return False, "admin role required", "/users"
+            ok, msg = self.ui.action_user_create(
+                form.get("username", ""), form.get("password", ""),
+                form.get("role", "viewer"), actor)
+            return ok, msg, "/users"
+        if path == "/users/delete":
+            if not need("admin"):
+                return False, "admin role required", "/users"
+            ok, msg = self.ui.action_user_delete(form.get("username", ""), actor)
+            return ok, msg, "/users"
+        if path == "/users/passwd":
+            if not need("admin"):
+                return False, "admin role required", "/users"
+            ok, msg = self.ui.action_user_passwd(
+                form.get("username", ""), form.get("password", ""), actor)
+            return ok, msg, "/users"
+        if path.startswith("/device/"):
+            parts = path[len("/device/"):].strip("/").split("/")
+            if len(parts) == 4:
+                qn, verb = "/".join(parts[:3]), parts[3]
+                back = _device_link_name(qn)
+                if not need("operator"):
+                    return False, "operator role required", back
+                if verb == "backup":
+                    ok, msg = self.ui.action_backup(qn, actor)
+                    return ok, msg, back
+                if verb == "verify":
+                    ok, msg = self.ui.action_verify(qn)
+                    return ok, msg, back
+                if verb == "note":
+                    ok, msg = self.ui.action_note(
+                        qn, form.get("commit", ""), form.get("text", ""), actor)
+                    return ok, msg, back
+                if verb == "baseline":
+                    ok, msg = self.ui.action_baseline(
+                        qn, form.get("commit", ""), actor)
+                    return ok, msg, back
+        return None, "", "/"
 
 
 def serve(
@@ -956,18 +1456,30 @@ def serve(
     tls: dict | None = None,
     blobstore=None,
     runstore=None,
+    events=None,
+    config_path=None,
 ) -> None:
     from .auth import build_users
-    users = build_users(auth, config.webui.get("users"))
-    if not users and host not in ("127.0.0.1", "localhost", "::1"):
+    secrets = None
+    if config.secrets:
+        from pathlib import Path as _P
+
+        from .secrets import load_backend
+        try:
+            secrets = load_backend(
+                config.secrets, base_dir=_P(config.data_dir).parent
+            )
+        except Exception as exc:
+            log.warning("secrets backend unavailable for web actions: %s", exc)
+    ui = WebUI(
+        config, store, auth=auth, blobstore=blobstore, runstore=runstore,
+        events=events, config_path=config_path, secrets=secrets,
+    )
+    if not ui.users and host not in ("127.0.0.1", "localhost", "::1"):
         log.warning(
             "web UI on %s has NO authentication configured — set "
             "webui.auth/users in the config (see `otitbup passwd`)", host,
         )
-    ui = WebUI(
-        config, store, auth=auth, blobstore=blobstore, runstore=runstore,
-        users=users,
-    )
     server = ThreadingHTTPServer((host, port), partial(_Handler, ui))
     scheme = "http"
     if tls:

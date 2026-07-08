@@ -65,6 +65,13 @@ CREATE TABLE IF NOT EXISTS audit (
     detail TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_audit_at ON audit(at);
+
+CREATE TABLE IF NOT EXISTS users (
+    username      TEXT PRIMARY KEY,
+    password_hash TEXT NOT NULL,
+    role          TEXT NOT NULL DEFAULT 'viewer',
+    created_at    REAL NOT NULL
+);
 """
 
 
@@ -289,6 +296,44 @@ class RunStore:
                     "SELECT * FROM audit ORDER BY at DESC LIMIT ?", (limit,)
                 )
             ]
+
+
+    # --------------------------------------------------------- users
+
+    def add_user(
+        self, username: str, password_hash: str, role: str, at: float
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO users (username, password_hash, role, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (username, password_hash, role, at),
+            )
+
+    def delete_user(self, username: str) -> int:
+        with self._conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM users WHERE username = ?", (username,)
+            )
+            return cur.rowcount
+
+    def set_user_password(self, username: str, password_hash: str) -> int:
+        with self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE users SET password_hash = ? WHERE username = ?",
+                (password_hash, username),
+            )
+            return cur.rowcount
+
+    def get_users(self) -> dict[str, dict]:
+        with self._conn() as conn:
+            return {
+                row["username"]: {
+                    "password_hash": row["password_hash"],
+                    "role": row["role"],
+                }
+                for row in conn.execute("SELECT * FROM users")
+            }
 
 
 def default_runstore(config) -> RunStore:
