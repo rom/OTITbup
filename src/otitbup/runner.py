@@ -29,6 +29,12 @@ def default_blobstore(config: AppConfig) -> BlobStore:
     """The blob store lives next to (not inside) the backup repo."""
     return BlobStore(Path(config.data_dir).parent / "blobs")
 
+
+def default_gitstore(config: AppConfig) -> GitStore:
+    """A GitStore configured with the commit-signing key, if set."""
+    sign_key = (config.git.get("sign") or {}).get("key_file")
+    return GitStore(config.data_dir, sign_key=sign_key)
+
 log = logging.getLogger("otitbup.runner")
 
 
@@ -52,10 +58,12 @@ class Runner:
         force: bool = False,
         runstore: RunStore | None = None,
         events: EventBus | None = None,
+        dry_run: bool = False,
     ):
         self.config = config
         self.store = store
         self.secrets = secrets
+        self.dry_run = dry_run
         self.alerts = alerts or AlertManager(
             config.alerts,
             state_path=Path(config.data_dir).parent / "alert-state.json",
@@ -174,19 +182,28 @@ class Runner:
 
         started = time.time()
         zone = self.config.find_zone(device)
-        if not self.force and not in_window(zone.maintenance_window):
+        if not self.force and not in_window(
+            zone.maintenance_window, tz=zone.timezone
+        ):
             return BackupResult(
                 device=device.qualified_name,
                 ok=True,
                 message=f"skipped: outside maintenance window "
                         f"{zone.maintenance_window}",
             )
+        # Was this device failing before this run? (for recovery alerts)
+        was_failing = (
+            self.runstore.status(device.qualified_name).consecutive_failures
+            > 0
+        )
         self.events.emit(
             BACKUP_START, f"backup started: {device.qualified_name}",
             detail=device.qualified_name,
         )
+        self._run_hook(device, "pre")
         with limit:
-            result = self._collect_and_store(device, started)
+            result = self._collect_with_retry(device, started)
+        self._run_hook(device, "post", ok=result.ok)
         if not result.ok:
             self.events.emit(
                 BACKUP_ERROR,
@@ -199,7 +216,19 @@ class Runner:
                 f"backup finished: {device.qualified_name} ({result.message})",
                 detail=device.qualified_name,
             )
-        self.runstore.record_run(RunRecord(
+            if was_failing:
+                self.events.emit(
+                    BACKUP_STOP,
+                    f"backup RECOVERED: {device.qualified_name}",
+                    detail=device.qualified_name,
+                )
+                self.alerts.notify(
+                    f"otitbup: {device.qualified_name} recovered",
+                    f"{device.qualified_name} backed up successfully after "
+                    "prior failures.",
+                )
+        if not self.dry_run:
+            self.runstore.record_run(RunRecord(
             device=result.device,
             started_at=started,
             finished_at=time.time(),
@@ -208,7 +237,54 @@ class Runner:
             commit_hash=result.commit,
             message=result.message,
             expected=result.expected,
-        ))
+            ))
+        return result
+
+    def _run_hook(self, device: Device, phase: str, ok: bool | None = None):
+        """Run a configured pre/post hook (shell command). Hook config
+        resolves device.hooks over the global config.hooks. Failures are
+        logged, never fatal; env carries device context."""
+        import os
+        import subprocess
+        spec = {**self.config.hooks, **device.hooks}
+        cmd = spec.get(phase)
+        if not cmd:
+            return
+        env = {
+            **os.environ,
+            "OTITBUP_DEVICE": device.qualified_name,
+            "OTITBUP_SITE": device.site,
+            "OTITBUP_ZONE": device.zone,
+            "OTITBUP_DRIVER": device.driver,
+            "OTITBUP_ADDRESS": device.address or "",
+            "OTITBUP_PHASE": phase,
+        }
+        if ok is not None:
+            env["OTITBUP_OK"] = "1" if ok else "0"
+        try:
+            subprocess.run(cmd, shell=True, env=env, timeout=120,
+                           capture_output=True)
+        except Exception as exc:
+            log.warning("%s %s-hook failed: %s", device.qualified_name,
+                        phase, exc)
+
+    def _collect_with_retry(
+        self, device: Device, started: float
+    ) -> BackupResult:
+        """Collect+store with retry/backoff on transient failure. Retries
+        are config-driven (retry.attempts, retry.backoff seconds)."""
+        attempts = max(1, int(self.config.retry.get("attempts", 1)))
+        backoff = float(self.config.retry.get("backoff", 2.0))
+        result = None
+        for attempt in range(1, attempts + 1):
+            result = self._collect_and_store(device, started)
+            if result.ok:
+                return result
+            if attempt < attempts:
+                delay = backoff * (2 ** (attempt - 1))
+                log.info("%s: attempt %d/%d failed, retrying in %.0fs",
+                         device.qualified_name, attempt, attempts, delay)
+                time.sleep(delay)
         return result
 
     def _collect_and_store(
@@ -225,6 +301,12 @@ class Runner:
                     )
                 secret = self.secrets.get(device.credentials)
             artifacts = driver.collect(device, secret)
+            if self.dry_run:
+                return BackupResult(
+                    device=device.qualified_name, ok=True, changed=False,
+                    message=f"dry run OK: {len(artifacts)} artifact(s) "
+                            "collected (not committed)",
+                )
             threshold = self.config.retention_for(device).get(
                 "large_file_threshold", 0
             )

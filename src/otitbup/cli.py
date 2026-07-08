@@ -38,8 +38,10 @@ def _build_events(config):
     )
 
 
-def _build_runner(config, force: bool = False, events=None) -> Runner:
-    store = GitStore(config.data_dir)
+def _build_runner(config, force: bool = False, events=None,
+                  dry_run: bool = False) -> Runner:
+    from .runner import default_gitstore
+    store = default_gitstore(config)
     secrets = load_backend(
         config.secrets, base_dir=Path(config.data_dir).parent
     ) if config.secrets else None
@@ -53,6 +55,7 @@ def _build_runner(config, force: bool = False, events=None) -> Runner:
         ),
         force=force,
         events=events or _build_events(config),
+        dry_run=dry_run,
     )
 
 
@@ -88,6 +91,35 @@ def main(argv: list[str] | None = None) -> int:
         "--force", action="store_true",
         help="ignore maintenance windows",
     )
+    p_backup.add_argument(
+        "--dry-run", action="store_true",
+        help="collect but don't commit (test reachability/auth)",
+    )
+
+    p_test = sub.add_parser(
+        "test", help="test reachability/credentials without committing")
+    p_test.add_argument("devices", nargs="*", help="devices (default: all)")
+    p_test.add_argument("--site", action="append")
+    p_test.add_argument("--zone", action="append")
+
+    p_gc = sub.add_parser("gc", help="repack/prune the backup git repo")
+    p_gc.add_argument("--aggressive", action="store_true")
+
+    sub.add_parser(
+        "verify-audit", help="verify the tamper-evident audit-log chain")
+
+    p_token = sub.add_parser("token", help="manage scoped API tokens")
+    token_sub = p_token.add_subparsers(dest="token_command", required=True)
+    p_tcreate = token_sub.add_parser("create", help="create an API token")
+    p_tcreate.add_argument("name")
+    p_tcreate.add_argument("--role", default="operator",
+                           choices=["viewer", "operator", "admin"])
+    p_tcreate.add_argument("--scopes", default="*",
+                           help="space-separated site/zone globs")
+    p_tcreate.add_argument("--days", type=int, help="expiry in days")
+    token_sub.add_parser("list", help="list API tokens")
+    p_tdel = token_sub.add_parser("delete", help="delete a token by name")
+    p_tdel.add_argument("name")
 
     p_diff = sub.add_parser("diff", help="show a device's change or a range")
     p_diff.add_argument("device")
@@ -471,13 +503,73 @@ def main(argv: list[str] | None = None) -> int:
         if not devices:
             print("no devices matched the selection", file=sys.stderr)
             return 1
-        runner = _build_runner(config, force=args.force, events=events)
+        runner = _build_runner(config, force=args.force, events=events,
+                               dry_run=args.dry_run)
         results = runner.backup_devices(devices)
         for result in results:
             status = "OK " if result.ok else "FAIL"
             print(f"{status} {result.device:40s} {result.message}")
         events.emit(PROCESS_STOP, "otitbup backup finished", detail="backup")
         return 0 if all(r.ok for r in results) else 1
+
+    if args.command == "test":
+        try:
+            devices = config.select(
+                names=args.devices, sites=args.site, zones=args.zone)
+        except KeyError as exc:
+            print(f"test error: {exc}", file=sys.stderr)
+            return 2
+        runner = _build_runner(config, force=True, events=events,
+                               dry_run=True)
+        results = runner.backup_devices(devices)
+        for result in results:
+            status = "OK  " if result.ok else "FAIL"
+            print(f"{status} {result.device:40s} {result.message}")
+        return 0 if all(r.ok for r in results) else 1
+
+    if args.command == "gc":
+        from .runner import default_gitstore
+        store = default_gitstore(config)
+        store.ensure_repo()
+        before = store.repo_size_bytes()
+        store.gc(aggressive=args.aggressive)
+        after = store.repo_size_bytes()
+        print(f"git gc: {before / 1048576:.1f} MiB -> {after / 1048576:.1f} MiB")
+        return 0
+
+    if args.command == "verify-audit":
+        from .runstore import default_runstore
+        intact, bad_id = default_runstore(config).verify_audit()
+        if intact:
+            print("audit log intact (hash chain verified)")
+            return 0
+        print(f"AUDIT TAMPERING DETECTED at entry id {bad_id}",
+              file=sys.stderr)
+        return 1
+
+    if args.command == "token":
+        from . import apitoken
+        from .runstore import default_runstore
+        runstore = default_runstore(config)
+        if args.token_command == "create":
+            plaintext = apitoken.create(
+                runstore, args.name, args.role, args.scopes, args.days)
+            print(f"token '{args.name}' created (role={args.role}, "
+                  f"scopes={args.scopes}):")
+            print(f"\n  {plaintext}\n")
+            print("store it now — it is not shown again.")
+        elif args.token_command == "list":
+            import datetime as _dt
+            for t in runstore.list_api_tokens():
+                exp = ("never" if not t["expires_at"] else
+                       _dt.datetime.fromtimestamp(
+                           t["expires_at"], _dt.timezone.utc).strftime("%Y-%m-%d"))
+                print(f"{t['name']:20s} role={t['role']:9s} "
+                      f"scopes={t['scopes']:12s} expires={exp}")
+        elif args.token_command == "delete":
+            n = runstore.delete_api_token(args.name)
+            print(f"deleted {n} token(s)")
+        return 0
 
     if args.command == "diff":
         [device] = config.find_devices([args.device])

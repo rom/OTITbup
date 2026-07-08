@@ -88,6 +88,24 @@ Examples:
 
 See also: daemon, diff, status, maintenance.
 """),
+    _c("test", "Backup & schedule",
+       "test reachability/credentials without committing", """
+`otitbup test [DEVICE ...] [--site S] [--zone Z]` connects to devices and
+collects a backup but commits nothing — a dry run to confirm a new device's
+address, credentials and driver options work before adding it to the
+schedule. Same selection flags as `backup`. (Equivalent to
+`backup --dry-run`.)
+
+See also: backup, list.
+"""),
+    _c("gc", "Backup & schedule", "repack/prune the backup git repo", """
+`otitbup gc [--aggressive]` runs `git gc --prune=now` on the backup
+repository to repack loose objects and reclaim space — housekeeping for a
+long-lived repo. `--aggressive` repacks harder (slower). Safe to run from
+cron while the repo is idle.
+
+See also: retention, export.
+"""),
     _c("daemon", "Backup & schedule", "run the scheduler", """
 `otitbup daemon [--once]` runs the scheduler, backing up each device when
 its `schedule` comes due and its zone's `maintenance_window` is open.
@@ -381,6 +399,26 @@ backend.
 See also: passwd.
 """),
 
+    _c("verify-audit", "Health & compliance",
+       "verify the tamper-evident audit-log chain", """
+`otitbup verify-audit` recomputes the audit log's hash chain and reports
+whether it is intact. Each audit entry is chained to the previous one's
+hash, so any edit or deletion of a row breaks the chain and is detected —
+tamper-evidence for who did what. Exits non-zero and names the first bad
+entry if tampering is found.
+
+See also: report.
+"""),
+    _c("token", "Web UI & secrets", "manage scoped API tokens", """
+`otitbup token create NAME [--role R] [--scopes GLOBS] [--days N]` mints an
+API token for the write API and prints it once (only its hash is stored).
+`token list` and `token delete NAME` manage them. A token carries a role
+(viewer/operator/admin) and scopes (space-separated site/zone globs), so
+automation gets least-privilege access without a user's full credentials.
+Use it as `Authorization: Bearer <token>` against the API.
+
+See also: serve, passwd.
+"""),
     # -------------------------------------------------------------- Help
     _c("help", "Help", "list the commands with a short description", """
 `otitbup help` prints every command grouped by theme with a one-line
