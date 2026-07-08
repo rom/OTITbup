@@ -316,8 +316,13 @@ HTTP clients needing no extra dependencies. See CONFIGURATION.md.
 
 ## 16. Command reference
 
+Two built-in guides: **`otitbup help`** prints every command grouped by
+theme with a one-line summary, and **`otitbup explain <command>`** gives a
+full description (arguments, examples, related commands) of one command.
+
 | Command | Purpose |
 |---|---|
+| `help` / `explain <cmd>` | list commands; describe one at length |
 | `init` | scaffold a starter config |
 | `validate` / `list` / `drivers` | check config; list devices; list drivers |
 | `backup [devices] [--site --zone --force]` | run a backup |

@@ -1,5 +1,7 @@
 """otitbup command-line interface.
 
+    otitbup help                       # grouped list of all commands
+    otitbup explain backup             # full description of one command
     otitbup -c otitbup.yml validate
     otitbup -c otitbup.yml list
     otitbup -c otitbup.yml backup [--all | DEVICE ...] [--force]
@@ -69,6 +71,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("validate", help="check the config file and exit")
     sub.add_parser("list", help="list configured devices")
     sub.add_parser("drivers", help="list available drivers")
+    sub.add_parser(
+        "help", help="list the commands with a short description")
+    p_explain = sub.add_parser(
+        "explain", help="describe a command at length")
+    p_explain.add_argument("topic", help="the command to explain")
 
     p_init = sub.add_parser("init", help="scaffold a starter config")
     p_init.add_argument("--dir", default=".", help="directory to write into")
@@ -341,6 +348,17 @@ def main(argv: list[str] | None = None) -> int:
         for name, description in driver_descriptions().items():
             print(f"{name:20s} {description}")
         return 0
+
+    if args.command == "help":
+        from .helptext import render_help
+        print(render_help())
+        return 0
+
+    if args.command == "explain":
+        from .helptext import render_explain
+        text, found = render_explain(args.topic)
+        print(text, file=sys.stdout if found else sys.stderr)
+        return 0 if found else 2
 
     if args.command == "init":
         from .scaffold import init_project

@@ -54,6 +54,8 @@ pip install -e .[ssh]          # + netmiko for network equipment
 cp examples/otitbup.yml examples/secrets.yml .
 $EDITOR otitbup.yml secrets.yml
 
+otitbup help                   # grouped list of every command
+otitbup explain backup         # a full description of one command
 otitbup init                   # scaffold a starter otitbup.yml + secrets.yml
 otitbup validate               # check the config
 otitbup list                   # show the inventory
