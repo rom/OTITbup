@@ -57,6 +57,28 @@ _REGISTRY: dict[str, str | type[Driver]] = {
     "bachmann_m1": "otitbup.drivers.more_ot:BachmannM1Driver",
     "br_automation": "otitbup.drivers.more_ot:BRAutomationDriver",
     "emerson_roc": "otitbup.drivers.more_ot:EmersonROCDriver",
+    # HMI/SCADA project fetch (SFTP)
+    "aveva_edge": "otitbup.drivers.hmi_ied_rtu:AvevaEdgeDriver",
+    "zenon": "otitbup.drivers.hmi_ied_rtu:ZenonDriver",
+    "movicon": "otitbup.drivers.hmi_ied_rtu:MoviconDriver",
+    "factorytalk_se": "otitbup.drivers.hmi_ied_rtu:FactoryTalkSEDriver",
+    "vtscada": "otitbup.drivers.hmi_ied_rtu:VTScadaDriver",
+    "clearscada": "otitbup.drivers.hmi_ied_rtu:ClearScadaDriver",
+    "geo_scada": "otitbup.drivers.hmi_ied_rtu:ClearScadaDriver",
+    "siemens_wincc_unified": "otitbup.drivers.hmi_ied_rtu:SiemensWinccUnifiedDriver",
+    "reliance_scada": "otitbup.drivers.hmi_ied_rtu:RelianceScadaDriver",
+    # Substation IEDs / protection relays
+    "siemens_siprotec": "otitbup.drivers.hmi_ied_rtu:SiemensSiprotecDriver",
+    "abb_relion": "otitbup.drivers.hmi_ied_rtu:AbbRelionDriver",
+    "schneider_micom": "otitbup.drivers.hmi_ied_rtu:SchneiderMicomDriver",
+    "nr_electric": "otitbup.drivers.hmi_ied_rtu:NrElectricDriver",
+    "nari_relay": "otitbup.drivers.hmi_ied_rtu:NariRelayDriver",
+    "sel_relay": "otitbup.drivers.hmi_ied_rtu:SelRelayDriver",
+    "ge_multilin": "otitbup.drivers.hmi_ied_rtu:GeMultilinDriver",
+    # RTUs
+    "kingfisher_rtu": "otitbup.drivers.hmi_ied_rtu:KingfisherRtuDriver",
+    "motorola_ace": "otitbup.drivers.hmi_ied_rtu:MotorolaAceDriver",
+    "satec_rtu": "otitbup.drivers.hmi_ied_rtu:SatecRtuDriver",
 }
 
 # Vendor SSH profiles (presets over generic_ssh) register themselves from
@@ -122,6 +144,25 @@ _CORE_DESCRIPTIONS = {
     "bachmann_m1": "Bachmann M1 controllers: CFC project/config via SFTP",
     "br_automation": "B&R Automation Runtime project via SFTP",
     "emerson_roc": "Emerson ROC/FloBoss RTUs (DNP3 device attributes)",
+    "aveva_edge": "AVEVA Edge / InduSoft Web Studio project via SFTP",
+    "zenon": "COPA-DATA zenon project workspace via SFTP",
+    "movicon": "Progea/Emerson Movicon project via SFTP",
+    "factorytalk_se": "Rockwell FactoryTalk View SE project via SFTP",
+    "vtscada": "Trihedral VTScada application dir via SFTP",
+    "clearscada": "AVEVA/Schneider ClearSCADA / Geo SCADA files via SFTP",
+    "geo_scada": "AVEVA Geo SCADA Expert (ClearSCADA) files via SFTP",
+    "siemens_wincc_unified": "Siemens WinCC Unified runtime project via SFTP",
+    "reliance_scada": "GEOVAP Reliance SCADA project via SFTP",
+    "siemens_siprotec": "Siemens SIPROTEC 4/5 relays (IEC 61850 MMS identity)",
+    "abb_relion": "ABB Relion 6xx/5xx relays (IEC 61850 MMS identity)",
+    "schneider_micom": "Schneider MiCOM/Easergy relays (IEC 61850 MMS identity)",
+    "nr_electric": "NR Electric PCS-9xx IEDs (IEC 61850 MMS identity)",
+    "nari_relay": "NARI RCS/PCS IEDs (IEC 61850 MMS identity)",
+    "sel_relay": "SEL relays/RTAC web export (HTTP; SEL tooling for settings)",
+    "ge_multilin": "GE Multilin UR/SR relays (embedded web server, HTTP)",
+    "kingfisher_rtu": "Servelec/Schneider Kingfisher RTUs (DNP3 attributes)",
+    "motorola_ace": "Motorola ACE3600 RTUs (DNP3 attributes; MDLC proprietary)",
+    "satec_rtu": "SATEC meters/RTUs (embedded web server, HTTP)",
 }
 
 
