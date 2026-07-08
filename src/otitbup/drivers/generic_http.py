@@ -18,6 +18,11 @@ firmware:
 Requests go DIRECTLY to the device (proxy environment variables are
 ignored — backup traffic must not leave the OT network). Basic and Digest
 authentication are attempted with the configured credentials.
+
+TLS: put `https://` in the URL, or set `options.https: true` to upgrade
+http:// (and scheme-less) URLs to HTTPS in place — this works for ANY
+generic_http-based driver. The `generic_https` driver defaults to that.
+Use `options.verify_tls: false` for a device's self-signed certificate.
 """
 from __future__ import annotations
 
@@ -39,8 +44,24 @@ def _artifact_name(url: str, index: int) -> str:
     return base if "." in base else f"{base}.txt"
 
 
+def _apply_scheme(url: str, https: bool) -> str:
+    """Resolve the URL scheme. When `https` is on, upgrade an http:// URL to
+    https:// and prefix a scheme-less URL with https://; otherwise default a
+    scheme-less URL to http://. An explicit scheme is otherwise respected,
+    so any driver can be flipped to TLS with `options.https: true` (or the
+    generic_https driver) without rewriting every URL."""
+    if "://" not in url:
+        return ("https://" if https else "http://") + url
+    if https and url.startswith("http://"):
+        return "https://" + url[len("http://"):]
+    return url
+
+
 class GenericHTTPDriver(Driver):
     name = "generic_http"
+    # Subclasses (generic_https) set this to force TLS; a device can also
+    # opt in per-instance with options.https: true.
+    force_https = False
 
     def collect(
         self, device: Device, secrets: dict[str, Any] | None
@@ -55,6 +76,10 @@ class GenericHTTPDriver(Driver):
                 "(the device's config export endpoint)"
             )
         timeout = float(options.get("timeout", 15))
+        https = self.force_https or options.get("https") is True
+
+        def _resolve(url: str) -> str:
+            return _apply_scheme(url.format(address=device.address or ""), https)
 
         handlers: list[urllib.request.BaseHandler] = [
             # Never route device traffic through a proxy.
@@ -63,7 +88,7 @@ class GenericHTTPDriver(Driver):
         if secrets and secrets.get("username"):
             password_mgr = urllib.request.HTTPPasswordMgrWithDefaultRealm()
             for url in urls:
-                resolved = url.format(address=device.address or "")
+                resolved = _resolve(url)
                 password_mgr.add_password(
                     None, resolved,
                     str(secrets["username"]), str(secrets.get("password", "")),
@@ -79,7 +104,7 @@ class GenericHTTPDriver(Driver):
 
         artifacts = []
         for index, url in enumerate(urls):
-            resolved = url.format(address=device.address or "")
+            resolved = _resolve(url)
             try:
                 with opener.open(resolved, timeout=timeout) as response:
                     data = response.read()
@@ -97,6 +122,17 @@ class GenericHTTPDriver(Driver):
                 )
             )
         return artifacts
+
+
+class GenericHTTPSDriver(GenericHTTPDriver):
+    """Same as generic_http but forces TLS: scheme-less URLs become
+    https://, and http:// URLs are upgraded to https://. Use it for
+    web-managed devices reached over HTTPS. For a self-signed device
+    certificate set options.verify_tls: false. (Any generic_http-based
+    driver can also be flipped to TLS in place with options.https: true.)"""
+
+    name = "generic_https"
+    force_https = True
 
 
 class MoxaNPortDriver(GenericHTTPDriver):
