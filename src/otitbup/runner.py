@@ -11,14 +11,20 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-
 from pathlib import Path
 
 from .alerts import AlertManager
 from .blobstore import BlobStore
 from .drivers import get_driver
-from .events import (ANOMALY, BACKUP_ERROR, BACKUP_START, BACKUP_STOP,
-                     CHANGE_UNEXPECTED, EventBus, NullEventBus)
+from .events import (
+    ANOMALY,
+    BACKUP_ERROR,
+    BACKUP_START,
+    BACKUP_STOP,
+    CHANGE_UNEXPECTED,
+    EventBus,
+    NullEventBus,
+)
 from .gitstore import GitStore
 from .models import AppConfig, Device
 from .runstore import RunRecord, RunStore, default_runstore

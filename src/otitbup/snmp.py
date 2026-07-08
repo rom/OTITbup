@@ -7,7 +7,6 @@ enrichment. Includes a small BER decoder for the SNMP application types.
 from __future__ import annotations
 
 import socket
-import struct
 
 # Well-known system-group OIDs.
 SYS_DESCR = "1.3.6.1.2.1.1.1.0"

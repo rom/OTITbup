@@ -1,8 +1,6 @@
 import json
 import textwrap
 import threading
-import time
-from functools import partial
 from http.server import ThreadingHTTPServer
 
 from otitbup import desired, federation

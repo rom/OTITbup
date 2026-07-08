@@ -44,8 +44,9 @@ def _parse_retention(raw: Any, context: str) -> dict[str, int]:
     for key, value in raw.items():
         try:
             parsed[key] = int(value)
-        except (TypeError, ValueError):
-            raise ConfigError(f"{context}: retention.{key} must be an integer")
+        except (TypeError, ValueError) as exc:
+            raise ConfigError(
+                f"{context}: retention.{key} must be an integer") from exc
         if parsed[key] < 0:
             raise ConfigError(f"{context}: retention.{key} must be >= 0")
     return parsed

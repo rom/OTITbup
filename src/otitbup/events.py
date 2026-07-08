@@ -110,7 +110,7 @@ class Broadcaster:
         with self._lock:
             self._subscribers.discard(q)
 
-    def publish(self, event: "Event") -> None:
+    def publish(self, event: Event) -> None:
         with self._lock:
             subscribers = list(self._subscribers)
         for q in subscribers:

@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .models import AppConfig
@@ -140,7 +140,7 @@ class Daemon:
 
     def run_once(self) -> int:
         """One scheduler tick. Returns the number of devices backed up."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         due = self._due(now)
         if due:
             log.info("due: %s", ", ".join(d.qualified_name for d in due))
@@ -156,7 +156,7 @@ class Daemon:
         interval = self.config.reports.get("interval")
         if not interval:
             return
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         last = self.state.get("__report__")
         if last is not None:
             due_at = datetime.fromisoformat(last) + parse_interval(interval)

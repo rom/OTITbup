@@ -19,7 +19,6 @@ from otitbup.webui import WebUI, _Handler
 pytest.importorskip("cryptography")
 from cryptography.fernet import Fernet  # noqa: E402
 
-
 # ------------------------------------------------ blob encryption at rest
 
 def test_blob_store_encrypted_at_rest(tmp_path):
@@ -36,7 +35,8 @@ def test_blob_store_encrypted_at_rest(tmp_path):
     # get() transparently decrypts.
     assert store.get(sha) == data
     # Wrong key can't read it.
-    with pytest.raises(Exception):
+    from cryptography.fernet import InvalidToken
+    with pytest.raises(InvalidToken):
         BlobStore(tmp_path / "blobs", key=Fernet.generate_key()).get(sha)
 
 

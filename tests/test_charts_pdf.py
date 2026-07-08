@@ -11,7 +11,6 @@ from otitbup.gitstore import GitStore
 from otitbup.pdfcanvas import PDFCanvas
 from otitbup.runstore import RunRecord, RunStore
 
-
 # ------------------------------------------------------------- SVG charts
 
 def _valid_svg(svg: str) -> bool:

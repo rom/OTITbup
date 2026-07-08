@@ -6,13 +6,12 @@ from datetime import datetime
 import pytest
 
 from otitbup import apitoken
-from otitbup.config import ConfigError, load_config
+from otitbup.config import load_config
 from otitbup.drivers import register
 from otitbup.drivers.base import Artifact, Driver
 from otitbup.gitstore import GitStore
-from otitbup.runstore import RunStore, SCHEMA_VERSION
+from otitbup.runstore import SCHEMA_VERSION, RunStore
 from otitbup.windows import cron_matches, in_window, is_cron, validate_schedule
-
 
 # ----------------------------------------------------- schema migrations
 

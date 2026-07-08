@@ -9,7 +9,7 @@ timezone.
 from __future__ import annotations
 
 import re
-from datetime import datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 
 _INTERVAL_RE = re.compile(r"^(\d+)\s*([smhd])$")
 _UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
@@ -98,8 +98,7 @@ def in_window(spec: str | None, now: datetime | None = None,
         try:
             from zoneinfo import ZoneInfo
             if current_dt.tzinfo is None:
-                from datetime import timezone
-                current_dt = current_dt.replace(tzinfo=timezone.utc)
+                current_dt = current_dt.replace(tzinfo=UTC)
             current_dt = current_dt.astimezone(ZoneInfo(tz))
         except Exception:
             pass  # unknown tz -> fall back to naive

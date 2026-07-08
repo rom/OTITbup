@@ -21,7 +21,8 @@ rockwell = ["pycomm3>=1.2"]
 opcua = ["asyncua>=1.0"]
 beckhoff = ["pyads>=3.3"]
 crypto = ["cryptography>=42.0"]
-dev = ["pytest>=8.0"]
+ldap = ["ldap3>=2.9"]
+dev = ["pytest>=8.0", "ruff>=0.6", "cryptography>=42.0"]
 
 [project.scripts]
 otitbup = "otitbup.cli:main"
@@ -31,3 +32,21 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# A pragmatic, stdlib-first project: pyflakes (F), pycodestyle (E/W),
+# import order (I), bugbear (B), and pyupgrade (UP). Kept deliberately
+# focused so the gate stays meaningful rather than noisy.
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+    "E501",   # line length is handled by the formatter, not enforced hard
+    "B008",   # false positives on argparse/default factories
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]

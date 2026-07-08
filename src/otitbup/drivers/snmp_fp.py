@@ -30,7 +30,7 @@ class SNMPFingerprintDriver(Driver):
     def collect(
         self, device: Device, secrets: dict[str, Any] | None
     ) -> list[Artifact]:
-        from ..snmp import (SYS_UPTIME, SYSTEM_GROUP, SNMPError, snmp_get)
+        from ..snmp import SYS_UPTIME, SYSTEM_GROUP, SNMPError, snmp_get
 
         if not device.address:
             raise DriverError(f"{device.qualified_name}: address is required")

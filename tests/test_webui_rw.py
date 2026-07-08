@@ -1,5 +1,4 @@
 """Read/write web UI: login/logout, session + CSRF, and POST actions."""
-import base64
 import http.client
 import textwrap
 import threading
@@ -119,7 +118,6 @@ def test_login_logout_flow_and_events(rw_server):
 
 def test_bad_login_shows_error(rw_server):
     address, _, _ = rw_server
-    c = Client(address)
     conn = http.client.HTTPConnection(*address, timeout=5)
     conn.request("POST", "/login", "username=op&password=wrong",
                  {"Content-Type": "application/x-www-form-urlencoded"})

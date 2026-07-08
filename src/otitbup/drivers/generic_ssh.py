@@ -18,7 +18,8 @@ enable_secret.
 from __future__ import annotations
 
 import re
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from ..models import Device
 from .base import Artifact, Driver, DriverError

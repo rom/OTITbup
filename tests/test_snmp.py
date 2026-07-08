@@ -1,6 +1,5 @@
 """SNMP protocol + fingerprint driver + a live UDP agent."""
 import socket
-import struct
 import threading
 
 import pytest

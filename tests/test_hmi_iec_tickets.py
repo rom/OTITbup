@@ -11,7 +11,6 @@ from otitbup.drivers import get_driver
 from otitbup.drivers.base import DriverError
 from otitbup.models import Device
 
-
 # ------------------------------------------------------ Ignition HMI
 
 class _IgnitionHandler(BaseHTTPRequestHandler):

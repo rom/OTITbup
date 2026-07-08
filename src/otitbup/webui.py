@@ -25,7 +25,6 @@ from urllib.parse import quote, unquote
 
 import yaml
 
-from .auth import check_basic_auth
 from .gitstore import GitStore
 from .models import AppConfig, Device
 
@@ -208,7 +207,7 @@ class WebUI:
             base = dict(self._static_users)
         else:
             base = build_users(self.auth, self.config.webui.get("users"))
-        for name, rec in base.items():
+        for rec in base.values():
             rec.setdefault("source", "config")
         if self.runstore is not None:
             for name, rec in self.runstore.get_users().items():
@@ -387,6 +386,7 @@ class WebUI:
         self, username: str, password: str, role: str, actor: str
     ) -> tuple[bool, str]:
         import time
+
         from .auth import ROLES, hash_password
         from .events import USER_CREATE
         if self.runstore is None:
@@ -557,7 +557,7 @@ class WebUI:
         )
         body = (
             live
-            + f"<h2>Recent backups</h2>"
+            + "<h2>Recent backups</h2>"
             "<table><tr><th>When</th><th>Device</th><th>Commit</th></tr>"
             + ("".join(rows) or "<tr><td colspan='3'>no backups yet</td></tr>")
             + "</table>"
@@ -572,14 +572,14 @@ class WebUI:
         import datetime as _dt
         import time
         now = now if now is not None else time.time()
-        today = _dt.datetime.fromtimestamp(now, _dt.timezone.utc).date()
+        today = _dt.datetime.fromtimestamp(now, _dt.UTC).date()
         buckets = {}
         for i in range(days):
             day = today - _dt.timedelta(days=days - 1 - i)
             buckets[day] = [0, 0, 0]
         for run in runs:
             day = _dt.datetime.fromtimestamp(
-                run["started_at"], _dt.timezone.utc).date()
+                run["started_at"], _dt.UTC).date()
             if day in buckets:
                 buckets[day][0] += 1
                 if run["changed"]:
@@ -593,6 +593,7 @@ class WebUI:
 
     def dashboard(self) -> bytes:
         import time
+
         from . import charts
         now = time.time()
         devices = self.config.all_devices()
@@ -911,7 +912,7 @@ class WebUI:
         rows = "".join(
             "<tr data-row><td>"
             + _dt.datetime.fromtimestamp(
-                r["at"], _dt.timezone.utc
+                r["at"], _dt.UTC
             ).strftime("%Y-%m-%d %H:%M:%S")
             + f"</td><td>{html.escape(r.get('actor') or '-')}</td>"
             f"<td>{html.escape(r.get('role') or '-')}</td>"
@@ -1161,7 +1162,6 @@ class WebUI:
             if not match:
                 continue
             chash, date, subject = match.groups()
-            full = self.store.last_commit_hash(device) if not history_rows else None
             note = ""
             # Match short hash against annotated full hashes.
             if any(a.startswith(chash) for a in annotated):
@@ -1189,7 +1189,7 @@ class WebUI:
                 cells = ""
                 for run in reversed(runs[:60]):   # oldest -> newest
                     when = _dt.datetime.fromtimestamp(
-                        run["started_at"], _dt.timezone.utc
+                        run["started_at"], _dt.UTC
                     ).strftime("%Y-%m-%d %H:%M")
                     if not run["ok"]:
                         color, sym = charts.FAIL, "fail"
@@ -1237,7 +1237,7 @@ class WebUI:
                 rows = "".join(
                     "<tr><td>"
                     + _dt.datetime.fromtimestamp(
-                        r["at"], _dt.timezone.utc
+                        r["at"], _dt.UTC
                     ).strftime("%Y-%m-%d %H:%M")
                     + f"</td><td>{html.escape(r['result'])}</td>"
                     f"<td>{html.escape(r.get('tested_by') or '')}</td>"
@@ -1829,6 +1829,7 @@ class _Handler(BaseHTTPRequestHandler):
         """JSON write API. Auth by Bearer token or session; enforces role
         (operator+) and scope. POST /api/device/<qn>/{backup,verify}."""
         import json
+
         from .auth import role_rank, scope_allows
         if self.ui.users and identity is None:
             return self._send(
@@ -1931,7 +1932,6 @@ def serve(
     events=None,
     config_path=None,
 ) -> None:
-    from .auth import build_users
     secrets = None
     if config.secrets:
         from pathlib import Path as _P

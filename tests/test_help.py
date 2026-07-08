@@ -1,8 +1,6 @@
 import io
 from contextlib import redirect_stderr, redirect_stdout
 
-import pytest
-
 from otitbup import helptext
 from otitbup.cli import main
 
@@ -39,12 +37,7 @@ def test_explain_unknown_command_suggests():
 
 
 def test_every_registered_command_is_explainable():
-    # Build the parser's real subcommand list and compare to the registry.
-    import argparse
-
-    import otitbup.cli as climod
-    parser_cmds = set()
-    # Re-run argument construction by parsing --help is heavy; instead
+    # Re-running argument construction by parsing --help is heavy; instead
     # assert the known command set is covered by the registry.
     known = {
         "init", "validate", "list", "drivers", "backup", "daemon", "serve",
@@ -53,6 +46,8 @@ def test_every_registered_command_is_explainable():
         "restore", "net-restore", "dr-plan", "rehearse", "discover",
         "reconcile", "netbox", "report", "report-verify", "passwd",
         "certgen", "secrets", "help", "explain",
+        "test", "gc", "verify-audit", "token", "anomalies", "desired",
+        "federation",
     }
     missing = known - set(helptext.COMMANDS)
     assert not missing, f"commands missing from help registry: {missing}"

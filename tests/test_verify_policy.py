@@ -6,8 +6,7 @@ from otitbup.blobstore import BlobStore
 from otitbup.config import load_config
 from otitbup.drivers.base import Artifact
 from otitbup.gitstore import GitStore
-from otitbup.models import Device
-from otitbup.policy import check_all, check_device
+from otitbup.policy import check_device
 from otitbup.verify import verify
 
 

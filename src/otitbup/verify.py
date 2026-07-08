@@ -59,7 +59,6 @@ def verify(
 
 
 def _referenced_blobs(store: GitStore, device: Device, commit: str) -> set[str]:
-    import yaml
 
     from .blobstore import parse_pointer
     shas: set[str] = set()

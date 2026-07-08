@@ -219,7 +219,7 @@ def main(argv: list[str] | None = None) -> int:
         help="verify the whole history (default: latest per device)",
     )
 
-    p_status = sub.add_parser(
+    sub.add_parser(
         "status", help="show per-device backup health from the run store"
     )
 
@@ -241,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
         help="roll up health from federated site collectors",
     )
 
-    p_policy = sub.add_parser(
+    sub.add_parser(
         "policy", help="run config policy checks over the latest backups"
     )
 
@@ -299,7 +299,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_export.add_argument("--out", default="otitbup-export.tar.gz")
 
-    p_strategy = sub.add_parser(
+    sub.add_parser(
         "strategy", help="evaluate the 3-2-1 / 3-2-1-1-0 backup strategy"
     )
 
@@ -581,7 +581,7 @@ def main(argv: list[str] | None = None) -> int:
             for t in runstore.list_api_tokens():
                 exp = ("never" if not t["expires_at"] else
                        _dt.datetime.fromtimestamp(
-                           t["expires_at"], _dt.timezone.utc).strftime("%Y-%m-%d"))
+                           t["expires_at"], _dt.UTC).strftime("%Y-%m-%d"))
                 print(f"{t['name']:20s} role={t['role']:9s} "
                       f"scopes={t['scopes']:12s} expires={exp}")
         elif args.token_command == "delete":
@@ -622,9 +622,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if hits else 1
 
     if args.command == "baseline":
-        from .baseline import all_drift, drift_diff
-        from .runstore import default_runstore
         import time
+
+        from .baseline import all_drift
+        from .runstore import default_runstore
         store = GitStore(config.data_dir)
         runstore = default_runstore(config)
         if args.baseline_command == "set":
@@ -661,8 +662,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if not drifted else 1
 
     if args.command == "reconcile":
-        from .reconcile import reconcile
         from .discovery import proposal_yaml
+        from .reconcile import reconcile
         result = reconcile(
             config, args.subnets, timeout=args.timeout, delay=args.delay
         )
@@ -859,8 +860,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if report.ok else 1
 
     if args.command == "status":
-        from .runstore import default_runstore
         import time
+
+        from .runstore import default_runstore
         runstore = default_runstore(config)
         now = time.time()
         for device in config.all_devices():
@@ -976,8 +978,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "maintenance":
-        from .runstore import default_runstore
         import time
+
+        from .runstore import default_runstore
         runstore = default_runstore(config)
         now = time.time()
         if args.off:
@@ -1067,8 +1070,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if result.satisfies_321 else 1
 
     if args.command == "netbox":
-        from .netbox import (NetBoxClient, NetBoxError, import_proposal,
-                             reconcile_netbox)
+        from .netbox import NetBoxClient, NetBoxError, import_proposal, reconcile_netbox
         nb = config.netbox or {}
         url = args.url or nb.get("url")
         token = args.token or nb.get("token")
@@ -1150,6 +1152,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "rehearse":
         import tempfile
         import time
+
         from .restore import RestoreError, export_bundle
         from .runner import default_blobstore
         from .runstore import default_runstore

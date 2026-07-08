@@ -11,7 +11,7 @@ import csv
 import io
 import time
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .gitstore import GitStore
 from .models import AppConfig
@@ -107,7 +107,7 @@ def to_pdf(config, store, runstore, now=None) -> bytes:
     and shaded tables — drawn with vector graphics (no PDF library)."""
     from .pdfcanvas import PAGE_H, PAGE_W, PDFCanvas
     now = now or time.time()
-    generated = datetime.fromtimestamp(now, timezone.utc).strftime(
+    generated = datetime.fromtimestamp(now, UTC).strftime(
         "%Y-%m-%d %H:%M UTC")
     header, rows = report_rows(config, store, runstore, now)
     prows = policy_rows(config, store)
@@ -176,7 +176,7 @@ def to_pdf(config, store, runstore, now=None) -> bytes:
         c.text(margin, y, title, size=12, font="bold")
         y -= 16
         c.rect(margin, y - 2, PAGE_W - 2 * margin, 16, fill=_DARK)
-        for cx, name in zip(col_x, cols):
+        for cx, name in zip(col_x, cols, strict=False):
             c.text(margin + cx, y + 2, name, size=8, font="bold", color=_WHITE)
         y -= 16
         for ri, row in enumerate(data):
@@ -186,7 +186,7 @@ def to_pdf(config, store, runstore, now=None) -> bytes:
             if ri % 2 == 0:
                 c.rect(margin, y - 2, PAGE_W - 2 * margin, 14, fill=_LIGHT)
             color = row_color(row) if row_color else (0.1, 0.12, 0.14)
-            for cx, cell in zip(col_x, row):
+            for cx, cell in zip(col_x, row, strict=False):
                 c.text(margin + cx, y + 1, str(cell)[:40], size=8, color=color)
             y -= 14
         y -= 14
@@ -226,7 +226,7 @@ def _docx_xml_escape(text: str) -> str:
 def to_docx(config, store, runstore, now=None) -> bytes:
     """Assemble a minimal but valid .docx (OOXML) as a zip of parts."""
     generated = datetime.fromtimestamp(
-        now or time.time(), timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        now or time.time(), UTC).strftime("%Y-%m-%d %H:%M UTC")
     header, rows = report_rows(config, store, runstore, now)
 
     def para(text, bold=False, size=22):
