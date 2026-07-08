@@ -45,6 +45,10 @@ webui:
   # auth:
   #   username: admin
   #   password_hash: pbkdf2_sha256$600000$...$...
+  # Or multiple users with roles (viewer < operator < admin):
+  # users:
+  #   - {username: alice, password_hash: pbkdf2_sha256$..., role: admin}
+  #   - {username: bob,   password_hash: pbkdf2_sha256$..., role: viewer}
   # Generate a self-signed pair with: otitbup certgen (or use CA-issued PEMs)
   # tls:
   #   cert_file: webui-cert.pem    # relative to this config file
@@ -52,6 +56,7 @@ webui:
 
 alerts:
   stale_days: 7           # alert if no successful backup in N days (0 = off)
+  min_interval: 3600      # rate-limit: suppress the same alert within N s
   webhooks: []
   # syslog:
   #   address: 10.0.0.1

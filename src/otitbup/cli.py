@@ -57,15 +57,53 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("list", help="list configured devices")
     sub.add_parser("drivers", help="list available drivers")
 
+    p_init = sub.add_parser("init", help="scaffold a starter config")
+    p_init.add_argument("--dir", default=".", help="directory to write into")
+
     p_backup = sub.add_parser("backup", help="run a backup now")
     p_backup.add_argument("devices", nargs="*", help="device names (default: all)")
+    p_backup.add_argument("--site", action="append", help="limit to site(s)")
+    p_backup.add_argument("--zone", action="append", help="limit to zone(s)")
     p_backup.add_argument(
         "--force", action="store_true",
         help="ignore maintenance windows",
     )
 
-    p_diff = sub.add_parser("diff", help="show a device's latest change")
+    p_diff = sub.add_parser("diff", help="show a device's change or a range")
     p_diff.add_argument("device")
+    p_diff.add_argument("--from", dest="from_commit", help="base commit")
+    p_diff.add_argument("--to", dest="to_commit", default="HEAD",
+                        help="head commit (default HEAD)")
+
+    p_search = sub.add_parser(
+        "search", help="search across the latest backup of every device"
+    )
+    p_search.add_argument("pattern", help="text or regex to grep for")
+    p_search.add_argument("--case-sensitive", action="store_true")
+
+    p_baseline = sub.add_parser(
+        "baseline", help="manage golden-config baselines and drift"
+    )
+    baseline_sub = p_baseline.add_subparsers(
+        dest="baseline_command", required=True
+    )
+    p_bset = baseline_sub.add_parser("set", help="approve current as baseline")
+    p_bset.add_argument("device")
+    p_bset.add_argument("--commit", help="commit to pin (default: latest)")
+    p_bset.add_argument("--note")
+    p_bclear = baseline_sub.add_parser("clear", help="remove a baseline")
+    p_bclear.add_argument("device")
+    baseline_sub.add_parser("drift", help="show devices drifted from baseline")
+
+    p_reconcile = sub.add_parser(
+        "reconcile", help="compare inventory against a network scan"
+    )
+    p_reconcile.add_argument("subnets", nargs="+", help="CIDR subnets to scan")
+    p_reconcile.add_argument("--timeout", type=float, default=0.5)
+    p_reconcile.add_argument("--delay", type=float, default=0.05)
+    p_reconcile.add_argument(
+        "--out", help="write unmanaged hosts as a YAML proposal to this file"
+    )
 
     p_log = sub.add_parser("log", help="show backup history")
     p_log.add_argument("device", nargs="?")
@@ -246,6 +284,18 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{name:20s} {description}")
         return 0
 
+    if args.command == "init":
+        from .scaffold import init_project
+        try:
+            written = init_project(args.dir)
+        except FileExistsError as exc:
+            print(f"init error: {exc}", file=sys.stderr)
+            return 2
+        for path in written:
+            print(f"wrote {path}")
+        print("edit otitbup.yml and secrets.yml, then `otitbup validate`")
+        return 0
+
     if args.command == "passwd":
         from .auth import hash_password
         password = args.password
@@ -320,10 +370,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "backup":
-        devices = (
-            config.find_devices(args.devices)
-            if args.devices else config.all_devices()
-        )
+        try:
+            devices = config.select(
+                names=args.devices, sites=args.site, zones=args.zone
+            )
+        except KeyError as exc:
+            print(f"backup error: {exc}", file=sys.stderr)
+            return 2
+        if not devices:
+            print("no devices matched the selection", file=sys.stderr)
+            return 1
         runner = _build_runner(config, force=args.force)
         results = runner.backup_devices(devices)
         for result in results:
@@ -333,7 +389,97 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "diff":
         [device] = config.find_devices([args.device])
-        print(GitStore(config.data_dir).last_diff(device) or "no history")
+        store = GitStore(config.data_dir)
+        if args.from_commit:
+            print(
+                store.diff_between(device, args.from_commit, args.to_commit)
+                or "no differences"
+            )
+        else:
+            print(store.last_diff(device) or "no history")
+        return 0
+
+    if args.command == "search":
+        store = GitStore(config.data_dir)
+        store.ensure_repo()
+        by_path = {d.path: d for d in config.all_devices()}
+        hits = store.search(
+            args.pattern, ignore_case=not args.case_sensitive
+        )
+        for repo_path, lineno, text in hits:
+            # Map sites/<site>/<zone>/<device>/<artifact> back to a device.
+            device_name = repo_path
+            for path, device in by_path.items():
+                if repo_path.startswith(path + "/"):
+                    device_name = (
+                        f"{device.qualified_name}:{repo_path[len(path) + 1:]}"
+                    )
+                    break
+            print(f"{device_name}:{lineno}: {text.strip()}")
+        print(f"\n{len(hits)} match(es)", file=sys.stderr)
+        return 0 if hits else 1
+
+    if args.command == "baseline":
+        from .baseline import all_drift, drift_diff
+        from .runstore import default_runstore
+        import time
+        store = GitStore(config.data_dir)
+        runstore = default_runstore(config)
+        if args.baseline_command == "set":
+            [device] = config.find_devices([args.device])
+            commit = args.commit or store.last_commit_hash(device)
+            if not commit:
+                print(f"no backups for {device.qualified_name}",
+                      file=sys.stderr)
+                return 1
+            runstore.set_baseline(
+                device.qualified_name, commit, time.time(),
+                set_by=userEmail_or_none(), note=args.note,
+            )
+            print(f"baseline for {device.qualified_name} = {commit[:10]}")
+            return 0
+        if args.baseline_command == "clear":
+            [device] = config.find_devices([args.device])
+            runstore.clear_baseline(device.qualified_name)
+            print(f"baseline cleared for {device.qualified_name}")
+            return 0
+        # drift
+        drifted = 0
+        for drift in all_drift(config, store, runstore):
+            if not drift.has_baseline:
+                state = "no-baseline"
+            elif drift.drifted:
+                state = "DRIFTED"
+                drifted += 1
+            else:
+                state = "ok"
+            print(f"{state:12s} {drift.device}")
+        print(f"\n{drifted} device(s) drifted from baseline",
+              file=sys.stderr)
+        return 0 if not drifted else 1
+
+    if args.command == "reconcile":
+        from .reconcile import reconcile
+        from .discovery import proposal_yaml
+        result = reconcile(
+            config, args.subnets, timeout=args.timeout, delay=args.delay
+        )
+        print(f"unmanaged (on network, not in inventory): "
+              f"{len(result.unmanaged)}")
+        for finding in result.unmanaged:
+            ports = ", ".join(str(p) for p in finding.open_ports)
+            print(f"  {finding.address:16s} ports {ports:20s} "
+                  f"-> {finding.driver}")
+        print(f"unreachable (in inventory, no scan response): "
+              f"{len(result.unreachable)}")
+        for name in result.unreachable:
+            print(f"  {name}")
+        print(f"managed & reachable: {len(result.managed_reachable)}")
+        if args.out and result.unmanaged:
+            Path(args.out).write_text(
+                proposal_yaml(result.unmanaged, "reconciled", "found")
+            )
+            print(f"\nunmanaged hosts written to {args.out} for review")
         return 0
 
     if args.command == "log":
@@ -346,7 +492,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "daemon":
         runner = _build_runner(config)
-        daemon = Daemon(config, runner)
+        daemon = Daemon(config, runner, config_path=args.config)
         if args.once:
             count = daemon.run_once()
             print(f"backed up {count} device(s)")

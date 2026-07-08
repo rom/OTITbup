@@ -22,20 +22,64 @@ from __future__ import annotations
 import json
 import logging
 import smtplib
+import time
 import urllib.request
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from logging.handlers import SysLogHandler
+from pathlib import Path
 from typing import Any
 
 log = logging.getLogger("otitbup.alerts")
 
 
 class AlertManager:
-    def __init__(self, cfg: dict[str, Any] | None):
+    def __init__(self, cfg: dict[str, Any] | None, state_path=None):
         self.cfg = cfg or {}
+        # Rate-limiting: suppress a repeat of the same subject within
+        # min_interval seconds (default 1h; 0 disables). State persists so
+        # a flapping device can't spam across separate cron runs.
+        self.min_interval = float(self.cfg.get("min_interval", 3600))
+        self.state_path = Path(state_path) if state_path else None
+        self._last_sent: dict[str, float] = self._load_state()
+
+    def _load_state(self) -> dict[str, float]:
+        if self.state_path and self.state_path.exists():
+            try:
+                return json.loads(self.state_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                pass
+        return {}
+
+    def _save_state(self) -> None:
+        if not self.state_path:
+            return
+        try:
+            self.state_path.parent.mkdir(parents=True, exist_ok=True)
+            self.state_path.write_text(json.dumps(self._last_sent))
+        except OSError as exc:
+            log.warning("could not persist alert state: %s", exc)
+
+    def _suppressed(self, subject: str) -> bool:
+        if self.min_interval <= 0:
+            return False
+        now = time.time()
+        last = self._last_sent.get(subject)
+        if last is not None and now - last < self.min_interval:
+            return True
+        self._last_sent[subject] = now
+        # Forget entries older than the window so state doesn't grow.
+        self._last_sent = {
+            k: v for k, v in self._last_sent.items()
+            if now - v < self.min_interval
+        }
+        self._save_state()
+        return False
 
     def notify(self, subject: str, body: str) -> None:
+        if self._suppressed(subject):
+            log.info("alert suppressed (rate limit): %s", subject)
+            return
         for url in self.cfg.get("webhooks") or []:
             self._webhook(url, subject, body)
         if self.cfg.get("syslog"):

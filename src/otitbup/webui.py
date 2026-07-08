@@ -98,9 +98,10 @@ def _page(title: str, body: str) -> bytes:
         f"<title>{html.escape(title)}</title><style>{_STYLE}</style></head>"
         f"<body><header><h1><a href='/'>otitbup</a></h1>"
         f"<nav><a href='/'>Devices</a><a href='/health'>Health</a>"
+        f"<a href='/search'>Search</a><a href='/drift'>Drift</a>"
         f"<a href='/activity'>Activity</a><a href='/policy'>Policy</a>"
         f"<a href='/retention'>Retention</a>"
-        f"<a href='/drivers'>Drivers</a></nav></header>"
+        f"<a href='/drivers'>Drivers</a><a href='/audit'>Audit</a></nav></header>"
         f"{body}</body></html>"
     ).encode()
 
@@ -119,12 +120,18 @@ class WebUI:
         auth: dict | None = None,
         blobstore=None,
         runstore=None,
+        users: dict | None = None,
     ):
         self.config = config
         self.store = store
         self.auth = auth
         self.blobstore = blobstore
         self.runstore = runstore
+        # {username: {password_hash, role}}; empty = no auth required.
+        from .auth import build_users
+        self.users = users if users is not None else build_users(
+            auth, config.webui.get("users")
+        )
 
     # ------------------------------------------------------------ pages
 
@@ -286,6 +293,133 @@ class WebUI:
             + _FILTER_SCRIPT
         )
         return _page("otitbup — health", body)
+
+    def search(self, query: str) -> bytes:
+        by_path = {d.path: d for d in self.config.all_devices()}
+        rows = ""
+        count = 0
+        if query:
+            for repo_path, lineno, text in self.store.search(query):
+                count += 1
+                label = repo_path
+                link = None
+                for path, device in by_path.items():
+                    if repo_path.startswith(path + "/"):
+                        artifact = repo_path[len(path) + 1:]
+                        label = f"{device.qualified_name}:{artifact}"
+                        link = (
+                            f"{_device_link(device)}/artifact/"
+                            f"{quote(artifact)}"
+                        )
+                        break
+                cell = (
+                    f"<a href='{link}'>{html.escape(label)}</a>" if link
+                    else html.escape(label)
+                )
+                rows += (
+                    f"<tr data-row><td>{cell}</td><td>{lineno}</td>"
+                    f"<td><code>{html.escape(text.strip()[:200])}</code></td></tr>"
+                )
+        form = (
+            "<form method='get' action='/search'>"
+            f"<input id='filter' type='search' name='q' "
+            f"value='{html.escape(query)}' placeholder='Search configs…' "
+            "autocomplete='off'><button type='submit'>Search</button></form>"
+        )
+        body = (
+            "<h2>Config search</h2>" + form
+            + (
+                f"<p class='muted'>{count} match(es) across the latest "
+                "backup of every device</p>"
+                "<table><tr><th>Device : artifact</th><th>Line</th>"
+                "<th>Match</th></tr>" + rows + "</table>"
+                if query else
+                "<p class='muted'>Search the latest configuration of every "
+                "device — e.g. a VLAN id, an IP, a tag or username.</p>"
+            )
+        )
+        return _page("otitbup — search", body)
+
+    def drift(self) -> bytes:
+        from .baseline import all_drift
+        if self.runstore is None:
+            return _page("otitbup — drift",
+                         "<p class='muted'>run store unavailable</p>")
+        drifts = all_drift(self.config, self.store, self.runstore)
+        drifted = sum(1 for d in drifts if d.drifted)
+        no_baseline = sum(1 for d in drifts if not d.has_baseline)
+        rows = ""
+        for d in drifts:
+            if not d.has_baseline:
+                badge = "<span class='muted'>no baseline</span>"
+            elif d.drifted:
+                badge = "<span class='badge never'>DRIFTED</span>"
+            else:
+                badge = "<span class='badge'>matches baseline</span>"
+            device = self._find(d.device)
+            link = _device_link(device) if device else "#"
+            rows += (
+                f"<tr data-row><td><a href='{link}'>{html.escape(d.device)}"
+                "</a></td>"
+                f"<td>{badge}</td>"
+                f"<td><code>{html.escape((d.baseline_commit or '-')[:10])}"
+                "</code></td>"
+                f"<td><code>{html.escape((d.latest_commit or '-')[:10])}"
+                "</code></td></tr>"
+            )
+        tiles = (
+            "<div class='tiles'>"
+            f"<div class='tile'><b>{drifted}</b><span>drifted</span></div>"
+            f"<div class='tile'><b>{len(drifts) - no_baseline}</b>"
+            "<span>with baseline</span></div>"
+            f"<div class='tile'><b>{no_baseline}</b><span>no baseline</span>"
+            "</div></div>"
+        )
+        body = (
+            "<h2>Golden-config drift</h2>" + tiles
+            + "<table><tr><th>Device</th><th>State</th><th>Baseline</th>"
+              "<th>Latest</th></tr>" + rows + "</table>"
+            + "<p class='muted'>set a baseline with "
+              "<code>otitbup baseline set &lt;device&gt;</code></p>"
+        )
+        return _page("otitbup — drift", body)
+
+    def compare(self, qualified_name: str, base: str, head: str) -> bytes | None:
+        device = self._find(qualified_name)
+        ref_ok = lambda r: r == "HEAD" or bool(_COMMIT_RE.match(r))  # noqa: E731
+        if not device or not ref_ok(base) or not ref_ok(head):
+            return None
+        diff = self.store.diff_between(device, base, head).strip()
+        body = (
+            f"<h2>{html.escape(device.qualified_name)}</h2>"
+            f"<p class='muted'><code>{html.escape(base)}</code> .. "
+            f"<code>{html.escape(head)}</code> · "
+            f"<a href='{_device_link(device)}'>&larr; device</a></p>"
+            f"<pre>{html.escape(diff) or 'no differences'}</pre>"
+        )
+        return _page(f"otitbup — compare {device.qualified_name}", body)
+
+    def audit(self) -> bytes:
+        if self.runstore is None:
+            return _page("otitbup — audit", "<p class='muted'>unavailable</p>")
+        import datetime as _dt
+        rows = "".join(
+            "<tr data-row><td>"
+            + _dt.datetime.fromtimestamp(
+                r["at"], _dt.timezone.utc
+            ).strftime("%Y-%m-%d %H:%M:%S")
+            + f"</td><td>{html.escape(r.get('actor') or '-')}</td>"
+            f"<td>{html.escape(r.get('role') or '-')}</td>"
+            f"<td>{html.escape(r.get('action') or '')}</td>"
+            f"<td>{html.escape(r.get('detail') or '')}</td></tr>"
+            for r in self.runstore.recent_audit(limit=300)
+        )
+        body = (
+            "<h2>Audit log</h2>"
+            "<table><tr><th>When (UTC)</th><th>User</th><th>Role</th>"
+            "<th>Action</th><th>Detail</th></tr>" + rows + "</table>"
+        )
+        return _page("otitbup — audit", body)
 
     def policy(self) -> bytes:
         from .policy import check_all, load_rules, severity_rank
@@ -498,6 +632,32 @@ class WebUI:
                 "<th>Description</th></tr>" + rows + "</table>"
             )
 
+        # Baseline / golden-config drift.
+        drift_block = ""
+        if self.runstore is not None:
+            from .baseline import device_drift, drift_diff
+            dr = device_drift(self.store, self.runstore, device)
+            if dr.has_baseline:
+                if dr.drifted:
+                    dd = drift_diff(self.store, self.runstore, device).strip()
+                    drift_block = (
+                        "<h3>Baseline drift "
+                        "<span class='badge never'>DRIFTED</span></h3>"
+                        f"<p class='muted'>baseline "
+                        f"<code>{html.escape((dr.baseline_commit or '')[:10])}"
+                        "</code> vs latest "
+                        f"<code>{html.escape((dr.latest_commit or '')[:10])}"
+                        "</code></p>"
+                        f"<pre>{html.escape(dd)}</pre>"
+                    )
+                else:
+                    drift_block = (
+                        "<h3>Baseline <span class='badge'>matches</span></h3>"
+                        f"<p class='muted'>baseline "
+                        f"<code>{html.escape((dr.baseline_commit or '')[:10])}"
+                        "</code></p>"
+                    )
+
         diff = self.store.last_diff(device).strip()
         from .retention import describe_policy
         policy_line = describe_policy(self.config.retention_for(device))
@@ -523,6 +683,7 @@ class WebUI:
                 if history_rows else "<p class='muted'>no backups yet</p>"
             )
             + rehearsal_block
+            + drift_block
             + "<h3>Latest change</h3>"
             + f"<pre>{html.escape(diff) or 'no backups yet'}</pre>"
         )
@@ -676,23 +837,56 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def do_GET(self):
-        _path = unquote(self.path.split("?", 1)[0])
+        from urllib.parse import parse_qs
+        raw = self.path.split("?", 1)
+        path = unquote(raw[0])
+        query = parse_qs(raw[1]) if len(raw) > 1 else {}
         # Liveness probe is always reachable so monitoring can poll it.
-        if _path == "/healthz":
+        if path == "/healthz":
             return self._send(200, b'{"status":"ok"}\n', "application/json")
-        if self.ui.auth and not check_basic_auth(
-            self.headers.get("Authorization"), self.ui.auth
-        ):
-            content = _page("unauthorized", "<p>unauthorized</p>")
-            self.send_response(401)
-            self.send_header("WWW-Authenticate", 'Basic realm="otitbup"')
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(content)))
-            self.end_headers()
-            self.wfile.write(content)
-            return
 
-        path = unquote(self.path.split("?", 1)[0])
+        # Authenticate (multi-user with roles, or open if no users set).
+        identity = None
+        if self.ui.users:
+            from .auth import authenticate
+            identity = authenticate(
+                self.headers.get("Authorization"), self.ui.users
+            )
+            if identity is None:
+                content = _page("unauthorized", "<p>unauthorized</p>")
+                self.send_response(401)
+                self.send_header("WWW-Authenticate", 'Basic realm="otitbup"')
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
+                return
+        self._identity = identity
+
+        # Audit log (best-effort; page views only, not asset fetches).
+        if self.ui.runstore is not None and not path.startswith(
+            ("/api/", "/metrics")
+        ):
+            import time
+            try:
+                self.ui.runstore.audit(
+                    time.time(), "view",
+                    actor=identity["username"] if identity else None,
+                    role=identity["role"] if identity else None,
+                    detail=path,
+                )
+            except Exception:
+                pass
+
+        # Role-gated pages.
+        if path == "/audit":
+            from .auth import role_rank
+            role = identity["role"] if identity else "admin"
+            if self.ui.users and role_rank(role) < role_rank("admin"):
+                return self._send(
+                    403, _page("forbidden", "<p>admin role required</p>")
+                )
+            return self._send(200, self.ui.audit())
 
         # Machine-readable endpoints (non-HTML).
         if path == "/metrics":
@@ -703,8 +897,6 @@ class _Handler(BaseHTTPRequestHandler):
             )
             return self._send(200, text.encode(),
                               "text/plain; version=0.0.4; charset=utf-8")
-        if path == "/healthz":
-            return self._send(200, b'{"status":"ok"}\n', "application/json")
         if path.startswith("/api/"):
             result = self._api(path)
             if result is None:
@@ -722,6 +914,10 @@ class _Handler(BaseHTTPRequestHandler):
             content = self.ui.index()
         elif path == "/health":
             content = self.ui.health()
+        elif path == "/search":
+            content = self.ui.search(query.get("q", [""])[0])
+        elif path == "/drift":
+            content = self.ui.drift()
         elif path == "/policy":
             content = self.ui.policy()
         elif path == "/activity":
@@ -735,6 +931,11 @@ class _Handler(BaseHTTPRequestHandler):
             parts = rest.split("/")
             if len(parts) >= 5 and parts[3] == "commit":
                 content = self.ui.commit("/".join(parts[:3]), parts[4])
+            elif len(parts) >= 4 and parts[3] == "compare":
+                content = self.ui.compare(
+                    "/".join(parts[:3]),
+                    query.get("base", [""])[0], query.get("head", ["HEAD"])[0],
+                )
             elif len(parts) >= 5 and parts[3] == "artifact":
                 result = self.ui.artifact(
                     "/".join(parts[:3]), "/".join(parts[4:])
@@ -756,13 +957,16 @@ def serve(
     blobstore=None,
     runstore=None,
 ) -> None:
-    if not auth and host not in ("127.0.0.1", "localhost", "::1"):
+    from .auth import build_users
+    users = build_users(auth, config.webui.get("users"))
+    if not users and host not in ("127.0.0.1", "localhost", "::1"):
         log.warning(
             "web UI on %s has NO authentication configured — set "
-            "webui.auth in the config (see `otitbup passwd`)", host,
+            "webui.auth/users in the config (see `otitbup passwd`)", host,
         )
     ui = WebUI(
-        config, store, auth=auth, blobstore=blobstore, runstore=runstore
+        config, store, auth=auth, blobstore=blobstore, runstore=runstore,
+        users=users,
     )
     server = ThreadingHTTPServer((host, port), partial(_Handler, ui))
     scheme = "http"

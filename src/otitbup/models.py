@@ -126,3 +126,26 @@ class AppConfig:
                 raise KeyError(f"ambiguous device name {name!r}: {qualified}")
             result.extend(matches)
         return result
+
+    def select(
+        self,
+        names: list[str] | None = None,
+        sites: list[str] | None = None,
+        zones: list[str] | None = None,
+    ) -> list[Device]:
+        """Select devices by explicit names and/or by --site/--zone
+        filters. With no criteria, returns every device."""
+        if not names and not sites and not zones:
+            return self.all_devices()
+        selected: dict[str, Device] = {}
+        if names:
+            for device in self.find_devices(names):
+                selected[device.qualified_name] = device
+        if sites or zones:
+            for device in self.all_devices():
+                if sites and device.site not in sites:
+                    continue
+                if zones and device.zone not in zones:
+                    continue
+                selected[device.qualified_name] = device
+        return [d for _, d in sorted(selected.items())]

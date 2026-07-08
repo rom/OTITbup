@@ -47,6 +47,24 @@ CREATE TABLE IF NOT EXISTS maintenance (
     set_by    TEXT,
     set_at    REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS baselines (
+    device      TEXT PRIMARY KEY,   -- approved "golden" config commit
+    commit_hash TEXT NOT NULL,
+    set_at      REAL NOT NULL,
+    set_by      TEXT,
+    note        TEXT
+);
+
+CREATE TABLE IF NOT EXISTS audit (
+    id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    at     REAL NOT NULL,
+    actor  TEXT,
+    role   TEXT,
+    action TEXT NOT NULL,
+    detail TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_audit_at ON audit(at);
 """
 
 
@@ -222,6 +240,55 @@ class RunStore:
                 or f"{site}/{zone}/*" in active
             )
         return False
+
+
+    # ----------------------------------------------------- baselines
+
+    def set_baseline(
+        self, device: str, commit_hash: str, at: float,
+        set_by: str | None = None, note: str | None = None,
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO baselines (device, commit_hash, set_at, set_by, "
+                "note) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(device) DO UPDATE SET commit_hash=excluded."
+                "commit_hash, set_at=excluded.set_at, set_by=excluded.set_by, "
+                "note=excluded.note",
+                (device, commit_hash, at, set_by, note),
+            )
+
+    def get_baseline(self, device: str) -> dict | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM baselines WHERE device = ?", (device,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def clear_baseline(self, device: str) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM baselines WHERE device = ?", (device,))
+
+    # --------------------------------------------------------- audit
+
+    def audit(
+        self, at: float, action: str, actor: str | None = None,
+        role: str | None = None, detail: str | None = None,
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO audit (at, actor, role, action, detail) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (at, actor, role, action, detail),
+            )
+
+    def recent_audit(self, limit: int = 200) -> list[dict]:
+        with self._conn() as conn:
+            return [
+                dict(row) for row in conn.execute(
+                    "SELECT * FROM audit ORDER BY at DESC LIMIT ?", (limit,)
+                )
+            ]
 
 
 def default_runstore(config) -> RunStore:

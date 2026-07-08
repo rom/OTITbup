@@ -53,12 +53,36 @@ class Runner:
         self.config = config
         self.store = store
         self.secrets = secrets
-        self.alerts = alerts or AlertManager(config.alerts)
+        self.alerts = alerts or AlertManager(
+            config.alerts,
+            state_path=Path(config.data_dir).parent / "alert-state.json",
+        )
         self.force = force
         self.blobstore = default_blobstore(config)
         self.runstore = runstore or default_runstore(config)
 
     def backup_devices(self, devices: list[Device]) -> list[BackupResult]:
+        from .filelock import FileLock, LockBusy
+        lock = FileLock(Path(self.config.data_dir).parent / "otitbup.lock")
+        try:
+            lock.acquire(blocking=False)
+        except LockBusy as exc:
+            log.warning("backup skipped: %s", exc)
+            return [
+                BackupResult(
+                    device=d.qualified_name, ok=True,
+                    message="skipped: another backup is in progress",
+                )
+                for d in devices
+            ]
+        try:
+            return self._backup_devices_locked(devices)
+        finally:
+            lock.release()
+
+    def _backup_devices_locked(
+        self, devices: list[Device]
+    ) -> list[BackupResult]:
         self.store.ensure_repo()
         zone_limits: dict[tuple[str, str], threading.Semaphore] = {}
         for device in devices:

@@ -21,11 +21,47 @@ _POLL_SECONDS = 30
 
 
 class Daemon:
-    def __init__(self, config: AppConfig, runner: Runner):
+    def __init__(
+        self, config: AppConfig, runner: Runner, config_path: str | None = None
+    ):
         self.config = config
         self.runner = runner
+        self.config_path = config_path
+        self._config_mtime = self._mtime()
         self.state_path = Path(config.data_dir).parent / "state.json"
         self.state: dict[str, str] = self._load_state()
+
+    def _mtime(self) -> float:
+        if not self.config_path:
+            return 0.0
+        try:
+            return Path(self.config_path).stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def reload(self) -> bool:
+        """Re-read the config file if it changed. Returns True on reload.
+        The inventory, schedules, retention, alerts and policy all take
+        effect on the next tick without a restart."""
+        if not self.config_path:
+            return False
+        current = self._mtime()
+        if current == self._config_mtime:
+            return False
+        from .config import ConfigError, load_config
+        try:
+            new_config = load_config(self.config_path)
+        except ConfigError as exc:
+            log.warning("config reload failed, keeping old config: %s", exc)
+            self._config_mtime = current  # don't retry the same broken file
+            return False
+        self.config = new_config
+        self.runner.config = new_config
+        self._config_mtime = current
+        log.info(
+            "config reloaded: %d device(s)", len(new_config.all_devices())
+        )
+        return True
 
     def _load_state(self) -> dict[str, str]:
         if self.state_path.exists():
@@ -60,10 +96,25 @@ class Daemon:
             len(self.config.all_devices()),
             _POLL_SECONDS,
         )
+        self._install_sighup()
         while True:
+            self.reload()  # pick up config edits without a restart
             self.run_once()
             self._maybe_report()
             time.sleep(_POLL_SECONDS)
+
+    def _install_sighup(self) -> None:
+        """SIGHUP forces an immediate reload on the next tick (edit then
+        `kill -HUP <pid>`), in addition to automatic mtime detection."""
+        try:
+            import signal
+
+            def _handler(signum, frame):
+                self._config_mtime = -1.0  # force reload() to fire
+
+            signal.signal(signal.SIGHUP, _handler)
+        except (ImportError, ValueError, AttributeError):
+            pass  # no SIGHUP (e.g. Windows, or not main thread)
 
     def run_once(self) -> int:
         """One scheduler tick. Returns the number of devices backed up."""
