@@ -124,6 +124,9 @@ class Daemon:
             self.run_once()
             self._maybe_report()
             self._maybe_gc()
+            self._maybe_integrity()
+            self._maybe_offsite()
+            self._maybe_rehearse()
             time.sleep(_POLL_SECONDS)
 
     def _install_sighup(self) -> None:
@@ -208,3 +211,94 @@ class Daemon:
             log.warning("housekeeping git gc failed: %s", exc)
         self.state["__gc__"] = now.isoformat()
         self._save_state()
+
+    def _periodic_due(self, key: str, interval: timedelta) -> bool:
+        """True if a periodic job keyed by `key` is due (and stamp it)."""
+        now = datetime.now(UTC)
+        last = self.state.get(key)
+        if last is not None:
+            if now < datetime.fromisoformat(last) + interval:
+                return False
+        self.state[key] = now.isoformat()
+        self._save_state()
+        return True
+
+    def _maybe_integrity(self) -> None:
+        """Run a scheduled integrity scrub (verify + git fsck [+ signatures])
+        every integrity.interval_days, alerting on any problem. 0/unset off."""
+        days = float(self.config.integrity.get("interval_days", 0) or 0)
+        if days <= 0 or not self._periodic_due(
+            "__integrity__", timedelta(days=days)
+        ):
+            return
+        import time as _time
+
+        from . import integrity
+        from .runner import default_blobstore
+        from .runstore import default_runstore
+        try:
+            result = integrity.run_scheduled(
+                self.config, self.runner.store,
+                default_blobstore(self.config), default_runstore(self.config),
+                self.events, self.runner.alerts, _time.time())
+            log.info("scheduled integrity check: %s", result.summary())
+        except Exception as exc:
+            log.warning("scheduled integrity check failed: %s", exc)
+
+    def _maybe_offsite(self) -> None:
+        """Push an encrypted offsite snapshot every offsite.interval_days."""
+        days = float(self.config.offsite.get("interval_days", 0) or 0)
+        if days <= 0 or not self._periodic_due(
+            "__offsite__", timedelta(days=days)
+        ):
+            return
+        from . import offsite
+        try:
+            stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+            name = offsite.push(self.config, stamp)
+            log.info("scheduled offsite push: %s", name)
+        except Exception as exc:
+            log.warning("scheduled offsite push failed: %s", exc)
+            self.runner.alerts.notify(
+                "otitbup: scheduled offsite push failed", str(exc))
+
+    def _maybe_rehearse(self) -> None:
+        """Rehearse restores (export+verify a bundle) every
+        rehearsal.interval_days, across all devices."""
+        days = float(self.config.rehearsal.get("interval_days", 0) or 0)
+        if days <= 0 or not self._periodic_due(
+            "__rehearse__", timedelta(days=days)
+        ):
+            return
+        import tempfile
+        import time as _time
+
+        from .restore import RestoreError, export_bundle
+        from .runner import default_blobstore
+        from .runstore import default_runstore
+        runstore = default_runstore(self.config)
+        blobstore = default_blobstore(self.config)
+        failures = []
+        for device in self.config.all_devices():
+            commit = self.runner.store.last_commit_hash(device)
+            if not commit:
+                continue
+            try:
+                with tempfile.TemporaryDirectory() as tmp:
+                    _, mismatches = export_bundle(
+                        self.runner.store, device, f"{tmp}/b",
+                        commit=commit, blobstore=blobstore)
+                result = "pass" if not mismatches else "fail"
+            except RestoreError:
+                result = "fail"
+            if result == "fail":
+                failures.append(device.qualified_name)
+            runstore.record_rehearsal(
+                device.qualified_name, _time.time(), commit, result,
+                tested_by="daemon")
+        log.info("scheduled rehearsal: %d device(s), %d failure(s)",
+                 len(self.config.all_devices()), len(failures))
+        if failures:
+            self.runner.alerts.notify(
+                f"otitbup: {len(failures)} restore rehearsal(s) failed",
+                "\n".join(failures))

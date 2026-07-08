@@ -29,6 +29,18 @@ class GitStoreError(Exception):
     pass
 
 
+def manifest_artifacts(manifest) -> dict:
+    """The per-artifact section of a manifest. Manifests are now
+    `{provenance: {...}, artifacts: {name: {...}}}`; older ones were a flat
+    `{name: {...}}`. This returns the artifact map for either shape."""
+    if not isinstance(manifest, dict):
+        return {}
+    if "artifacts" in manifest and isinstance(manifest["artifacts"], dict):
+        return manifest["artifacts"]
+    # Legacy flat manifest: drop any non-dict values defensively.
+    return {k: v for k, v in manifest.items() if isinstance(v, dict)}
+
+
 class GitStore:
     def __init__(self, data_dir: str | Path, sign_key: str | None = None):
         self.root = Path(data_dir)
@@ -62,6 +74,8 @@ class GitStore:
         artifacts: list[Artifact],
         blobstore=None,
         threshold: int | None = None,
+        appliance: str | None = None,
+        captured_at: str | None = None,
     ) -> str | None:
         """Replace the device's directory contents with `artifacts` and
         commit. Returns the commit hash, or None if nothing changed.
@@ -105,16 +119,26 @@ class GitStore:
                 else:
                     target.write_bytes(artifact.data)
                 manifest[artifact.name] = entry
+            # Stable provenance lives IN the manifest (device GUID + driver)
+            # so it is content-hashed and diffable, yet — being stable — never
+            # causes a spurious commit. Volatile provenance (timestamp, tool
+            # and appliance) goes in the commit trailers instead.
+            document = {
+                "provenance": {
+                    "device_guid": device.effective_guid,
+                    "driver": device.driver,
+                },
+                "artifacts": manifest,
+            }
             with open(device_dir / "manifest.yml", "w") as fh:
-                yaml.safe_dump(manifest, fh, sort_keys=True)
+                yaml.safe_dump(document, fh, sort_keys=True)
 
             self._git("add", "-A", "--", device.path)
             if not self._git("status", "--porcelain", "--", device.path).strip():
                 return None
-            commit_args = [
-                "commit", "-m",
-                f"backup({device.qualified_name}): {len(artifacts)} artifact(s)",
-            ]
+            message = self._commit_message(
+                device, len(artifacts), appliance, captured_at)
+            commit_args = ["commit", "-m", message]
             if self.sign_key:
                 # SSH-signed commit: attributable, tamper-evident history.
                 commit_args = [
@@ -124,6 +148,26 @@ class GitStore:
             commit_args += ["--", device.path]
             self._git(*commit_args)
             return self._git("rev-parse", "HEAD").strip()
+
+    def _commit_message(
+        self, device: Device, count: int, appliance: str | None,
+        captured_at: str | None,
+    ) -> str:
+        """Backup commit subject plus provenance trailers (chain of custody)."""
+        import socket
+
+        from . import __version__
+        appliance = appliance or socket.gethostname()
+        trailers = [
+            f"Device-GUID: {device.effective_guid}",
+            f"Driver: {device.driver}",
+            f"Tool-Version: {__version__}",
+            f"Appliance: {appliance}",
+        ]
+        if captured_at:
+            trailers.append(f"Captured-At: {captured_at}")
+        return (f"backup({device.qualified_name}): {count} artifact(s)\n\n"
+                + "\n".join(trailers) + "\n")
 
     def verify_commit_signature(self, commit: str = "HEAD") -> bool:
         """True if `commit` carries a valid signature."""
@@ -268,7 +312,7 @@ class GitStore:
         if not isinstance(manifest, dict):
             return [f"{device.qualified_name}@{commit[:8]}: manifest unreadable"]
         from .blobstore import parse_pointer
-        for name, meta in manifest.items():
+        for name, meta in manifest_artifacts(manifest).items():
             expected = meta.get("sha256") if isinstance(meta, dict) else None
             try:
                 data = self.read_file_at(commit, f"{device.path}/{name}")
@@ -284,6 +328,24 @@ class GitStore:
                 data = blobstore.get(sha)
             if expected and hashlib.sha256(data).hexdigest() != expected:
                 problems.append(f"{name}: sha256 mismatch")
+        return problems
+
+    def fsck(self) -> list[str]:
+        """Run `git fsck` to detect repository-level corruption (bad or
+        missing objects, broken links). Returns a list of problem lines
+        (empty = healthy). Dangling objects are normal and ignored."""
+        proc = subprocess.run(
+            ["git", "fsck", "--full", "--no-progress", "--no-dangling"],
+            cwd=self.root, capture_output=True, text=True,
+        )
+        problems = []
+        for line in (proc.stdout + proc.stderr).splitlines():
+            line = line.strip()
+            if not line or line.startswith(("Checking", "dangling", "notice:")):
+                continue
+            problems.append(line)
+        if proc.returncode != 0 and not problems:
+            problems.append(f"git fsck exited {proc.returncode}")
         return problems
 
     def gc(self, aggressive: bool = False) -> str:

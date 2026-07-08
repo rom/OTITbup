@@ -38,6 +38,7 @@ class DevicePlan:
     kept_backups: int = 0
     referenced: set[str] = field(default_factory=set)
     kept: set[str] = field(default_factory=set)
+    held: bool = False       # under legal hold: nothing pruned
 
 
 @dataclass
@@ -80,9 +81,10 @@ def _offloaded_shas(store: GitStore, device: Device, commit: str) -> set[str]:
         return set()
     if not isinstance(manifest, dict):
         return set()
+    from .gitstore import manifest_artifacts
     return {
         str(entry["sha256"])
-        for entry in manifest.values()
+        for entry in manifest_artifacts(manifest).values()
         if isinstance(entry, dict) and entry.get("offloaded")
         and entry.get("sha256")
     }
@@ -93,10 +95,16 @@ def plan(
     store: GitStore,
     blobstore: BlobStore,
     now: float | None = None,
+    runstore=None,
 ) -> PrunePlan:
     now = now if now is not None else time.time()
     device_plans: list[DevicePlan] = []
     keep_all: set[str] = set()
+    # Immutability protections: a retention lock keeps everything captured
+    # within lock_days regardless of policy; a legal hold keeps a scope's
+    # entire history until the hold is cleared. Both override deletion.
+    lock_days = int((config.retention or {}).get("lock_days", 0) or 0)
+    lock_cutoff = now - lock_days * 86400 if lock_days else None
 
     for device in config.all_devices():
         policy = config.retention_for(device)
@@ -104,6 +112,7 @@ def plan(
             device=device.qualified_name,
             policy=policy,
             sources=config.retention_sources(device),
+            held=bool(runstore and runstore.is_held(device.qualified_name)),
         )
         keep_versions = policy.get("keep_versions", 0)
         keep_days = policy.get("keep_days", 0)
@@ -116,9 +125,11 @@ def plan(
             dplan.referenced |= shas
             unlimited = not keep_versions and not keep_days
             keep = (
-                unlimited
+                dplan.held
+                or unlimited
                 or (keep_versions and index < keep_versions)
                 or (cutoff is not None and timestamp >= cutoff)
+                or (lock_cutoff is not None and timestamp >= lock_cutoff)
             )
             if keep:
                 dplan.kept_backups += 1

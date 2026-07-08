@@ -5,6 +5,7 @@ deployments are single-site (see docs/REQUIREMENTS.md section 4).
 """
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -16,6 +17,11 @@ DEFAULT_RETENTION: dict[str, int] = {
     "keep_days": 0,
     "large_file_threshold": 1024 * 1024,
 }
+
+
+# Fixed namespace for deriving a stable device GUID from its qualified name
+# when the config doesn't pin an explicit one.
+_GUID_NAMESPACE = uuid.UUID("6f4f2b9e-2c1a-5e7d-9b3a-0a1b2c3d4e5f")
 
 
 @dataclass
@@ -30,6 +36,7 @@ class Device:
     options: dict[str, Any] = field(default_factory=dict)
     retention: dict[str, int] = field(default_factory=dict)
     hooks: dict[str, Any] = field(default_factory=dict)
+    guid: str = ""
 
     @property
     def path(self) -> str:
@@ -39,6 +46,12 @@ class Device:
     @property
     def qualified_name(self) -> str:
         return f"{self.site}/{self.zone}/{self.name}"
+
+    @property
+    def effective_guid(self) -> str:
+        """The device's GUID: the config-pinned one, or a stable UUIDv5
+        derived from its qualified name so every device always has one."""
+        return self.guid or str(uuid.uuid5(_GUID_NAMESPACE, self.qualified_name))
 
 
 @dataclass
@@ -62,6 +75,7 @@ class Site:
 @dataclass
 class AppConfig:
     data_dir: str
+    appliance_id: str = ""
     sites: list[Site] = field(default_factory=list)
     secrets: dict[str, Any] = field(default_factory=dict)
     alerts: dict[str, Any] = field(default_factory=dict)
@@ -85,6 +99,9 @@ class AppConfig:
     desired: dict[str, Any] = field(default_factory=dict)
     anomaly: dict[str, Any] = field(default_factory=dict)
     offsite: dict[str, Any] = field(default_factory=dict)
+    capture: dict[str, Any] = field(default_factory=dict)
+    integrity: dict[str, Any] = field(default_factory=dict)
+    rehearsal: dict[str, Any] = field(default_factory=dict)
 
     def all_devices(self) -> list[Device]:
         return [d for s in self.sites for z in s.zones for d in z.devices]

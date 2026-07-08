@@ -101,9 +101,9 @@ def export_bundle(
     manifest: dict = {}
     manifest_path = f"{device.path}/manifest.yml"
     if manifest_path in files:
-        manifest = yaml.safe_load(
-            store.read_file_at(commit, manifest_path)
-        ) or {}
+        from .gitstore import manifest_artifacts
+        manifest = manifest_artifacts(yaml.safe_load(
+            store.read_file_at(commit, manifest_path)) or {})
 
     from .blobstore import parse_pointer
 

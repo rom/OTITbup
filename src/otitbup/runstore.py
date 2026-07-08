@@ -61,6 +61,19 @@ _MIGRATIONS: list[str] = [
         role TEXT NOT NULL DEFAULT 'viewer', scopes TEXT DEFAULT '*',
         created_at REAL NOT NULL, expires_at REAL, last_used REAL);
     """,
+    # v5 — captured size per run (for size-drop / truncation detection).
+    "ALTER TABLE runs ADD COLUMN size_bytes INTEGER;",
+    # v6 — legal holds (retention/immutability protection).
+    """
+    CREATE TABLE IF NOT EXISTS holds (
+        scope TEXT PRIMARY KEY, reason TEXT, set_by TEXT,
+        set_at REAL NOT NULL);
+    """,
+    # v7 — small key/value store (e.g. last integrity-check result).
+    """
+    CREATE TABLE IF NOT EXISTS meta (
+        key TEXT PRIMARY KEY, value TEXT, updated_at REAL NOT NULL);
+    """,
 ]
 
 SCHEMA_VERSION = len(_MIGRATIONS)
@@ -76,6 +89,7 @@ class RunRecord:
     commit_hash: str | None = None
     message: str = ""
     expected: bool | None = None
+    size_bytes: int | None = None
 
 
 @dataclass
@@ -124,13 +138,14 @@ class RunStore:
         with self._conn() as conn:
             conn.execute(
                 "INSERT INTO runs (device, started_at, finished_at, ok, "
-                "changed, commit_hash, message, expected) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "changed, commit_hash, message, expected, size_bytes) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     run.device, run.started_at, run.finished_at,
                     int(run.ok), int(run.changed), run.commit_hash,
                     run.message,
                     None if run.expected is None else int(run.expected),
+                    run.size_bytes,
                 ),
             )
 
@@ -250,6 +265,57 @@ class RunStore:
             )
         return False
 
+
+    # ------------------------------------------------------ meta k/v
+
+    def set_meta(self, key: str, value: str, at: float) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO meta (key, value, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, "
+                "updated_at=excluded.updated_at",
+                (key, value, at))
+
+    def get_meta(self, key: str) -> dict | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM meta WHERE key = ?", (key,)).fetchone()
+        return dict(row) if row else None
+
+    # --------------------------------------------------- legal holds
+
+    def set_hold(self, scope: str, now: float, reason: str | None = None,
+                 set_by: str | None = None) -> None:
+        """Place a legal hold on a scope (device qualified name, 'site/*',
+        'site/zone/*', or '*'). Held scopes are never pruned by retention."""
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO holds (scope, reason, set_by, set_at) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(scope) DO UPDATE SET "
+                "reason=excluded.reason, set_by=excluded.set_by, "
+                "set_at=excluded.set_at",
+                (scope, reason, set_by, now))
+
+    def clear_hold(self, scope: str) -> int:
+        with self._conn() as conn:
+            return conn.execute(
+                "DELETE FROM holds WHERE scope = ?", (scope,)).rowcount
+
+    def holds(self) -> list[dict]:
+        with self._conn() as conn:
+            return [dict(r) for r in conn.execute(
+                "SELECT * FROM holds ORDER BY scope")]
+
+    def is_held(self, qualified_name: str) -> bool:
+        """True if the device or a covering scope is under legal hold."""
+        scopes = {row["scope"] for row in self.holds()}
+        if "*" in scopes or qualified_name in scopes:
+            return True
+        parts = qualified_name.split("/")
+        if len(parts) == 3:
+            site, zone, _ = parts
+            return f"{site}/*" in scopes or f"{site}/{zone}/*" in scopes
+        return False
 
     # ----------------------------------------------------- baselines
 

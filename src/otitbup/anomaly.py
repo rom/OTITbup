@@ -143,6 +143,29 @@ def _detect_slow_trend(
     return None
 
 
+def _detect_size_drop(
+    device: str, runs: list[dict], drop: float, min_history: int,
+) -> Anomaly | None:
+    """Flag when the latest capture is dramatically smaller than the device's
+    trailing median — the signature of a truncated download or an error page
+    that still 'succeeded'. Uses the size_bytes recorded per run."""
+    sizes = [int(r["size_bytes"]) for r in runs
+             if r.get("ok") and r.get("size_bytes")]
+    if len(sizes) < min_history + 1:
+        return None
+    latest, history = sizes[0], sizes[1:]
+    median = statistics.median(history)
+    if median <= 0:
+        return None
+    if latest < median * drop:
+        return Anomaly(
+            device, "size_drop",
+            f"capture {latest} bytes vs ~{median:.0f} baseline "
+            f"({latest / median * 100:.0f}%) — possibly truncated",
+        )
+    return None
+
+
 def analyze(device: str, runs: list[dict], cfg: dict | None = None) -> list[Anomaly]:
     """Return anomalies for a device given its run history (newest first).
 
@@ -157,6 +180,7 @@ def analyze(device: str, runs: list[dict], cfg: dict | None = None) -> list[Anom
       flap_transitions ok/fail transitions that trip it      (default 3)
       trend_window     recent-run window for slow trend      (default 5)
       trend_ratio      recent/baseline duration multiplier   (default 2.0)
+      size_drop        flag if latest < this × median size   (default 0.5)
     """
     cfg = cfg or {}
     if cfg.get("enabled") is False:
@@ -194,4 +218,11 @@ def analyze(device: str, runs: list[dict], cfg: dict | None = None) -> list[Anom
     )
     if trend:
         out.append(trend)
+    size_drop = _detect_size_drop(
+        device, runs,
+        drop=float(cfg.get("size_drop", 0.5)),
+        min_history=min_history,
+    )
+    if size_drop:
+        out.append(size_drop)
     return out

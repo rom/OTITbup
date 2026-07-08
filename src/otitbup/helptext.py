@@ -207,6 +207,19 @@ failure count. Because run *attempts* are persisted, this distinguishes
 
 See also: verify, report, strategy.
 """),
+    _c("guids", "Health & compliance",
+       "show or assign per-device GUIDs", """
+`otitbup guids [--assign]` lists every device with its GUID — a stable
+identifier that follows the device across renames and appears in each
+backup's provenance (the manifest and the commit trailers). Without a
+pinned `guid:` in the config a device gets a deterministic UUIDv5 derived
+from its qualified name (shown as *derived*); `--assign` writes a random
+UUIDv4 into the config for any device that lacks one (*pinned*), so the
+identity survives a later rename. New devices added via the web Config page
+are auto-assigned a GUID.
+
+See also: verify, report.
+"""),
     _c("anomalies", "Health & compliance",
        "report statistical anomalies in backup history", """
 `otitbup anomalies` scans each device's run history for signals that it is
@@ -254,6 +267,24 @@ failing the whole roll-up. Exits non-zero if any collector is unreachable.
 
 See also: status, token, serve.
 """),
+    _c("integrity", "Health & compliance",
+       "full integrity scrub: verify + git fsck (+ signatures)", """
+`otitbup integrity [--all-commits] [--no-fsck] [--signatures] [--alert]`
+runs a complete integrity scrub in one pass: **content** (`verify` re-hashes
+every artifact against its manifest and checks offloaded blobs),
+**repository** (`git fsck` detects missing/broken git objects — silent
+corruption), and optionally **provenance** (`--signatures` re-checks that
+signed commits still verify). Backups rot silently; this is the catch-all
+that proves they haven't.
+
+With `--alert` it behaves exactly like the daemon's scheduled scrub: it
+stores the result (shown on the Health page and in `/metrics` as
+`otitbup_integrity_ok`), emits an `integrity.ok`/`integrity.error` event,
+and alerts on failure. Schedule it from the daemon with
+`integrity.interval_days`. Exits non-zero if any problem is found.
+
+See also: verify, verify-audit, rehearse.
+"""),
     _c("verify", "Health & compliance",
        "re-hash stored backups against their manifests", """
 `otitbup verify [--all-commits]` re-hashes every stored artifact against
@@ -277,6 +308,24 @@ See also: report, search.
 """),
 
     # ------------------------------------------------ Retention & strategy
+    _c("hold", "Retention & strategy",
+       "legal hold: protect backups from retention pruning", """
+`otitbup hold set <scope> [--reason ...]` places a **legal hold** on a scope
+(a device qualified name, `site/*`, `site/zone/*`, or `*`). While held, the
+scope's entire offloaded history is exempt from retention pruning — nothing
+is deleted, whatever `keep_versions`/`keep_days` say — until you
+`otitbup hold clear <scope>`. Use it for incident preservation, litigation
+holds, or a known-good copy you must not lose. `otitbup hold list` shows
+active holds.
+
+Complementary to a **retention lock**: set `retention.lock_days: N` in the
+config to keep everything captured within the last N days regardless of
+policy (a minimum-retention / WORM window). For true immutability of the
+off-appliance copy, point the git remote or the `offsite` target at an
+append-only / object-locked (WORM) store.
+
+See also: retention, strategy, offsite.
+"""),
     _c("retention", "Retention & strategy",
        "show retention policies and prune expired blobs", """
 `otitbup retention [--apply]` shows every device's effective retention
@@ -471,6 +520,24 @@ backend.
 See also: passwd.
 """),
 
+    _c("blobkey", "Web UI & secrets",
+       "rotate/enable/disable blob-store encryption", """
+`otitbup blobkey rotate --new-key-file KEY [--old-key-file OLD]` re-encrypts
+every large-artifact blob from the old key to a new one — key rotation for
+encryption at rest. Because blobs are content-addressed by their PLAINTEXT
+sha256, names never change; only the on-disk encryption layer is rewritten
+(each blob atomically, and its plaintext hash is re-checked as an integrity
+guard). Use `--decrypt` to remove encryption, or rotate from an unencrypted
+store by simply providing `--new-key-file`. `otitbup blobkey genkey` prints
+a fresh Fernet key.
+
+Rotate the offsite key by re-pushing (`otitbup offsite push`) with the new
+`offsite.key_file`; existing offsite snapshots stay under their old key.
+Keep a backup/escrow of every key — a lost key makes those blobs (and any
+offsite snapshot) unrecoverable.
+
+See also: integrity, offsite.
+"""),
     _c("verify-audit", "Health & compliance",
        "verify the tamper-evident audit-log chain", """
 `otitbup verify-audit` recomputes the audit log's hash chain and reports

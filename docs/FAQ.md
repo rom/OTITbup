@@ -201,6 +201,35 @@ specifically. The offsite copy is separately encrypted end to end (see the
 3-2-1 section). See
 [CONFIGURATION.md](CONFIGURATION.md#encryption).
 
+### How do I rotate the blob-store encryption key?
+`otitbup blobkey rotate --new-key-file new.key --old-key-file old.key`
+re-encrypts every blob from the old key to the new one; `otitbup blobkey
+genkey` prints a fresh Fernet key. You can also **enable** encryption on a
+plaintext store (`--new-key-file` only) or **remove** it (`--old-key-file
+--decrypt`). Blobs stay content-addressed by their *plaintext* sha256, so
+names never change, and each blob's plaintext hash is re-verified during
+rotation as a guard. The **offsite** key rotates differently: just re-push
+with a new `offsite.key_file` — old snapshots stay readable under their old
+key. **Keep a backup / escrow of every key**: a lost blob or offsite key
+makes that ciphertext permanently unrecoverable. (This is the *blob*/offsite
+key; rotating the *secrets* key is a separate `secrets decrypt`/`encrypt`
+round-trip — see below.) See
+[CONFIGURATION.md](CONFIGURATION.md#encryption).
+
+### Can I stop backups being deleted — legal hold or compliance retention?
+Yes, three ways, strongest first. A **legal hold** freezes a scope's entire
+offloaded history against pruning until you clear it: `otitbup hold set
+plant-a/cell-1/plc-01 --reason "…"` (or a `site/zone/*`, `site/*` or `*`
+scope), `otitbup hold list`, `otitbup hold clear <scope>`; held scopes show
+as `[HELD]` in `otitbup retention`. A **retention lock** (`retention.lock_days:
+N`) keeps everything captured in the last `N` days regardless of
+`keep_versions` / `keep_days` — a minimum-retention / WORM window. And for
+immutability the appliance itself can't override, point the git remote or the
+`offsite` target at an **append-only / object-locked** store (WORM, e.g. S3
+Object Lock). Remember git history is never rewritten anyway — pruning is
+plain blob-file deletion, which holds and the lock suppress. See
+[CONFIGURATION.md](CONFIGURATION.md#retention-lock--legal-holds).
+
 ### How is the backup history made tamper-evident?
 Two independent mechanisms. **Signed commits**: point `git.sign.key_file` at
 an SSH private key and every backup commit is SSH-signed, giving a
@@ -284,6 +313,25 @@ Yes — `otitbup annotate <device> "MOC-1234: reason"` attaches a note (git
 note) to a commit, or use the note form on the device page. Unannotated
 changes are counted in the compliance report.
 
+### What is a device GUID and why does it matter?
+Every device carries a stable **GUID** so its history is provable even
+across renames — the backbone of the chain-of-custody story. Pin it with
+`guid:` on the device, or leave it out and a UUIDv5 is derived from the
+qualified name (so every device always has one); devices added in the web
+Config editor get a random UUIDv4. `otitbup guids` lists each device's GUID
+and whether it's *pinned* (config) or *derived*, and `otitbup guids
+--assign` writes a persistent UUIDv4 for any device lacking one so the
+identity survives a rename. The GUID is recorded per backup in two places:
+the `manifest.yml` (`provenance: {device_guid, driver}`) and the commit's
+`Device-GUID` / `Driver` / `Tool-Version` / `Appliance` / `Captured-At`
+trailers — stable fields that don't churn commits, tamper-evident under
+signed commits, and queryable with `git log`. Combined with the
+hash-chained audit log (`otitbup verify-audit`) and `otitbup integrity
+--signatures`, it lets you prove *which* device a captured config came from,
+*when*, and that it hasn't been altered. Set `appliance_id` to name the
+capturing appliance in the trailers. See
+[CONFIGURATION.md](CONFIGURATION.md#provenance--manifest-chain-of-custody).
+
 ### What do the config policy checks do?
 They lint captured text configs against rules and report findings per device
 (`otitbup policy`, the web UI Policy page, `/api/policy`, and the compliance
@@ -308,6 +356,33 @@ fires when a previously failing device succeeds again; the Health page and
 `otitbup status` show last-success and consecutive-failure counts; and
 `/metrics` exposes all of it to Prometheus. Layer anomaly detection on top
 for slow/flapping devices that are technically "succeeding".
+
+### How do I know a backup wasn't silently corrupted or truncated?
+Three layers catch it. (1) **Capture guards** reject a bad capture *before*
+it enters the archive: a capture with no artifacts, below `capture.min_bytes`,
+or missing the `capture.expect_match` content fails the backup (`capture too
+small…` / `capture failed content check…`) and nothing is committed — so a
+truncated download or an error page never lands as a "good" backup. Set the
+guards globally or per device (`options.min_bytes` / `options.expect_match`).
+(2) The **`size_drop` anomaly detector** flags, after the fact, a capture far
+below a device's trailing median size (`anomaly.size_drop`, default 0.5 =
+< 50%). (3) **`otitbup integrity`** scrubs what's already stored: it re-hashes
+artifacts against their capture-time manifests, checks every blob is present
+and intact, runs `git fsck` on the repo, and (with `--signatures`) re-verifies
+signed-commit signatures. See
+[CONFIGURATION.md](CONFIGURATION.md#capture) and USAGE §8.
+
+### How often should integrity checks run?
+Let the daemon do it: set `integrity.interval_days` (0/unset = off) and it
+runs a scheduled scrub — content verification + `git fsck`, optionally full
+history (`all_commits`) and signature verification (`signatures`) — persisting
+the result, emitting an `integrity.ok` / `integrity.error` event, and alerting
+on failure. A weekly scrub is a reasonable default; run `all_commits` less
+often since it walks the whole history. The last result is on `/api/status`
+(an `integrity` object) and `/metrics` (`otitbup_integrity_ok`,
+`otitbup_integrity_last_check_timestamp_seconds`), so you can also alert from
+Prometheus. On demand, `otitbup integrity --alert` does the same one-pass
+scrub by hand. See [CONFIGURATION.md](CONFIGURATION.md#integrity).
 
 ### How do I run it as a service?
 Use the systemd units (or Dockerfile) in `packaging/` — typically one unit
@@ -538,6 +613,21 @@ appliance before it is uploaded, and the key never leaves the appliance.
 Losing the remote credentials (or the provider itself being compromised)
 exposes no configuration; only the appliance-held offsite key can decrypt a
 snapshot, and a wrong key fails loudly. Extraction is path-traversal-safe.
+
+### How do I make the offsite copy immutable / ransomware-resistant?
+Two complementary properties. **Confidentiality:** `otitbup offsite push`
+Fernet-encrypts the whole snapshot on the appliance *before* upload, so the
+remote holds ciphertext only and losing the remote credentials exposes
+nothing. **Immutability:** point the `offsite` target (or the git remote) at
+an **append-only / object-locked** store — S3 Object Lock (WORM), an
+append-only bucket, or write-once media — so that even a compromised
+appliance or stolen remote credentials cannot rewrite or delete the copies
+already shipped; ransomware that reaches the appliance can't reach back
+through and erase them. Keep the offsite key off the remote (and escrowed),
+since it is the only thing that can decrypt. On the appliance side, a
+`retention.lock_days` window and legal holds stop local pruning from
+removing content you must keep. See
+[CONFIGURATION.md](CONFIGURATION.md#offsite).
 
 ### What's the difference between 3-2-1 and 3-2-1-1-0?
 3-2-1-1-0 adds one **offline/air-gapped** copy (ransomware can't reach it)

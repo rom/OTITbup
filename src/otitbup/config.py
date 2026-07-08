@@ -26,7 +26,8 @@ def _require(mapping: dict[str, Any], key: str, context: str) -> Any:
     return mapping[key]
 
 
-_RETENTION_KEYS = {"keep_versions", "keep_days", "large_file_threshold"}
+_RETENTION_KEYS = {"keep_versions", "keep_days", "large_file_threshold",
+                   "lock_days"}
 
 
 def _parse_retention(raw: Any, context: str) -> dict[str, int]:
@@ -117,6 +118,7 @@ def load_config(path: str | Path) -> AppConfig:
                         dev_raw.get("retention"), f"device {dev_name}"
                     ),
                     hooks=dev_raw.get("hooks") or {},
+                    guid=str(dev_raw.get("guid") or ""),
                 )
                 validate_schedule(device.schedule)
                 if device.qualified_name in seen_devices:
@@ -155,4 +157,8 @@ def load_config(path: str | Path) -> AppConfig:
         desired=desired,
         anomaly=raw.get("anomaly") or {},
         offsite=raw.get("offsite") or {},
+        appliance_id=str(raw.get("appliance_id") or ""),
+        capture=raw.get("capture") or {},
+        integrity=raw.get("integrity") or {},
+        rehearsal=raw.get("rehearsal") or {},
     )

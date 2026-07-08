@@ -36,10 +36,10 @@ otitbup.yml (inventory, source of truth, versioned by the operator)
 | `discovery.py` | Opt-in sequential TCP probe of known OT/IT ports; emits an inventory-shaped YAML *proposal* for human review — never edits the inventory |
 | `auth.py` | PBKDF2 password hashing and HTTP Basic verification for the web UI |
 | `restore.py` | Guided restore: exports hash-verified artifacts + RESTORE.md checklist with driver-specific vendor-tool instructions; performs no device writes |
-| `blobstore.py` | Content-addressed store for large artifacts (sha256, deduplicated); pointer files go into git. Optional at-rest Fernet encryption — addressing is by the **plaintext** hash, so ciphertext-at-rest leaves dedup and manifests unchanged |
-| `retention.py` | Hierarchical retention policies (device > zone > site > global), prune planning/apply; never rewrites git history |
-| `runstore.py` | SQLite: backup run results, restore rehearsals, maintenance state — the source for status, metrics and reports. Versioned schema migrations (`PRAGMA user_version`); the `audit` table is **hash-chained** (each row stores prev+entry sha256) so edits/deletes are detectable |
-| `verify.py` | Backup verification job: re-hash artifacts against manifests, check blob integrity |
+| `blobstore.py` | Content-addressed store for large artifacts (sha256, deduplicated); pointer files go into git. Optional at-rest Fernet encryption and optional gzip **compression** (a magic prefix on the stored frame distinguishes raw / compressed / encrypted, so old blobs read unchanged) — addressing is by the **plaintext** hash, so ciphertext-at-rest leaves dedup and manifests unchanged. `blobkey rotate` walks the store re-encrypting each blob old→new key, re-verifying its plaintext hash as a guard |
+| `retention.py` | Hierarchical retention policies (device > zone > site > global), prune planning/apply; never rewrites git history. A `lock_days` minimum-retention/WORM window and **legal holds** (per-scope, in the run store) exempt content from the prune |
+| `runstore.py` | SQLite: backup run results (incl. captured size per run), restore rehearsals, maintenance state, legal holds, last integrity result — the source for status, metrics and reports. Versioned schema migrations (`PRAGMA user_version`); the `audit` table is **hash-chained** (each row stores prev+entry sha256) so edits/deletes are detectable |
+| `verify.py` | Backup verification job: re-hash artifacts against manifests, check blob integrity. The **integrity** scrub layers on top: one pass of verify + `git fsck` + optional signed-commit signature checks, its result persisted to the run store and fanned out as `integrity.ok`/`integrity.error` events |
 | `policy.py` | Config policy/compliance checks (built-in + custom rules) over captured text configs |
 | `metrics.py` | Prometheus text metrics and JSON status |
 | `reports.py` | HTML compliance reports and per-site DR runbooks |
@@ -58,21 +58,30 @@ otitbup.yml (inventory, source of truth, versioned by the operator)
 | `strategy.py` | 3-2-1 / 3-2-1-1-0 backup-strategy evaluation |
 | `charts.py` | Inline-SVG charts (donut/bar/stacked/timeline) for the web UI, theme-aware, CSP-safe |
 | `pdfcanvas.py` | Minimal vector PDF canvas (rects, lines, text, colour) for rich report graphics |
-| `gitstore.py` | Local git repo; per-device commits; `manifest.yml` with sha256 fingerprints (change detection for binaries); optional push to remote; optional **SSH-signed** commits (`git.sign.key_file`) with signature verification |
-| `runner.py` | Orchestration: per-zone concurrency semaphores, maintenance-window checks, change/failure alerts |
-| `daemon.py` | Scheduler loop; per-device interval state in `state.json` |
+| `gitstore.py` | Local git repo; per-device commits; `manifest.yml` now `{provenance: {device_guid, driver}, artifacts: {name: {sha256, kind, size, offloaded?}}}` (older flat manifests read via a compat helper); commit **provenance trailers** (`Device-GUID`/`Driver`/`Tool-Version`/`Appliance`/`Captured-At`); optional push to remote; optional **SSH-signed** commits (`git.sign.key_file`) with signature verification |
+| `runner.py` | Orchestration: per-zone concurrency semaphores, maintenance-window checks, change/failure alerts. A **capture-quality gate** rejects an empty / too-small / content-check-failing capture before it is committed |
+| `daemon.py` | Scheduler loop; per-device interval state in `state.json`. Also drives the scheduled integrity scrub, offsite push and restore rehearsals, each on its own `*.interval_days` |
 | `alerts.py` | Webhook, syslog, email notifiers; failures logged, never fatal |
 | `webui.py` | Read/write web UI (stdlib http.server): dashboard with tiles/zone grouping/filtering, activity feed, driver catalog, per-device artifacts + history, per-commit diffs, raw artifact viewing; optional HTTP Basic auth and TLS, warns when bound beyond loopback without auth |
 | `tlscert.py` | Self-signed EC P-256 certificate generation for the web UI (`otitbup certgen`) |
-| `cli.py` | `validate`, `list`, `drivers`, `backup`, `diff`, `log`, `daemon`, `serve`, `discover`, `restore`, `passwd`, `certgen`, `secrets genkey/encrypt/decrypt` |
+| `cli.py` | `validate`, `list`, `drivers`, `guids`, `backup`, `diff`, `log`, `daemon`, `serve`, `discover`, `restore`, `integrity`, `hold`, `blobkey`, `passwd`, `certgen`, `secrets genkey/encrypt/decrypt` |
 
 ## Key design points
 
 - **Repo layout**: `sites/<site>/<zone>/<device>/…` — one repo, one commit
   per device per change, so `git log -- sites/plant-a/cell-1/plc-01` is the
   device's full history.
-- **Fingerprints**: every backup writes `manifest.yml` (sha256 per
-  artifact). Even opaque binary uploads produce a meaningful diff signal.
+- **Fingerprints**: every backup writes `manifest.yml` — a `provenance`
+  block (`device_guid`, `driver`) plus an `artifacts` map (sha256, kind,
+  size, offload flag) per artifact. Even opaque binary uploads produce a
+  meaningful diff signal, and the provenance fields are stable so they don't
+  spuriously churn commits.
+- **Chain of custody**: every device has a GUID (pinned `device.guid`, else
+  a UUIDv5 derived from its qualified name). Provenance rides both the
+  manifest and tamper-evident commit trailers (`Device-GUID`, `Driver`,
+  `Tool-Version`, `Appliance`, `Captured-At`); under signed commits and the
+  hash-chained audit log this proves *which* device a config came from and
+  *when*.
 - **OT safety**: maintenance windows are validated at config load, enforced
   per zone; `max_concurrent` caps simultaneous connections per zone
   (default 1 = strictly sequential). `backup --force` overrides windows for

@@ -14,10 +14,11 @@ not.
 
 ## What it does
 
-- **Backs up 40+ device types** across PLCs, RTUs and network gear — from
-  Siemens/Rockwell/Schneider/Mitsubishi/Omron/Beckhoff PLCs and DNP3/SEL
-  RTUs to Cisco/Hirschmann/Moxa/Westermo switches — via native protocols,
-  SSH, SFTP, HTTP, OPC UA, EtherNet/IP and more.
+- **Backs up 120+ device types** across PLCs, RTUs, HMI/SCADA, substation
+  IEDs and network gear — from Siemens/Rockwell/Schneider/Mitsubishi/Omron/
+  Beckhoff PLCs and DNP3/SEL RTUs to Cisco/Hirschmann/Moxa/Westermo/Juniper/
+  Arista switches — via native protocols, SSH, SFTP, FTP, HTTP(S), OPC UA,
+  EtherNet/IP and more.
 - **Versions everything in git**, one commit per device per change, with
   sha256 manifests, hierarchical **retention** and a deduplicated blob
   store for large project files.
@@ -34,9 +35,13 @@ not.
   (trusted-header/LDAP), a live activity stream, and a scoped write API;
   syslog and **SNMP trap** event fan-out; and a JSON API.
 - **Hardens the archive**: a tamper-evident, hash-chained **audit log**
-  (`otitbup verify-audit`), optional **SSH-signed commits**, optional
-  **at-rest encryption** of the large-artifact blob store (Fernet), and an
-  **encrypted offsite/cloud copy** of the whole backup (`otitbup offsite`).
+  (`otitbup verify-audit`), optional **SSH-signed commits**, **per-device
+  GUID provenance** in manifests and commit trailers, **continuous
+  integrity** scrubbing (`otitbup integrity`: verify + `git fsck`),
+  **capture-quality guards**, **legal holds** and a **retention lock**,
+  optional **at-rest encryption** of the large-artifact blob store (Fernet,
+  rotatable via `otitbup blobkey`), and an **encrypted offsite/cloud copy**
+  of the whole backup (`otitbup offsite`).
 - **Scales across sites**: federated **site collectors** (Purdue model) —
   git for the backup bytes, a scoped health API for the roll-up — plus
   statistical **anomaly detection** and config-as-code **desired state**.
@@ -82,6 +87,7 @@ otitbup retention              # show effective policies + prune dry run
 otitbup retention --apply      # delete expired large-artifact blobs
 otitbup status                 # per-device backup health (last success, fails)
 otitbup verify                 # re-hash stored backups against manifests
+otitbup integrity --alert      # continuous-integrity scrub: verify + git fsck
 otitbup policy                 # config policy/compliance findings
 otitbup annotate plc-01 "MOC-1234"      # attach a change note to a commit
 otitbup maintenance plant-a/cell-1/* --hours 8   # changes now "expected"
@@ -108,6 +114,9 @@ otitbup anomalies                       # slow-backup / change-storm outliers
 otitbup desired --diff                  # drift vs. declared config-as-code
 otitbup gc                              # repack/prune the backup git repo
 otitbup verify-audit                    # verify the tamper-evident audit chain
+otitbup guids --assign                  # list/pin per-device GUIDs (provenance)
+otitbup hold set plant-a/*              # legal hold: exempt a scope from retention
+otitbup blobkey rotate --new-key-file new.key --old-key-file old.key   # rotate blob key
 otitbup token create ci --role operator --scopes "plant-a/*"   # scoped API token
 otitbup federation                      # roll up health from site collectors
 ```
@@ -313,6 +322,17 @@ every save validated before write, a `.bak` kept, and an instant reload.
   / `backup --dry-run` for a commit-free connectivity and credential check.
 - **Verification** — `otitbup verify` re-hashes stored artifacts against
   the manifest recorded at capture time and checks blob integrity.
+- **Continuous integrity** — `otitbup integrity` is a one-pass scrub
+  combining content verification, repository health (`git fsck`) and
+  optional signed-commit signature checks; the daemon runs it on
+  `integrity.interval_days`, persisting the result, emitting
+  `integrity.ok` / `integrity.error` events, and surfacing it on
+  `/api/status` and `/metrics` (`otitbup_integrity_ok`).
+- **Capture quality** — silently truncated, empty or wrong captures are
+  rejected *before* they enter the archive (`capture.min_bytes`,
+  `capture.expect_match`, or per-device `options.*`), and the `size_drop`
+  anomaly detector flags a capture far below a device's trailing median
+  size.
 - **Change management** — `otitbup annotate` links a change to a work
   order (git notes); maintenance mode classifies changes as expected vs.
   **unexpected** (the unauthorized-change signal); compliance reports
@@ -326,8 +346,23 @@ every save validated before write, a `.bak` kept, and an instant reload.
 - **Integrity & at-rest** — a hash-chained, tamper-evident **audit log**
   (`otitbup verify-audit`); optional **SSH-signed** backup commits
   (`git.sign`); and optional **Fernet encryption** of the blob store
-  (`encryption.blob_key`) — content-addressing by plaintext hash is
-  preserved, so dedup is unaffected (LUKS still recommended for the rest).
+  (`encryption.blob_key`, with optional gzip `compress` at rest) —
+  content-addressing by plaintext hash is preserved, so dedup is unaffected
+  (LUKS still recommended for the rest). Rotate the blob key or toggle
+  encryption with `otitbup blobkey rotate` (plaintext hash re-verified as a
+  guard; **keep a key escrow** — a lost key is unrecoverable).
+- **Provenance / chain of custody** — every device carries a stable
+  **GUID** (`otitbup guids [--assign]`), recorded per backup in the
+  `manifest.yml` `provenance` block and in `Device-GUID` / `Driver` /
+  `Tool-Version` / `Appliance` / `Captured-At` commit trailers — proving
+  which device a config came from and when, tamper-evident under signed
+  commits and queryable with `git log`.
+- **Immutability & retention protection** — **legal holds** (`otitbup hold
+  set <scope>`) exempt a device/zone/site/`*` scope from pruning until
+  cleared, a **retention lock** (`retention.lock_days`) enforces a
+  minimum-retention / WORM window, and pointing the git remote or `offsite`
+  target at an append-only / object-locked store (S3 Object Lock) gives
+  off-appliance, ransomware-resistant immutability.
 - **Federation / site collectors** — a central appliance rolls up health
   from per-site collectors over a scoped read-only API (`otitbup
   federation`), while backup bytes federate over plain git to a shared

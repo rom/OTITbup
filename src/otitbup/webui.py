@@ -192,6 +192,7 @@ _SETTINGS_FORMS = [
     {"section": "offsite", "title": "Offsite copy (external server / cloud)",
      "fields": [
          ("transport", "Transport (file | sftp | s3)", "str"),
+         ("interval_days", "Auto-push every N days (0=off)", "float"),
          ("key_file", "Encryption key file", "str"),
          ("dir", "file: directory / mount", "str"),
          ("host", "sftp: host", "str"), ("port", "sftp: port", "int"),
@@ -246,7 +247,24 @@ _SETTINGS_FORMS = [
          ("password", "Password / API token", "str"),
      ]},
     {"section": "encryption", "title": "Encryption at rest",
-     "fields": [("blob_key_file", "Blob-store key file", "str")]},
+     "fields": [
+         ("blob_key_file", "Blob-store key file", "str"),
+         ("compress", "Compress blobs before encrypting", "bool"),
+     ]},
+    {"section": "capture", "title": "Capture-quality guards",
+     "fields": [
+         ("min_bytes", "Reject captures smaller than (bytes)", "int"),
+         ("expect_match", "Required content (regex)", "str"),
+     ]},
+    {"section": "integrity", "title": "Integrity scrubbing",
+     "fields": [
+         ("interval_days", "Scrub every N days (0=off)", "float"),
+         ("all_commits", "Verify whole history", "bool"),
+         ("fsck", "Run git fsck", "bool"),
+         ("signatures", "Verify commit signatures", "bool"),
+     ]},
+    {"section": "rehearsal", "title": "Scheduled restore rehearsals",
+     "fields": [("interval_days", "Rehearse every N days (0=off)", "float")]},
     {"section": "git", "title": "Git remote & signed history",
      "fields": [
          ("remote", "Push remote", "str"),
@@ -268,6 +286,7 @@ _SETTINGS_FORMS = [
          ("keep_versions", "Keep newest N backups", "int"),
          ("keep_days", "Keep backups newer than N days", "int"),
          ("large_file_threshold", "Blob offload threshold (bytes)", "int"),
+         ("lock_days", "Retention lock: keep last N days (WORM)", "int"),
      ]},
     {"section": "alerts", "title": "Alerts",
      "fields": [
@@ -385,7 +404,7 @@ def _inventory_fields(form: dict, is_device: bool) -> dict:
     Blank values delete the key; retention is nested."""
     fields: dict = {}
     if is_device:
-        keys = ("name", "driver", "address", "schedule", "credentials")
+        keys = ("name", "driver", "address", "schedule", "credentials", "guid")
     else:
         keys = ("maintenance_window", "timezone")
     for key in keys:
@@ -862,6 +881,7 @@ class WebUI:
             + _labeled("address", d.get("address") or "", "10.0.0.1")
             + _labeled("schedule", d.get("schedule") or "", "12h or cron")
             + _labeled("credentials", d.get("credentials") or "", "secret key")
+            + _labeled("guid", d.get("guid") or "", "auto")
             + _labeled("keep_versions", r.get("keep_versions") or "", "0")
             + _labeled("keep_days", r.get("keep_days") or "", "0")
             + "<button type='submit'>Save</button>"
@@ -974,9 +994,12 @@ class WebUI:
                 self.config_path, site, zone, orig, fields), actor)
 
     def action_config_device_add(self, form: dict, actor: str):
+        import uuid
+
         from . import configedit
         site, zone = form.get("site", ""), form.get("zone", "")
-        dev = {"name": form.get("name", ""), "driver": form.get("driver", "")}
+        dev = {"name": form.get("name", ""), "driver": form.get("driver", ""),
+               "guid": str(uuid.uuid4())}
         for key in ("address", "schedule", "credentials"):
             if form.get(key):
                 dev[key] = form[key]
@@ -2077,8 +2100,8 @@ class WebUI:
             raw = self.store.read_file_at(
                 commit, f"{device.path}/manifest.yml"
             )
-            manifest = yaml.safe_load(raw)
-            return manifest if isinstance(manifest, dict) else {}
+            from .gitstore import manifest_artifacts
+            return manifest_artifacts(yaml.safe_load(raw))
         except Exception:
             return {}
 

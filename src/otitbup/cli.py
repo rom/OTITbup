@@ -105,6 +105,22 @@ def main(argv: list[str] | None = None) -> int:
     p_gc = sub.add_parser("gc", help="repack/prune the backup git repo")
     p_gc.add_argument("--aggressive", action="store_true")
 
+    p_blobkey = sub.add_parser(
+        "blobkey", help="rotate/enable/disable blob-store encryption at rest")
+    blobkey_sub = p_blobkey.add_subparsers(
+        dest="blobkey_command", required=True)
+    p_bkrot = blobkey_sub.add_parser(
+        "rotate", help="re-encrypt every blob to a new key")
+    p_bkrot.add_argument(
+        "--old-key-file",
+        help="current key file (default: the configured encryption key)")
+    p_bkrot.add_argument(
+        "--new-key-file", help="new key file ('-' or omit with --decrypt)")
+    p_bkrot.add_argument(
+        "--decrypt", action="store_true",
+        help="remove encryption (store blobs in plaintext)")
+    blobkey_sub.add_parser("genkey", help="print a new Fernet blob key")
+
     sub.add_parser(
         "verify-audit", help="verify the tamper-evident audit-log chain")
 
@@ -219,6 +235,22 @@ def main(argv: list[str] | None = None) -> int:
         help="verify the whole history (default: latest per device)",
     )
 
+    p_integrity = sub.add_parser(
+        "integrity",
+        help="full integrity scrub: verify + git fsck (+ signatures)",
+    )
+    p_integrity.add_argument("--all-commits", action="store_true")
+    p_integrity.add_argument(
+        "--no-fsck", action="store_true", help="skip git fsck")
+    p_integrity.add_argument(
+        "--signatures", action="store_true",
+        help="also verify signed-commit signatures",
+    )
+    p_integrity.add_argument(
+        "--alert", action="store_true",
+        help="emit events and alert on failure (as the daemon does)",
+    )
+
     sub.add_parser(
         "status", help="show per-device backup health from the run store"
     )
@@ -226,6 +258,13 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser(
         "anomalies",
         help="report statistical anomalies (slow backups, change storms)",
+    )
+
+    p_guids = sub.add_parser(
+        "guids", help="show device GUIDs; --assign pins persistent ones")
+    p_guids.add_argument(
+        "--assign", action="store_true",
+        help="write a stable UUID into the config for devices without one",
     )
 
     p_desired = sub.add_parser(
@@ -273,6 +312,18 @@ def main(argv: list[str] | None = None) -> int:
     p_annotate.add_argument(
         "--commit", help="commit to annotate (default: latest for the device)"
     )
+
+    p_hold = sub.add_parser(
+        "hold",
+        help="legal hold: protect a scope's backups from retention pruning",
+    )
+    hold_sub = p_hold.add_subparsers(dest="hold_command", required=True)
+    p_hset = hold_sub.add_parser("set", help="place a legal hold")
+    p_hset.add_argument("scope", help="device, 'site/*', 'site/zone/*', or '*'")
+    p_hset.add_argument("--reason")
+    p_hclear = hold_sub.add_parser("clear", help="release a legal hold")
+    p_hclear.add_argument("scope")
+    hold_sub.add_parser("list", help="list active legal holds")
 
     p_maint = sub.add_parser(
         "maintenance",
@@ -575,6 +626,43 @@ def main(argv: list[str] | None = None) -> int:
         print(f"git gc: {before / 1048576:.1f} MiB -> {after / 1048576:.1f} MiB")
         return 0
 
+    if args.command == "blobkey":
+        import os
+
+        from .blobstore import BlobStoreError, rotate_key
+        blobs_dir = Path(config.data_dir).parent / "blobs"
+        if args.blobkey_command == "genkey":
+            from cryptography.fernet import Fernet
+            print(Fernet.generate_key().decode())
+            return 0
+        # rotate
+        enc = config.encryption or {}
+        current = (os.environ.get("OTITBUP_BLOB_KEY") or enc.get("blob_key"))
+        if not current and enc.get("blob_key_file"):
+            current = Path(enc["blob_key_file"]).read_text().strip()
+        old_key = None
+        if args.old_key_file:
+            old_key = Path(args.old_key_file).read_text().strip()
+        elif current:
+            old_key = current
+        new_key = None
+        if not args.decrypt:
+            if not args.new_key_file:
+                print("blobkey rotate: --new-key-file or --decrypt required",
+                      file=sys.stderr)
+                return 2
+            new_key = Path(args.new_key_file).read_text().strip()
+        try:
+            rotated, skipped = rotate_key(blobs_dir, old_key, new_key)
+        except BlobStoreError as exc:
+            print(f"blobkey error: {exc}", file=sys.stderr)
+            return 1
+        print(f"re-encrypted {rotated} blob(s)"
+              + (f", skipped {skipped} (hash mismatch)" if skipped else ""))
+        print("update encryption.blob_key_file in the config to the new key"
+              if new_key else "remove encryption.blob_key* from the config")
+        return 0
+
     if args.command == "verify-audit":
         from .runstore import default_runstore
         intact, bad_id = default_runstore(config).verify_audit()
@@ -799,10 +887,12 @@ def main(argv: list[str] | None = None) -> int:
         from .retention import apply as retention_apply
         from .retention import describe_policy, plan
         from .runner import default_blobstore
+        from .runstore import default_runstore
         store = GitStore(config.data_dir)
         store.ensure_repo()
         blobstore = default_blobstore(config)
-        prune_plan = plan(config, store, blobstore)
+        prune_plan = plan(config, store, blobstore,
+                          runstore=default_runstore(config))
         for dplan in prune_plan.devices:
             sources = ", ".join(
                 f"{key}={dplan.sources[key]}"
@@ -812,6 +902,7 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"{dplan.device:40s} {describe_policy(dplan.policy):45s} "
                 f"backups kept {dplan.kept_backups}/{dplan.backups}"
+                + ("  [HELD]" if dplan.held else "")
                 + (f"   [{sources}]" if sources else "")
             )
         print(
@@ -879,6 +970,37 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0 if report.ok else 1
 
+    if args.command == "integrity":
+        import time as _time
+
+        from . import integrity as integrity_mod
+        from .runner import default_blobstore
+        from .runstore import default_runstore
+        store = GitStore(config.data_dir)
+        store.ensure_repo()
+        blobstore = default_blobstore(config)
+        if args.alert:
+            result = integrity_mod.run_scheduled(
+                config, store, blobstore, default_runstore(config),
+                events, AlertManager(
+                    config.alerts,
+                    state_path=Path(config.data_dir).parent
+                    / "alert-state.json"),
+                _time.time(), all_commits=args.all_commits)
+        else:
+            result = integrity_mod.check(
+                config, store, blobstore=blobstore,
+                all_commits=args.all_commits, do_fsck=not args.no_fsck,
+                do_signatures=args.signatures)
+        for problem in result.content_problems:
+            print(f"CONTENT  {problem}")
+        for problem in result.repo_problems:
+            print(f"REPO     {problem}")
+        for problem in result.signature_problems:
+            print(f"SIG      {problem}")
+        print("\n" + result.summary())
+        return 0 if result.ok else 1
+
     if args.command == "status":
         import time
 
@@ -923,6 +1045,32 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n{found} anomaly(ies) across {len(config.all_devices())} "
               "device(s)", file=sys.stderr)
         return 0 if not found else 1
+
+    if args.command == "guids":
+        import uuid as _uuid
+
+        from . import configedit
+        assigned = 0
+        for device in config.all_devices():
+            pinned = bool(device.guid)
+            if args.assign and not pinned:
+                new = str(_uuid.uuid4())
+                try:
+                    configedit.set_device(
+                        args.config, device.site, device.zone, device.name,
+                        {"guid": new})
+                except configedit.ConfigEditError as exc:
+                    print(f"guid assign error: {exc}", file=sys.stderr)
+                    return 2
+                assigned += 1
+                print(f"{device.qualified_name:40s} {new}  (assigned)")
+            else:
+                tag = "pinned" if pinned else "derived"
+                print(f"{device.qualified_name:40s} "
+                      f"{device.effective_guid}  ({tag})")
+        if args.assign:
+            print(f"\nassigned {assigned} persistent GUID(s)", file=sys.stderr)
+        return 0
 
     if args.command == "desired":
         from . import desired as desired_mod
@@ -1051,6 +1199,27 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         store.set_annotation(commit, args.text)
         print(f"annotated {commit[:10]} on {device.qualified_name}")
+        return 0
+
+    if args.command == "hold":
+        import time
+
+        from .runstore import default_runstore
+        runstore = default_runstore(config)
+        if args.hold_command == "set":
+            runstore.set_hold(args.scope, time.time(), reason=args.reason,
+                              set_by=userEmail_or_none())
+            print(f"legal hold set on {args.scope} — retention will not prune "
+                  "it until cleared")
+        elif args.hold_command == "clear":
+            n = runstore.clear_hold(args.scope)
+            print(f"legal hold cleared on {args.scope}" if n
+                  else f"no hold on {args.scope}")
+        else:
+            holds = runstore.holds()
+            for h in holds:
+                print(f"{h['scope']:30s} {h.get('reason') or ''}")
+            print(f"\n{len(holds)} active hold(s)", file=sys.stderr)
         return 0
 
     if args.command == "maintenance":

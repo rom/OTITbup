@@ -2,13 +2,18 @@
 # This file is the inventory source of truth — keep it in git.
 
 data_dir: ./data          # backup git repository (relative to this file)
+# appliance_id: plant-a-01  # names this appliance in backup commit provenance
+                            # trailers (defaults to the hostname)
 
 retention:                # global defaults; override per site/zone/device
   keep_versions: 30       # keep offloaded content of the newest N backups
   keep_days: 365          # ...and of any backup newer than this (OR'd)
   large_file_threshold: 1048576   # artifacts >= 1 MiB go to the blob
                                   # store; 0 keeps everything in git
+  # lock_days: 90         # retention lock: NEVER prune anything captured in
+                          # the last N days, whatever keep_* say (WORM window)
   # Enforce with `otitbup retention --apply` (dry run without --apply).
+  # Legal hold on a scope: `otitbup hold set plant-a/*` (exempt from pruning).
 
 secrets:
   backend: plainfile      # plainfile | encryptedfile (needs otitbup[crypto])
@@ -48,6 +53,10 @@ encryption:               # encryption at rest for large offloaded artifacts
   # sha256, so dedup and manifests are unchanged. Generate a key with:
   #   python -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())"
   # blob_key_file: /etc/otitbup/blob.key   # or blob_key:, or OTITBUP_BLOB_KEY
+  # compress: true          # gzip blobs before encrypting (durability/space)
+  #
+  # Rotate the key with: otitbup blobkey rotate --new-key-file new.key
+  # KEEP A KEY BACKUP/ESCROW — a lost key makes blobs unrecoverable.
   #
   # The git repo, runstore.db and secrets are NOT encrypted by this — rely
   # on full-disk encryption (LUKS) on the appliance for those.
@@ -148,6 +157,7 @@ offsite:                  # encrypted offsite copy (otitbup offsite push/restore
   # ON THE APPLIANCE, then uploaded — the remote only ever holds ciphertext.
   # Generate the key with `otitbup offsite genkey` and keep it OFF the remote.
   # key_file: /etc/otitbup/offsite.key   # or OTITBUP_OFFSITE_KEY
+  # interval_days: 1                     # daemon auto-pushes a snapshot (0=off)
   # transport: s3                        # file | sftp | s3
   #
   # file — a directory, NFS/SMB mount, or removable media:
@@ -198,7 +208,23 @@ anomaly:                  # statistical anomaly detection over run history
   # flap_transitions: 3                 # ok/fail transitions that trip it
   # trend_window: 5                     # recent window for gradual slowdown
   # trend_ratio: 2.0                    # recent/baseline duration multiplier
+  # size_drop: 0.5                      # flag if a capture < 50% of median size
   # Runs after each backup (emits anomaly.detected); also `otitbup anomalies`.
+
+capture:                  # capture-quality guards (reject bad backups early)
+  # min_bytes: 512          # reject a capture smaller than this (truncated?)
+  # expect_match: "hostname"  # required regex in the captured content
+  # Also per-device via options.min_bytes / options.expect_match.
+
+integrity:                # continuous integrity scrubbing (daemon)
+  # interval_days: 7        # verify + git fsck every N days (0 = off)
+  # fsck: true              # include git repository corruption check
+  # signatures: false       # also re-verify signed-commit signatures
+  # all_commits: false      # verify whole history (slower) vs latest per device
+  # Alerts + emits integrity.ok/error events; also `otitbup integrity --alert`.
+
+rehearsal:                # scheduled restore rehearsals (daemon)
+  # interval_days: 30       # export+verify a bundle per device every N days
 
 housekeeping:             # git repo maintenance from the daemon
   # gc_interval_days: 7                 # periodic `git gc` to keep the repo small
@@ -228,6 +254,9 @@ sites:
             driver: siemens_s7              # needs otitbup[siemens]
             address: 10.20.0.10
             schedule: "0 2 * * *"           # cron: 02:00 daily (or "12h", "1d")
+            # guid: 3f2a...                 # stable device id (else auto-derived;
+                                            # pin with `otitbup guids --assign`)
+            # options: {min_bytes: 256}     # reject a truncated capture
             # hooks: {pre: "...", post: "..."}   # per-device hook override
             options:
               rack: 0
