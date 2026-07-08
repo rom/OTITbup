@@ -43,6 +43,55 @@ def role_rank(role: str) -> int:
         return 0
 
 
+def scope_allows(scopes: str, qualified_name: str) -> bool:
+    """True if a space-separated scope list (globs like 'plant-a/*',
+    'plant-a/cell-1/*', or '*') covers a device's site/zone/name path."""
+    import fnmatch
+    for scope in (scopes or "*").split():
+        if fnmatch.fnmatch(qualified_name, scope):
+            return True
+        # 'plant-a/*' should also cover 'plant-a/zone/dev'.
+        if scope.endswith("/*") and qualified_name.startswith(scope[:-1]):
+            return True
+    return False
+
+
+def ldap_authenticate(cfg: dict, username: str, password: str) -> dict | None:
+    """Bind to LDAP/AD with the user's credentials. Returns
+    {"username", "role"} on success. Role comes from group membership
+    (cfg.role_map: {group_dn_or_cn: role}) or cfg.default_role. Requires
+    the optional 'ldap3' package (pip install otitbup[ldap])."""
+    if not username or not password:
+        return None
+    try:
+        import ldap3
+    except ImportError:
+        return None
+    server = ldap3.Server(cfg["url"], get_info=ldap3.NONE)
+    user_dn = cfg["user_dn_template"].format(username=username)
+    try:
+        conn = ldap3.Connection(server, user=user_dn, password=password,
+                                auto_bind=True)
+    except Exception:
+        return None
+    role = cfg.get("default_role", "viewer")
+    role_map = cfg.get("role_map") or {}
+    if role_map and cfg.get("group_base"):
+        try:
+            conn.search(cfg["group_base"],
+                        f"(member={user_dn})",
+                        attributes=["cn"])
+            groups = {str(e["cn"]) for e in conn.entries}
+            for group, mapped in role_map.items():
+                if group in groups:
+                    role = mapped
+                    break
+        except Exception:
+            pass
+    conn.unbind()
+    return {"username": username, "role": role}
+
+
 def hash_password(password: str, iterations: int = _DEFAULT_ITERATIONS) -> str:
     salt = os.urandom(16)
     digest = hashlib.pbkdf2_hmac(
@@ -113,5 +162,6 @@ def authenticate(header: str | None, users: dict[str, dict]) -> dict | None:
     username, password = creds
     record = users.get(username)
     if record and verify_password(record["password_hash"], password):
-        return {"username": username, "role": record.get("role", "viewer")}
+        return {"username": username, "role": record.get("role", "viewer"),
+                "scopes": record.get("scopes", "*")}
     return None

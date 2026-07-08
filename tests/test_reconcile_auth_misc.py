@@ -71,7 +71,7 @@ def test_authenticate_returns_identity():
     )
     header = "Basic " + base64.b64encode(b"op:pw").decode()
     ident = authenticate(header, users)
-    assert ident == {"username": "op", "role": "operator"}
+    assert ident == {"username": "op", "role": "operator", "scopes": "*"}
     assert authenticate("Basic " + base64.b64encode(b"op:no").decode(),
                         users) is None
 

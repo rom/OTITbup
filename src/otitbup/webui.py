@@ -1493,17 +1493,39 @@ class _Handler(BaseHTTPRequestHandler):
         return None
 
     def _identify(self) -> dict | None:
-        """Resolve the request identity: cookie session first (browser),
-        then HTTP Basic (API/CLI/scrapers). Returns {username, role, token,
-        via} or None."""
+        """Resolve the request identity, in order: cookie session (browser),
+        Bearer API token (automation), trusted SSO header (behind an auth
+        proxy), then HTTP Basic (CLI/scrapers)."""
         session = self.ui.sessions.get(self._cookie_token())
         if session:
             return {
                 "username": session.username, "role": session.role,
+                "scopes": getattr(session, "scopes", "*"),
                 "token": session.token, "via": "session",
             }
+        # Bearer API token.
+        authz = self.headers.get("Authorization", "")
+        if authz.startswith("Bearer ") and self.ui.runstore is not None:
+            from . import apitoken
+            ident = apitoken.authenticate(self.ui.runstore, authz[7:])
+            if ident:
+                ident["via"] = "token"
+                return ident
+        # Trusted SSO header (an upstream proxy did OIDC/SAML and set it).
+        header_name = self.ui.config.webui.get("trusted_header")
+        if header_name:
+            user = self.headers.get(header_name)
+            if user:
+                role = self.ui.config.webui.get("trusted_default_role",
+                                                "viewer")
+                # Optional role from a second header.
+                role_header = self.ui.config.webui.get("trusted_role_header")
+                if role_header and self.headers.get(role_header):
+                    role = self.headers.get(role_header)
+                return {"username": user, "role": role, "scopes": "*",
+                        "via": "sso"}
         from .auth import authenticate
-        ident = authenticate(self.headers.get("Authorization"), self.ui.users)
+        ident = authenticate(authz, self.ui.users)
         if ident:
             ident["via"] = "basic"
         return ident
@@ -1655,10 +1677,16 @@ class _Handler(BaseHTTPRequestHandler):
             return self._handle_logout()
 
         identity = self._identify()
+
+        # Write API (JSON): Bearer token or session; no CSRF for token auth.
+        if path.startswith("/api/"):
+            return self._api_post(path, identity)
+
         if self.ui.users and identity is None:
             return self._send(401, _page("unauthorized", "<p>sign in</p>"))
         actor = identity["username"] if identity else "anonymous"
         role = identity["role"] if identity else "admin"
+        scopes = identity.get("scopes", "*") if identity else "*"
 
         # CSRF: cookie-session POSTs must echo the session token.
         if identity and identity["via"] == "session":
@@ -1666,7 +1694,8 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._send(403, _page("forbidden", "<p>bad CSRF token</p>"))
 
         from .auth import role_rank
-        ok, message, back = self._dispatch_post(path, form, actor, role, role_rank)
+        ok, message, back = self._dispatch_post(
+            path, form, actor, role, role_rank, scopes)
         if ok is None:
             return self._send(404, _page("not found", "<p>not found</p>"))
         return self._send(
@@ -1681,10 +1710,17 @@ class _Handler(BaseHTTPRequestHandler):
             f"{form.get('username', '')}:{form.get('password', '')}".encode()
         ).decode()
         ident = authenticate(header, self.ui.users)
+        if ident is None and self.ui.config.ldap:
+            # Fall back to LDAP/AD if configured.
+            from .auth import ldap_authenticate
+            ident = ldap_authenticate(
+                self.ui.config.ldap, form.get("username", ""),
+                form.get("password", ""))
         if ident is None:
             return self._send(200, self.ui.login_page(
                 error="invalid username or password", next_url=next_url))
-        session = self.ui.sessions.create(ident["username"], ident["role"])
+        session = self.ui.sessions.create(
+            ident["username"], ident["role"], ident.get("scopes", "*"))
         self.ui.events.emit(
             LOGIN, f"login: {ident['username']} ({ident['role']})",
             actor=ident["username"], detail=ident["username"],
@@ -1709,8 +1745,42 @@ class _Handler(BaseHTTPRequestHandler):
                 "otitbup_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
         })
 
-    def _dispatch_post(self, path, form, actor, role, role_rank):
+    def _api_post(self, path: str, identity: dict | None) -> None:
+        """JSON write API. Auth by Bearer token or session; enforces role
+        (operator+) and scope. POST /api/device/<qn>/{backup,verify}."""
+        import json
+        from .auth import role_rank, scope_allows
+        if self.ui.users and identity is None:
+            return self._send(
+                401, b'{"error":"unauthorized"}\n', "application/json",
+                headers={"WWW-Authenticate": 'Bearer'})
+        role = identity["role"] if identity else "admin"
+        scopes = identity.get("scopes", "*") if identity else "*"
+        if role_rank(role) < role_rank("operator"):
+            return self._send(403, b'{"error":"operator role required"}\n',
+                              "application/json")
+        if path.startswith("/api/device/") and path.count("/") >= 5:
+            rest = path[len("/api/device/"):]
+            qn, _, verb = rest.rpartition("/")
+            if not scope_allows(scopes, qn):
+                return self._send(403, b'{"error":"out of scope"}\n',
+                                  "application/json")
+            actor = identity["username"] if identity else "api"
+            if verb == "backup":
+                ok, msg = self.ui.action_backup(qn, actor)
+            elif verb == "verify":
+                ok, msg = self.ui.action_verify(qn)
+            else:
+                return self._send(404, b'{"error":"not found"}\n',
+                                  "application/json")
+            body = json.dumps({"ok": ok, "message": msg}).encode() + b"\n"
+            return self._send(200 if ok else 500, body, "application/json")
+        return self._send(404, b'{"error":"not found"}\n', "application/json")
+
+    def _dispatch_post(self, path, form, actor, role, role_rank, scopes="*"):
         """Returns (ok|None, message, back_url). ok is None for 404."""
+        from .auth import scope_allows
+
         def need(level):
             return not self.ui.users or role_rank(role) >= role_rank(level)
 
@@ -1752,6 +1822,8 @@ class _Handler(BaseHTTPRequestHandler):
                 back = _device_link_name(qn)
                 if not need("operator"):
                     return False, "operator role required", back
+                if not scope_allows(scopes, qn):
+                    return False, "device out of your scope", back
                 if verb == "backup":
                     ok, msg = self.ui.action_backup(qn, actor)
                     return ok, msg, back

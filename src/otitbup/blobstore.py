@@ -44,19 +44,29 @@ def parse_pointer(data: bytes) -> tuple[str, int] | None:
 
 
 class BlobStore:
-    def __init__(self, root: str | Path):
+    def __init__(self, root: str | Path, key: str | bytes | None = None):
         self.root = Path(root)
+        # Optional encryption at rest: blobs are content-addressed by the
+        # PLAINTEXT sha256 (so dedup and manifest hashes are unchanged) but
+        # written to disk Fernet-encrypted. Protects large artifacts if the
+        # appliance disk/snapshot leaks.
+        self._fernet = None
+        if key:
+            from cryptography.fernet import Fernet
+            self._fernet = Fernet(key if isinstance(key, bytes)
+                                  else key.encode())
 
     def _path(self, sha256: str) -> Path:
         return self.root / sha256[:2] / sha256
 
     def put(self, data: bytes) -> str:
-        sha256 = hashlib.sha256(data).hexdigest()
+        sha256 = hashlib.sha256(data).hexdigest()   # over plaintext
         path = self._path(sha256)
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
+            stored = self._fernet.encrypt(data) if self._fernet else data
             tmp = path.with_suffix(".tmp")
-            tmp.write_bytes(data)
+            tmp.write_bytes(stored)
             os.replace(tmp, path)
         return sha256
 
@@ -64,7 +74,8 @@ class BlobStore:
         path = self._path(sha256)
         if not path.exists():
             raise KeyError(sha256)
-        return path.read_bytes()
+        raw = path.read_bytes()
+        return self._fernet.decrypt(raw) if self._fernet else raw
 
     def has(self, sha256: str) -> bool:
         return self._path(sha256).exists()

@@ -26,8 +26,15 @@ from .secrets import SecretsBackend
 
 
 def default_blobstore(config: AppConfig) -> BlobStore:
-    """The blob store lives next to (not inside) the backup repo."""
-    return BlobStore(Path(config.data_dir).parent / "blobs")
+    """The blob store lives next to (not inside) the backup repo, and is
+    encrypted at rest when encryption.blob_key(_file) or OTITBUP_BLOB_KEY
+    is configured."""
+    import os
+    enc = config.encryption or {}
+    key = os.environ.get("OTITBUP_BLOB_KEY") or enc.get("blob_key")
+    if not key and enc.get("blob_key_file"):
+        key = Path(enc["blob_key_file"]).read_text().strip()
+    return BlobStore(Path(config.data_dir).parent / "blobs", key=key)
 
 
 def default_gitstore(config: AppConfig) -> GitStore:

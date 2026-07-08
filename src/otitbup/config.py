@@ -144,4 +144,6 @@ def load_config(path: str | Path) -> AppConfig:
         ldap=raw.get("ldap") or {},
         federation=raw.get("federation") or {},
         housekeeping=raw.get("housekeeping") or {},
+        encryption=raw.get("encryption") or {},
+        desired=raw.get("desired") or {},
     )
