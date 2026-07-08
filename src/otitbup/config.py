@@ -154,4 +154,5 @@ def load_config(path: str | Path) -> AppConfig:
         encryption=raw.get("encryption") or {},
         desired=desired,
         anomaly=raw.get("anomaly") or {},
+        offsite=raw.get("offsite") or {},
     )

@@ -241,6 +241,26 @@ def main(argv: list[str] | None = None) -> int:
         help="roll up health from federated site collectors",
     )
 
+    p_offsite = sub.add_parser(
+        "offsite",
+        help="manage the encrypted offsite copy (external server / cloud)",
+    )
+    offsite_sub = p_offsite.add_subparsers(
+        dest="offsite_command", required=True)
+    offsite_sub.add_parser("genkey", help="generate an offsite encryption key")
+    offsite_sub.add_parser("push", help="upload an encrypted snapshot offsite")
+    offsite_sub.add_parser("list", help="list offsite snapshots")
+    p_opull = offsite_sub.add_parser(
+        "pull", help="download+decrypt+extract a snapshot")
+    p_opull.add_argument("--name", help="snapshot name (default: newest)")
+    p_opull.add_argument("--out", help="extract directory")
+    p_orestore = offsite_sub.add_parser(
+        "restore", help="restore a device's bundle from the offsite copy")
+    p_orestore.add_argument("device")
+    p_orestore.add_argument("--name", help="snapshot name (default: newest)")
+    p_orestore.add_argument("--commit", help="backup commit (default: latest)")
+    p_orestore.add_argument("--out", help="bundle directory")
+
     sub.add_parser(
         "policy", help="run config policy checks over the latest backups"
     )
@@ -954,6 +974,62 @@ def main(argv: list[str] | None = None) -> int:
               f"total devices={t['devices']} covered={t['covered']} "
               f"stale={t['stale']} failing={t['failing']}")
         return 0 if agg["unreachable"] == 0 else 1
+
+    if args.command == "offsite":
+        import datetime as _dt
+        import os
+
+        from . import offsite as offsite_mod
+        enc = config.encryption or {}
+        blob_key = (os.environ.get("OTITBUP_BLOB_KEY") or enc.get("blob_key"))
+        if not blob_key and enc.get("blob_key_file"):
+            blob_key = Path(enc["blob_key_file"]).read_text().strip()
+        try:
+            if args.offsite_command == "genkey":
+                print(offsite_mod.generate_key())
+                print("store this as offsite.key_file — it is NOT kept on the "
+                      "remote and is required to restore.", file=sys.stderr)
+                return 0
+            if args.offsite_command == "push":
+                stamp = _dt.datetime.now(_dt.UTC).strftime(
+                    "%Y%m%d-%H%M%S")
+                name = offsite_mod.push(config, stamp)
+                print(f"uploaded {name}")
+                return 0
+            if args.offsite_command == "list":
+                names = offsite_mod.list_snapshots(config)
+                for n in names:
+                    print(n)
+                print(f"\n{len(names)} snapshot(s)", file=sys.stderr)
+                return 0
+            if args.offsite_command == "pull":
+                out = Path(args.out or "offsite-restore")
+                name, extracted = offsite_mod.pull(config, args.name, out)
+                print(f"{name} extracted to {extracted} "
+                      "(contains data/, blobs/, runstore.db)")
+                return 0
+            if args.offsite_command == "restore":
+                [device] = config.find_devices([args.device])
+                out = args.out or f"restore-{device.name}-offsite"
+                if Path(out).exists() and any(Path(out).iterdir()):
+                    print(f"output directory not empty: {out}", file=sys.stderr)
+                    return 1
+                name, commit, mismatches, bundle = \
+                    offsite_mod.restore_from_offsite(
+                        config, device, Path(out), name=args.name,
+                        commit=args.commit, blob_key=blob_key)
+                print(f"restored {device.qualified_name} from {name} "
+                      f"(backup {commit[:10]}) -> {bundle}")
+                if mismatches:
+                    print("HASH MISMATCH on: " + ", ".join(mismatches),
+                          file=sys.stderr)
+                    return 1
+                print("all artifact hashes verified; see RESTORE.md")
+                return 0
+        except offsite_mod.OffsiteError as exc:
+            print(f"offsite error: {exc}", file=sys.stderr)
+            return 2
+        return 0
 
     if args.command == "policy":
         from .policy import check_all, severity_rank

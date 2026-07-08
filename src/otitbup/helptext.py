@@ -305,7 +305,32 @@ store into a single .tar.gz to copy to removable or offsite media — the
 third copy of the 3-2-1 rule and the air-gapped copy of 3-2-1-1-0. Point
 `strategy.offline.path` at it so the Strategy page counts it.
 
-See also: strategy, restore.
+See also: strategy, restore, offsite.
+"""),
+    _c("offsite", "Retention & strategy",
+       "encrypted offsite copy on an external server / cloud", """
+`otitbup offsite {genkey|push|list|pull|restore}` keeps an encrypted copy
+of the whole backup (git repo + blob store + run store) on an external
+server or cloud object store — the "1 offsite" leg of 3-2-1, hardened.
+
+The snapshot is a single tarball encrypted with a Fernet key BEFORE upload,
+so the remote only ever holds ciphertext; the key stays on the appliance.
+Transports: `file` (a dir / NFS/SMB mount / removable media), `sftp` (any
+SSH server, needs otitbup[sftp]), and `s3` (AWS S3 or any S3-compatible
+store — MinIO, Backblaze B2, Wasabi — signed with SigV4 over stdlib, no
+boto3). Configure under `offsite:`.
+
+  otitbup offsite genkey > offsite.key   # then set offsite.key_file
+  otitbup offsite push                   # upload an encrypted snapshot
+  otitbup offsite list                   # what's stored offsite
+  otitbup offsite pull [--name N --out D]        # fetch+decrypt+extract
+  otitbup offsite restore DEVICE [--name N --commit H --out D]
+
+`offsite restore` pulls a snapshot and produces a hash-verified restore
+bundle for one device straight from the offsite copy — no device writes,
+no need to touch the live appliance.
+
+See also: export, restore, strategy.
 """),
 
     # ----------------------------------------------------------- Recovery
