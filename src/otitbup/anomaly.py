@@ -95,6 +95,54 @@ def _detect_change_storm(
     return None
 
 
+def _detect_flapping(
+    device: str, runs: list[dict], window: int, min_transitions: int,
+) -> Anomaly | None:
+    """Flag a device oscillating between success and failure — an
+    intermittent link or a device that only sometimes answers. Neither the
+    failure alert (fires on a solid failure streak) nor the recovery alert
+    catches a device that never settles."""
+    recent = runs[:window]
+    if len(recent) < 3:
+        return None
+    states = [bool(r.get("ok")) for r in recent]
+    transitions = sum(1 for a, b in zip(states, states[1:], strict=False)
+                      if a != b)
+    fails = states.count(False)
+    if transitions >= min_transitions and 0 < fails < len(states):
+        return Anomaly(
+            device, "flapping",
+            f"{transitions} ok/fail transitions in last {len(recent)} runs "
+            f"({fails} failed) — intermittent",
+        )
+    return None
+
+
+def _detect_slow_trend(
+    device: str, runs: list[dict], window: int, ratio: float, floor: float,
+    min_history: int,
+) -> Anomaly | None:
+    """Flag a *gradual* slowdown: the recent window's mean duration is
+    materially higher than the older baseline's. A single-point z-score
+    misses a slow, sustained creep (a filling disk, a degrading link)."""
+    durations = _durations(runs)          # newest first
+    if len(durations) < window + min_history:
+        return None
+    recent = durations[:window]
+    older = durations[window:]
+    recent_mean = statistics.fmean(recent)
+    older_mean = statistics.fmean(older)
+    if older_mean <= 0 or recent_mean < floor:
+        return None
+    if recent_mean >= older_mean * ratio:
+        return Anomaly(
+            device, "slow_trend",
+            f"recent backups avg {recent_mean:.1f}s vs {older_mean:.1f}s "
+            f"baseline ({recent_mean / older_mean:.1f}x) — degrading",
+        )
+    return None
+
+
 def analyze(device: str, runs: list[dict], cfg: dict | None = None) -> list[Anomaly]:
     """Return anomalies for a device given its run history (newest first).
 
@@ -105,17 +153,20 @@ def analyze(device: str, runs: list[dict], cfg: dict | None = None) -> list[Anom
       change_window    recent-run window for change storms   (default 5)
       change_recent    recent change-rate trigger            (default 0.8)
       change_baseline  max baseline change-rate to fire      (default 0.2)
+      flap_window      recent-run window for flapping        (default 6)
+      flap_transitions ok/fail transitions that trip it      (default 3)
+      trend_window     recent-run window for slow trend      (default 5)
+      trend_ratio      recent/baseline duration multiplier   (default 2.0)
     """
     cfg = cfg or {}
     if cfg.get("enabled") is False:
         return []
     min_history = int(cfg.get("min_history", 8))
+    floor = float(cfg.get("duration_floor", 5.0))
     out: list[Anomaly] = []
     slow = _detect_slow(
-        device, runs,
-        sigma=float(cfg.get("sigma", 3.0)),
-        floor=float(cfg.get("duration_floor", 5.0)),
-        min_history=min_history,
+        device, runs, sigma=float(cfg.get("sigma", 3.0)),
+        floor=floor, min_history=min_history,
     )
     if slow:
         out.append(slow)
@@ -128,4 +179,19 @@ def analyze(device: str, runs: list[dict], cfg: dict | None = None) -> list[Anom
     )
     if storm:
         out.append(storm)
+    flap = _detect_flapping(
+        device, runs,
+        window=int(cfg.get("flap_window", 6)),
+        min_transitions=int(cfg.get("flap_transitions", 3)),
+    )
+    if flap:
+        out.append(flap)
+    trend = _detect_slow_trend(
+        device, runs,
+        window=int(cfg.get("trend_window", 5)),
+        ratio=float(cfg.get("trend_ratio", 2.0)),
+        floor=floor, min_history=min_history,
+    )
+    if trend:
+        out.append(trend)
     return out

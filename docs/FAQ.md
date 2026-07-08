@@ -270,6 +270,35 @@ blob store and run store into one archive to copy to removable or offsite
 media. Point `strategy.offline.path` at it so the Strategy page counts it,
 and set `git.push`+`git.remote` for the offsite mirror.
 
+### How do I keep an encrypted copy offsite / in the cloud?
+`otitbup offsite push` ships an **encrypted** snapshot of the whole backup
+(git repo + blob store + run store) to an external server or cloud object
+store. Pick a transport under `offsite`: `file` (a directory / NFS-SMB
+mount / removable media), `sftp` (any SSH server), or `s3` (AWS S3 or any
+S3-compatible store — MinIO, Backblaze B2, Wasabi, Ceph RGW, signed with
+SigV4 over stdlib, no boto3). The snapshot is Fernet-encrypted on the
+appliance *before* upload, so the remote only ever holds ciphertext.
+Generate the key once with `otitbup offsite genkey` and keep it off the
+remote. This is the encrypted, remote counterpart to `otitbup export`
+(which writes a plaintext local tarball).
+
+### Can I restore from the offsite/cloud copy?
+Yes. `otitbup offsite pull` downloads, decrypts and extracts a whole
+snapshot (`data/`, `blobs/`, `runstore.db`); `otitbup offsite restore
+<device>` goes further and produces a hash-verified restore bundle for one
+device straight from the remote — **with no device writes**, exactly like
+`otitbup restore`. If the source appliance encrypted its blob store
+(`encryption.blob_key`), offloaded artifacts are decrypted during the
+restore. `offsite list` shows what snapshots exist; the newest is used by
+default (`--name` picks another).
+
+### Is my cloud provider able to read my configs?
+No. The remote holds **ciphertext only** — the snapshot is encrypted on the
+appliance before it is uploaded, and the key never leaves the appliance.
+Losing the remote credentials (or the provider itself being compromised)
+exposes no configuration; only the appliance-held offsite key can decrypt a
+snapshot, and a wrong key fails loudly. Extraction is path-traversal-safe.
+
 ### What's the difference between 3-2-1 and 3-2-1-1-0?
 3-2-1-1-0 adds one **offline/air-gapped** copy (ransomware can't reach it)
 and requires **0 errors** — every backup verifies and no device is
@@ -295,11 +324,12 @@ a generic ticket/webhook — a CMDB job can poll the API on a schedule.
 ## Devices (more)
 
 ### Which network vendors are supported now?
-Cisco (IOS/NX-OS/SG/ASA), Juniper (Junos/SRX), Arista, HPE/Aruba, Huawei,
-MikroTik, Extreme, Dell, Zyxel, Fortinet, Palo Alto, Check Point, Sophos,
-VyOS, plus the industrial lines (SCALANCE, RUGGEDCOM, Hirschmann/Belden,
-Moxa, Westermo, Advantech, Phoenix Contact, Red Lion, Korenix, Antaira,
-Planet, Netgear, Teltonika). Run `otitbup drivers`.
+Cisco (IOS/NX-OS/SG/ASA), Juniper (Junos/SRX), Arista, HPE/Aruba (incl.
+Aruba OS-Switch), Huawei, MikroTik, Nokia/Alcatel (SR OS), Extreme, Dell,
+Zyxel, Fortinet, Palo Alto, Check Point, Stormshield, Sophos, VyOS, plus the
+industrial lines (SCALANCE, RUGGEDCOM, Hirschmann/Belden, Moxa, Westermo,
+Advantech, Phoenix Contact incl. mGuard, Red Lion, Korenix, Antaira,
+Planet, Netgear, Teltonika). Run `otitbup drivers` for all 105.
 
 ### Which serial-to-ethernet / protocol gateways are supported?
 Moxa NPort and MGate, Lantronix, Digi, Perle, Sena, Advantech EKI, HMS
@@ -311,6 +341,14 @@ Often yes: `generic_ssh` (set `device_type` + `commands`), `generic_http`
 (set `urls`), `generic_sftp` (set `paths`), `snmp_fingerprint`,
 `generic_opcua`/`generic_enip`/`generic_dnp3`, or `generic_file` for
 engineering-tool exports.
+
+### Which PLC / controller appliances were added recently?
+The latest batch adds web/SFTP/DNP3 appliance drivers: `yokogawa_web` and
+`honeywell_web` (DCS web exports), `fanuc_cnc` (HTTP — note FOCAS itself is
+proprietary and not implemented), `bachmann_m1`, `br_automation` (B&R
+project files over SFTP) and `emerson_roc` (ROC/FloBoss over DNP3). As
+always each captures only what the device's open protocol exposes; run
+`otitbup drivers` for the full list of 105.
 
 ## Web UI (more)
 

@@ -4,6 +4,10 @@ __pycache__/
 build/
 dist/
 data/
+blobs/
+runstore.db
+alert-state.json
+*.lock
 state.json
 secrets.yml
 otitbup.yml

@@ -48,6 +48,37 @@ def test_change_storm_quiet_when_baseline_high():
     assert not any(a.kind == "change_storm" for a in found)
 
 
+def test_flapping_flagged():
+    # Alternating ok/fail in the recent window.
+    runs = []
+    for i in range(6):
+        runs.append(_run(1000 - i * 100, 2.0, ok=(i % 2 == 0)))
+    runs += [_run(400 - i * 100, 2.0, ok=True) for i in range(10)]
+    found = anomaly.analyze("s/z/d", runs)
+    assert any(a.kind == "flapping" for a in found)
+
+
+def test_no_flapping_on_solid_failure_streak():
+    # A solid failure streak is NOT flapping (few transitions).
+    runs = [_run(1000 - i * 100, 2.0, ok=False) for i in range(5)]
+    runs += [_run(400 - i * 100, 2.0, ok=True) for i in range(10)]
+    assert not any(a.kind == "flapping" for a in anomaly.analyze("s/z/d", runs))
+
+
+def test_slow_trend_flagged():
+    # Older baseline ~2s, recent window ~6s: a gradual creep, not a spike.
+    recent = [_run(2000 - i * 100, 6.0) for i in range(5)]
+    older = [_run(1400 - i * 100, 2.0) for i in range(12)]
+    found = anomaly.analyze("s/z/d", recent + older)
+    assert any(a.kind == "slow_trend" for a in found)
+
+
+def test_no_slow_trend_when_stable():
+    runs = [_run(2000 - i * 100, 2.0) for i in range(20)]
+    assert not any(a.kind == "slow_trend"
+                   for a in anomaly.analyze("s/z/d", runs))
+
+
 def test_disabled():
     history = [_run(1000 - i * 100, 2.0) for i in range(1, 12)]
     runs = [_run(1100, 30.0)] + history

@@ -34,8 +34,9 @@ not.
   (trusted-header/LDAP), a live activity stream, and a scoped write API;
   syslog and **SNMP trap** event fan-out; and a JSON API.
 - **Hardens the archive**: a tamper-evident, hash-chained **audit log**
-  (`otitbup verify-audit`), optional **SSH-signed commits**, and optional
-  **at-rest encryption** of the large-artifact blob store (Fernet).
+  (`otitbup verify-audit`), optional **SSH-signed commits**, optional
+  **at-rest encryption** of the large-artifact blob store (Fernet), and an
+  **encrypted offsite/cloud copy** of the whole backup (`otitbup offsite`).
 - **Scales across sites**: federated **site collectors** (Purdue model) —
   git for the backup bytes, a scoped health API for the roll-up — plus
   statistical **anomaly detection** and config-as-code **desired state**.
@@ -98,6 +99,8 @@ otitbup report --format pdf --sign      # signed compliance report (html/csv/pdf
 otitbup report-verify report.pdf        # verify a signed report
 otitbup export --out backup.tar.gz      # portable offsite/offline archive (3-2-1)
 otitbup strategy                        # evaluate 3-2-1 / 3-2-1-1-0 posture
+otitbup offsite push                    # encrypted snapshot to an external server / cloud (3-2-1 offsite)
+otitbup offsite restore plc-01 --out ./bundle   # restore a device from the offsite/cloud copy
 otitbup netbox reconcile                # inventory vs. NetBox (or: netbox import)
 otitbup discover 10.20.0.0/24 --enrich  # scan + probe device identity
 otitbup test plc-01                     # dry-run: test creds/reachability, no commit
@@ -162,6 +165,11 @@ per device; see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 | Phoenix Contact | PLCnext (AXC F, RFC) | `phoenix_plcnext` | **deployed project** (/opt/plcnext/projects) via SFTP | `otitbup[sftp]` |
 | Codesys family (Festo, Bosch Rexroth ctrlX, ...) | Linux-based controllers | `codesys_ssh` | project/settings files via SFTP (paths per device) | `otitbup[sftp]` |
 | GE / Emerson | PACSystems RX3i, RSTi-EP | `ge_pacsystems` | CIP identity + fingerprint (EtherNet/IP enabled) | — (stdlib) |
+| Yokogawa | FA-M3 (e-RT3), STARDOM FCN/FCJ | `yokogawa_web` | web-server status/parameter/config pages (HTTP) + fingerprint | — (stdlib) |
+| Honeywell | ControlEdge PLC / RTU | `honeywell_web` | web-server diagnostics/parameter/config pages (HTTP) + fingerprint | — (stdlib) |
+| Fanuc | CNC (0i/30i/31i/32i) | `fanuc_cnc` | embedded web-server pages (HTTP); FOCAS is proprietary, **not** implemented | — (stdlib) |
+| Bachmann | M1 (MX/CX/MC) | `bachmann_m1` | deployed project/config from the CFC card via SFTP | `otitbup[sftp]` |
+| B&R | X20 / X90 / Automation PC | `br_automation` | deployed project/config files via SFTP (paths per target) | `otitbup[sftp]` |
 | Netcontrol | Netcon 100/500/3000 RTUs & gateways | `netcontrol_rtu` | SSH CLI config; also DNP3/IEC-104/IEC-61850 | `otitbup[ssh]` |
 | Any vendor | OPC UA server exposed | `generic_opcua` | build info, namespaces, optional nodes + fingerprint | `otitbup[opcua]` |
 | Any vendor | EtherNet/IP device | `generic_enip` | CIP identity + fingerprint | — (stdlib) |
@@ -196,6 +204,7 @@ per device; see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 | Eaton / Cooper | SMP gateway | `smp_gateway` | CLI; also DNP3/IEC-61850 | `otitbup[ssh]` |
 | Survalent | SmartVU / RTU | `survalent_rtu` | CLI; also DNP3 | `otitbup[ssh]` |
 | Netcontrol | Netcon RTUs | `netcontrol_rtu` | SSH CLI; also DNP3/IEC-104/61850 | `otitbup[ssh]` |
+| Emerson | ROC800 / FloBoss (100/107) | `emerson_roc` | DNP3 device attributes (vendor/product/serial/versions) + fingerprint | — (stdlib) |
 
 ### Network equipment
 
@@ -204,11 +213,12 @@ per device; see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 | Cisco | `cisco_ios`, `cisco_nxos` (Nexus), `cisco_sg` (SB) | `cisco_ios` | `cisco_asa` |
 | Juniper | `juniper_junos` | `juniper_junos` | `juniper_srx` |
 | Arista | `arista_eos` | — | — |
-| HPE / Aruba | `hpe_comware`, `hpe_procurve`, `aruba_cx` | — | — |
+| HPE / Aruba | `hpe_comware`, `hpe_procurve`, `aruba_cx`, `aruba_osswitch` | — | — |
 | Huawei | `huawei_vrp` | `huawei_vrp` | — |
 | MikroTik | `mikrotik_routeros` | `mikrotik_routeros` | — |
+| Nokia / Alcatel-Lucent | — | `nokia_sros` (7705 SAR, 7750 SR) | — |
 | Extreme / Dell / Zyxel | `extreme_exos`, `dell_os10`, `dell_powerconnect`, `zyxel` | — | — |
-| Fortinet / Palo Alto / Check Point / Sophos | — | — | `fortinet_fortigate`, `paloalto_panos`, `checkpoint_gaia`, `sophos_xg` |
+| Fortinet / Palo Alto / Check Point / Stormshield / Sophos | — | — | `fortinet_fortigate`, `paloalto_panos`, `checkpoint_gaia`, `stormshield`, `sophos_xg` |
 | VyOS | — | `vyos` | `vyos` |
 | Siemens SCALANCE | `siemens_scalance` | `siemens_scalance` (M-series 4G/5G) | `siemens_scalance` (S/SC) |
 | Siemens RUGGEDCOM | `ruggedcom_ros` | `ruggedcom_rox` | `ruggedcom_rox` |
@@ -216,7 +226,7 @@ per device; see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 | Moxa | `moxa_switch` (EDS) | `moxa_edr` | `moxa_edr` |
 | Westermo | `westermo_weos` | `westermo_weos` (RedFox), `westermo_merlin` (4G/5G) | `westermo_weos` |
 | Advantech | `advantech_switch` (EKI) | `advantech_router` (ICR) | — |
-| Phoenix / Red Lion / Korenix / Antaira / Planet | `phoenix_fl_switch`, `redlion_nt`, `korenix`, `antaira`, `planet_switch` | — | — |
+| Phoenix / Red Lion / Korenix / Antaira / Planet | `phoenix_fl_switch`, `redlion_nt`, `korenix`, `antaira`, `planet_switch` | — | `phoenix_mguard` (mGuard) |
 | Netgear | `netgear_switch` (M4300/M4250/ProSAFE) | web-managed → `generic_http` | web-managed → `generic_http` |
 | Teltonika | — | `teltonika` (cellular) | — |
 | Omron | `omron_switch` | — | — |
@@ -268,7 +278,11 @@ actions per part of the estate; login can also be delegated to an upstream
 OIDC/SAML proxy (trusted header) or LDAP/AD. A scoped **write API**
 (`POST /api/device/<name>/backup|verify`, bearer token or session) lets CI
 and other systems trigger backups, and the **Activity** page streams live
-events over SSE.
+events over SSE. The **Help** page links to the full manuals — Usage,
+Configuration, FAQ and Release notes — rendered in-app from the shipped
+Markdown (`/help/usage`, `/help/configuration`, `/help/faq`,
+`/help/releasenotes`; docs directory found relative to the package or via
+the `OTITBUP_DOCS_DIR` override).
 
 ## Operations, compliance & recovery
 
@@ -328,6 +342,14 @@ events over SSE.
   strategy`) evaluates your backup posture: 3 copies, 2 media, 1 offsite,
   +1 offline, 0 errors — and tells you exactly what's missing. `otitbup
   export` produces the portable offsite/offline archive.
+- **Encrypted offsite / cloud copy** — `otitbup offsite` ships an
+  **encrypted** snapshot of the whole backup (git repo + blob store + run
+  store) to an external server or cloud object store (`file` / `sftp` /
+  `s3`-compatible: MinIO, Backblaze B2, Wasabi, Ceph RGW). The snapshot is
+  Fernet-encrypted on the appliance before upload — the remote holds
+  ciphertext only and the key never leaves the appliance — and `offsite
+  restore` produces a hash-verified bundle for one device straight from the
+  remote, with no device writes.
 - **CMDB / NetBox & ticketing** — `otitbup netbox` reconciles the
   inventory against NetBox (or imports from it); events open tickets in
   ServiceNow, Jira, **Request Tracker (RT)** or a generic CMDB webhook. Optional HTTP Basic auth

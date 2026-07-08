@@ -51,6 +51,12 @@ _REGISTRY: dict[str, str | type[Driver]] = {
     "abb_rtu500": "otitbup.drivers.generic_http:AbbRtu500Driver",
     "abb_rtu520": "otitbup.drivers.generic_http:AbbRtu500Driver",
     "abb_rtu560": "otitbup.drivers.generic_http:AbbRtu500Driver",
+    "yokogawa_web": "otitbup.drivers.more_ot:YokogawaWebDriver",
+    "honeywell_web": "otitbup.drivers.more_ot:HoneywellWebDriver",
+    "fanuc_cnc": "otitbup.drivers.more_ot:FanucCNCDriver",
+    "bachmann_m1": "otitbup.drivers.more_ot:BachmannM1Driver",
+    "br_automation": "otitbup.drivers.more_ot:BRAutomationDriver",
+    "emerson_roc": "otitbup.drivers.more_ot:EmersonROCDriver",
 }
 
 # Vendor SSH profiles (presets over generic_ssh) register themselves from
@@ -110,6 +116,12 @@ _CORE_DESCRIPTIONS = {
     "abb_rtu500": "ABB RTU500 series RTUs (web endpoints)",
     "abb_rtu520": "ABB RTU520 (RTU500 series, web endpoints)",
     "abb_rtu560": "ABB RTU560 (RTU500 series, web endpoints)",
+    "yokogawa_web": "Yokogawa FA-M3/STARDOM controllers (web export)",
+    "honeywell_web": "Honeywell ControlEdge PLC/RTU (web export)",
+    "fanuc_cnc": "Fanuc CNC embedded web server (HTTP; FOCAS not implemented)",
+    "bachmann_m1": "Bachmann M1 controllers: CFC project/config via SFTP",
+    "br_automation": "B&R Automation Runtime project via SFTP",
+    "emerson_roc": "Emerson ROC/FloBoss RTUs (DNP3 device attributes)",
 }
 
 

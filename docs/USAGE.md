@@ -81,6 +81,14 @@ sites:
 `otitbup list` shows the resulting inventory; `otitbup drivers` lists the
 drivers and which pip extra each needs.
 
+Coverage spans 105 drivers: OT controllers, RTUs and HMIs, plus enterprise
+and OT **network gear** (Cisco, Juniper, Arista, Fortinet, Palo Alto,
+Aruba/HPE, Huawei, MikroTik, Nokia, Check Point, Stormshield, Phoenix
+Contact mGuard) and vendor **appliances** (Yokogawa, Honeywell, Fanuc,
+Bachmann, B&R, Emerson ROC/FloBoss) — each capturing what the device's open
+protocol exposes (SSH CLI, HTTP export, SFTP project files, or DNP3
+attributes).
+
 ## 4. Running backups
 
 ```bash
@@ -209,12 +217,16 @@ JSON.
 otitbup anomalies                   # statistical anomalies across devices
 ```
 
-Over each device's run history the tool flags **slow backups** (duration
-z-score past `anomaly.sigma`) and **change storms** (a spike in the
-change rate above the device's own baseline). It runs automatically after
-each backup — emitting an `anomaly.detected` event and alert — and on
-demand with `otitbup anomalies`. Tune the thresholds under `anomaly`
-(sigma, history depth, change windows); see CONFIGURATION.md.
+Over each device's run history the tool flags four kinds of anomaly:
+**slow backups** (a single run's duration a z-score past `anomaly.sigma`),
+**change storms** (a spike in the change rate above the device's own
+baseline), **flapping** (a device oscillating between success and failure —
+intermittent, missed by both the failure and recovery alerts), and **slow
+trends** (a gradual, sustained slowdown a single-point z-score misses). It
+runs automatically after each backup — emitting an `anomaly.detected` event
+and alert — and on demand with `otitbup anomalies`. Tune the thresholds
+under `anomaly` (sigma, history depth, change windows, flap and trend
+windows); see CONFIGURATION.md.
 
 ## 9. Policy & compliance
 
@@ -300,6 +312,32 @@ human performs the write. **Network gear** can be restored automatically
 verifying the post-change config. `rehearse` records restore-test results
 that surface in the UI, DR runbooks and reports.
 
+### Offsite copy & cloud restore
+
+Keep an **encrypted** copy of the whole backup (git repo + blob store + run
+store) on an external server or cloud object store — the "1 offsite" leg of
+3-2-1, hardened. The snapshot is encrypted with a Fernet key on the
+appliance *before* upload, so the remote only ever holds ciphertext.
+
+```bash
+otitbup offsite genkey                 # -> store as offsite.key_file (keep it off the remote)
+otitbup offsite push                   # build + encrypt + upload a snapshot
+otitbup offsite list                   # snapshots on the remote
+otitbup offsite pull --out ./restore   # download + decrypt + extract the newest
+otitbup offsite restore plc-01 --out ./bundle   # restore one device straight from the remote
+```
+
+Set the transport under `offsite`: `file` (a directory / NFS-SMB mount /
+removable media), `sftp` (any SSH server, needs `otitbup[sftp]`), or `s3`
+(AWS S3 or any S3-compatible store — MinIO, Backblaze B2, Wasabi, Ceph RGW).
+`offsite restore` pulls a snapshot and produces a hash-verified bundle for
+one device **with no device writes**, decrypting offloaded blobs with
+`encryption.blob_key` if it is set. Unlike `otitbup export` (a *plaintext*
+local tarball for offline media), the offsite copy is encrypted, remote,
+and restores directly from the remote; losing the remote credentials
+exposes nothing — only the appliance-held offsite key can decrypt. See
+CONFIGURATION.md.
+
 ## 12. Discovery & reconciliation
 
 ```bash
@@ -339,6 +377,12 @@ built-in **Help** page. Rich per-device pages carry artifacts, history,
 per-commit and any-two-commit diffs, a run-health timeline, notes,
 baseline drift and rehearsals. Hover the small **?** icons for inline
 popover help.
+
+**In-app manuals.** The **Help** page links to the full manuals — Usage,
+Configuration, FAQ and Release notes — rendered in-app from the shipped
+Markdown at `/help/usage`, `/help/configuration`, `/help/faq` and
+`/help/releasenotes`. The docs directory is located relative to the package
+(source deployments) or via the `OTITBUP_DOCS_DIR` environment override.
 
 **Read/write, by role** — sign in (cookie session, CSRF-protected):
 
@@ -470,6 +514,7 @@ full description (arguments, examples, related commands) of one command.
 | `discover [--enrich]` / `reconcile` / `netbox` | find devices; prove coverage |
 | `report [--format --sign]` / `report-verify` | signed HTML/CSV/PDF/DOCX reports |
 | `export` / `strategy` | offline archive; 3-2-1 evaluation |
+| `offsite genkey|push|list|pull|restore` | encrypted offsite/cloud snapshot + restore-from-remote |
 | `federation` | roll up health from federated site collectors |
 | `verify-audit` | verify the tamper-evident audit hash chain |
 | `token create|list|delete` | manage scoped API tokens |

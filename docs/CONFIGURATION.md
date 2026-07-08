@@ -20,6 +20,7 @@ data_dir: ./data        # backup git repository; relative paths resolve
 secrets:    { ... }     # credential backend        (section below)
 git:        { ... }     # remote mirroring + commit signing (section below)
 encryption: { ... }     # blob-store encryption at rest (section below)
+offsite:    { ... }     # encrypted offsite snapshot copy (section below)
 webui:      { ... }     # web UI: host/port/auth/TLS/RBAC (section below)
 alerts:     { ... }     # change/failure/staleness alerts (section below)
 retention:  { ... }     # global retention defaults (section below)
@@ -106,9 +107,14 @@ one-line description. The recurring ones:
 | `endpoint`, `nodes` | `generic_opcua` | endpoint URL override; extra nodes to read |
 | `max_file_size` | file-fetch drivers | skip files larger than this (default 100 MiB) |
 
-Vendor SSH profiles (e.g. `cisco_ios`, `hirschmann_hios`) are presets —
-any of `device_type`, `commands`, `port`, `scrub` set in `options`
-overrides the preset for that device.
+Vendor SSH profiles (e.g. `cisco_ios`, `hirschmann_hios`, plus enterprise
+and OT presets such as `juniper_junos`, `arista_eos`, `fortinet_fortigate`,
+`paloalto_panos`, `checkpoint_gaia`, `aruba_osswitch`, `nokia_sros`,
+`stormshield`, `phoenix_mguard`) are presets — any of `device_type`,
+`commands`, `port`, `scrub` set in `options` overrides the preset for that
+device. Web/SFTP/DNP3 appliance drivers exist alongside them (e.g.
+`yokogawa_web`, `honeywell_web`, `fanuc_cnc`, `bachmann_m1`,
+`br_automation`, `emerson_roc`); `otitbup drivers` lists all 105.
 
 ## retention
 
@@ -548,6 +554,87 @@ otitbup maps the copies to: the local repo (copy 1), a git remote mirror
 copy). `strategy` evaluates all five conditions (3 copies, 2 media, 1
 offsite, 1 offline, 0 errors) and reports what's missing.
 
+## offsite
+
+An **encrypted** snapshot of the *whole* backup — git repo + blob store +
+run store — shipped to an external server or cloud object store: the "1
+offsite" leg of 3-2-1, hardened. The snapshot is a single `tar.gz`
+encrypted with a Fernet key **on the appliance before upload**, so the
+remote only ever holds ciphertext and the key never leaves the appliance.
+Driven by `otitbup offsite`; needs `otitbup[crypto]`.
+
+```yaml
+offsite:
+  key_file: /etc/otitbup/offsite.key   # Fernet key; or key:, or the env
+                                       # var OTITBUP_OFFSITE_KEY. Generate
+                                       # with `otitbup offsite genkey` and
+                                       # keep it OFF the remote — it is the
+                                       # only thing that can decrypt.
+  transport: s3                        # file | sftp | s3
+```
+
+**file** — a directory: local disk, an NFS/SMB mount, or removable media.
+
+```yaml
+offsite:
+  transport: file
+  dir: /mnt/offsite/otitbup            # required
+```
+
+**sftp** — any SSH server (needs `otitbup[sftp]` / paramiko).
+
+```yaml
+offsite:
+  transport: sftp
+  host: backup.example.com
+  port: 22                             # default 22
+  username: otitbup
+  ssh_key_file: /etc/otitbup/id_ed25519   # or password:
+  path: /srv/otitbup                   # remote directory
+```
+
+**s3** — AWS S3 or any S3-compatible store (MinIO, Backblaze B2, Wasabi,
+Ceph RGW), signed with SigV4 over the standard library (no boto3).
+
+```yaml
+offsite:
+  transport: s3
+  bucket: ot-backups                   # required
+  prefix: otitbup/                     # object-name prefix
+  region: eu-central-1                 # default us-east-1
+  endpoint: https://s3.eu-central-1.amazonaws.com   # default:
+                                       # https://s3.<region>.amazonaws.com
+  access_key: AKIA...                  # or env OTITBUP_OFFSITE_S3_KEY
+  secret_key: ...                      # or secret_key_file:, or env
+                                       # OTITBUP_OFFSITE_S3_SECRET
+  verify_tls: true                     # false for a self-signed endpoint
+```
+
+Commands:
+
+- `otitbup offsite genkey` — print a new Fernet key (store it as `key_file`
+  and keep it off the remote).
+- `otitbup offsite push` — build, encrypt and upload a snapshot, named
+  `otitbup-YYYYmmdd-HHMMSS.tar.gz.enc`.
+- `otitbup offsite list` — list the snapshots on the remote.
+- `otitbup offsite pull [--name N] [--out DIR]` — download, decrypt and
+  extract a snapshot (default: newest) into `DIR`, which then holds
+  `data/`, `blobs/` and `runstore.db`.
+- `otitbup offsite restore DEVICE [--name N] [--commit H] [--out DIR]` —
+  pull a snapshot and produce a hash-verified restore bundle for one device
+  straight from the offsite copy, with **no device writes**. Uses
+  `encryption.blob_key` (if configured) to decrypt offloaded blobs during
+  the restore.
+
+**Security model.** The remote holds **ciphertext only** — losing the
+remote credentials exposes no configuration; only the appliance-held
+offsite key can decrypt, and a wrong key fails loudly. Extraction is
+path-traversal-safe (any member that would escape the target directory is
+refused). This is distinct from `export` (see [strategy](#strategy)),
+which writes a *plaintext* local tarball for removable/offline media:
+offsite is **encrypted and remote**, and can restore a device directly
+from the remote copy.
+
 ## logging
 
 Configured via `logsetup.configure` right after the config loads.
@@ -601,10 +688,14 @@ logged, never fatal to the backup. Environment passed to the hook:
 
 ## anomaly
 
-Statistical anomaly detection over run history: slow-backup outliers
-(duration z-score) and change storms (a spike in the change rate). Runs
-automatically after each backup — emitting an `anomaly.detected` event and
-alert — and on demand via `otitbup anomalies`.
+Statistical anomaly detection over run history. Four detectors: **slow
+backup** (a single run whose duration is a z-score outlier), **change
+storm** (a spike in the change rate), **flapping** (a device oscillating
+between success and failure — intermittent, caught by neither the failure
+nor recovery alert), and **slow trend** (a gradual, sustained slowdown a
+single-point z-score misses). Runs automatically after each backup —
+emitting an `anomaly.detected` event and alert — and on demand via
+`otitbup anomalies`.
 
 ```yaml
 anomaly:
@@ -615,12 +706,21 @@ anomaly:
   change_window: 5       # recent-run window for change storms
   change_recent: 0.8     # recent change-rate that trips
   change_baseline: 0.2   # max long-run change-rate for it to fire
+  flap_window: 6         # recent-run window for flapping
+  flap_transitions: 3    # ok/fail transitions in that window that trip it
+  trend_window: 5        # recent-run window for the slow-trend average
+  trend_ratio: 2.0       # recent/baseline mean-duration multiplier that trips
   history: 50            # runs to load per device
 ```
 
 A change storm fires only when the recent change-rate exceeds
 `change_recent` **and** the long-run baseline stays below
 `change_baseline` (i.e. a genuine spike, not a chronically churny device).
+Flapping fires when the last `flap_window` runs contain at least
+`flap_transitions` success↔failure transitions (and at least one of each).
+Slow trend fires when the mean duration over the last `trend_window` runs
+is at least `trend_ratio`× the older baseline mean — a creep no single
+z-score would catch.
 
 ## housekeeping
 
