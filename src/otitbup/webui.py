@@ -36,9 +36,18 @@ _HISTORY_LINE = re.compile(r"^(\w+)\s+(\S+ \S+ \S+)\s+(.*)$")
 _STYLE = """
 body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 74rem;
        padding: 0 1rem; color: #1a1f24; background: #fff; }
-h1 { font-size: 1.4rem; display: inline-block; margin-right: 1.5rem; }
+h1 { font-size: 1.4rem; display: inline-block; margin: 0 1.5rem 0 0;
+     vertical-align: middle; }
 h1 a { color: inherit; text-decoration: none; }
-nav { display: inline-block; } nav a { margin-right: 1rem; }
+.brand { display: inline-flex; align-items: center; gap: .5rem;
+         text-decoration: none; }
+.brand .mark { display: block; border-radius: 8px; flex: none;
+     box-shadow: 0 1px 3px rgba(15,30,60,.28); }
+.brand:hover { text-decoration: none; }
+.wm { font-size: 1.35rem; font-weight: 800; letter-spacing: -.02em;
+      color: #12202b; }
+.wm .ot { color: #0ea5a4; } .wm .it { color: #2563eb; }
+nav { display: inline-block; vertical-align: middle; } nav a { margin-right: 1rem; }
 h2 { font-size: 1.15rem; margin-top: 1.6rem; }
 h3 { font-size: 1rem; margin-top: 1.4rem; }
 table { border-collapse: collapse; width: 100%; }
@@ -106,8 +115,44 @@ button.danger { color: #b3261e; }
   .badge.never { background: #3a2222; color: #f2b8b5; }
   .muted { color: #98a2ad; }
   .tile, #filter { border-color: #2c333a; }
+  .wm { color: #eef2f6; }
+  .wm .ot { color: #2dd4bf; } .wm .it { color: #6ea8fe; }
+  .brand .mark { box-shadow: 0 1px 4px rgba(0,0,0,.45); }
 }
 """
+
+# Brand mark: a git-commit graph (three commits on a spine plus a branch) on
+# a teal→blue badge — "versioned backups" for a git-backed backup tool. The
+# same artwork is the SVG favicon. Scales cleanly from 16px to any size.
+def _logo_mark(size: int = 30) -> str:
+    return (
+        f"<svg class='mark' viewBox='0 0 32 32' width='{size}' height='{size}' "
+        "role='img' aria-label='otitbup' xmlns='http://www.w3.org/2000/svg'>"
+        "<defs><linearGradient id='obG' x1='0' y1='0' x2='1' y2='1'>"
+        "<stop offset='0' stop-color='#12b8a6'/>"
+        "<stop offset='1' stop-color='#1f63d8'/></linearGradient></defs>"
+        "<rect x='1' y='1' width='30' height='30' rx='8' fill='url(#obG)'/>"
+        "<rect x='1' y='1' width='30' height='15' rx='8' fill='#fff' "
+        "opacity='.08'/>"
+        "<g fill='none' stroke='#fff' stroke-width='2.2' stroke-linecap='round'>"
+        "<path d='M10.5 6.5 V 25.5'/>"
+        "<path d='M10.5 16 C 10.5 11 16 9.5 21.5 9.5'/></g>"
+        "<g fill='#fff'>"
+        "<circle cx='10.5' cy='6.5' r='2.8'/>"
+        "<circle cx='10.5' cy='16' r='2.8'/>"
+        "<circle cx='10.5' cy='25.5' r='2.8'/>"
+        "<circle cx='21.5' cy='9.5' r='2.8'/></g></svg>"
+    )
+
+
+_FAVICON_SVG = _logo_mark(32).encode()
+
+_BRAND = (
+    f"<a class='brand' href='/'>{_logo_mark(30)}"
+    "<span class='wm'><span class='ot'>ot</span><span class='it'>it</span>"
+    "bup</span></a>"
+)
+
 
 _FILTER_SCRIPT = """
 <script>
@@ -126,8 +171,9 @@ def _page(title: str, body: str) -> bytes:
     return (
         f"<!doctype html><html><head><meta charset='utf-8'>"
         f"<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        f"<link rel='icon' type='image/svg+xml' href='/favicon.svg'>"
         f"<title>{html.escape(title)}</title><style>{_STYLE}</style></head>"
-        f"<body><header><h1><a href='/'>otitbup</a></h1>"
+        f"<body><header><h1>{_BRAND}</h1>"
         f"<nav><a href='/'>Devices</a><a href='/dashboard'>Dashboard</a>"
         f"<a href='/health'>Health</a>"
         f"<a href='/search'>Search</a><a href='/drift'>Drift</a>"
@@ -2295,6 +2341,11 @@ class _Handler(BaseHTTPRequestHandler):
         query = parse_qs(raw[1]) if len(raw) > 1 else {}
         if path == "/healthz":
             return self._send(200, b'{"status":"ok"}\n', "application/json")
+        if path in ("/favicon.svg", "/favicon.ico"):
+            # Public (browsers fetch it before sign-in); SVG serves both.
+            return self._send(
+                200, _FAVICON_SVG, "image/svg+xml",
+                headers={"Cache-Control": "public, max-age=86400"})
         if path == "/login":
             return self._send(200, self.ui.login_page(
                 next_url=query.get("next", ["/"])[0]))

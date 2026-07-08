@@ -335,3 +335,40 @@ def test_unknown_routes_404(server):
         with pytest.raises(urllib.error.HTTPError) as excinfo:
             opener.open(base + path, timeout=5)
         assert excinfo.value.code == 404
+
+
+def test_favicon_and_brand(tmp_path):
+    import http.client
+    import threading
+    from functools import partial
+    from http.server import ThreadingHTTPServer
+
+    from otitbup.config import load_config
+    from otitbup.gitstore import GitStore
+    from otitbup.webui import WebUI, _Handler
+
+    cfg = tmp_path / "otitbup.yml"
+    cfg.write_text(
+        "data_dir: ./data\nsites: [{name: s, zones: [{name: z, "
+        "devices: [{name: d, driver: cisco_ios}]}]}]\n")
+    config = load_config(cfg)
+    store = GitStore(config.data_dir)
+    store.ensure_repo()
+    ui = WebUI(config, store)
+    # Brand + favicon link are in every page.
+    page = ui.index().decode()
+    assert "class='brand'" in page and "/favicon.svg" in page
+    assert "<span class='wm'>" in page
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), partial(_Handler, ui))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        conn = http.client.HTTPConnection(*httpd.server_address, timeout=5)
+        conn.request("GET", "/favicon.svg")     # public, no auth
+        resp = conn.getresponse()
+        body = resp.read()
+        assert resp.status == 200
+        assert resp.getheader("Content-Type") == "image/svg+xml"
+        assert b"<svg" in body and b"linearGradient" in body
+    finally:
+        httpd.shutdown()
