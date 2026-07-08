@@ -401,7 +401,14 @@ change the whole configuration without hand-editing YAML:
 
 - *Global settings* — offsite copy (transport + URIs/paths/keys), SSO
   (trusted-header and LDAP), events (syslog/SNMP), logging, integrations
-  (NetBox, ticketing), and encryption/signing/TLS key & certificate paths.
+  (NetBox, ticketing), encryption/signing/TLS key & certificate paths, the
+  secrets backend, global retention defaults, alerts (staleness,
+  rate-limit, email, webhooks), retry/backoff, pre/post hooks, anomaly
+  thresholds, git housekeeping, config-as-code (desired) directory,
+  scheduled reports, and 3-2-1 strategy flags.
+- *Federation* — add and remove **collectors** (name, URL, token/token_file,
+  TLS verification) for the central roll-up (see
+  [SITECOLLECTOR.md](SITECOLLECTOR.md)).
 - *Inventory* — per **site**, **zone** and **device**: name, driver
   (dropdown of all installed drivers), address, schedule (interval or
   cron), credentials, maintenance window, timezone, per-zone concurrency,
@@ -414,10 +421,10 @@ written**: an edit that would produce an invalid config is refused and the
 file on disk is left untouched. The previous version is kept as
 `<config>.bak`, and the running process reloads immediately (the scheduler
 daemon picks the change up on its next tick via mtime). Editing requires the
-web process to have been started with `-c <config>`. Note that saving
-normalises the YAML file — **comments are not preserved** (install
-`ruamel.yaml` to round-trip them); the commented source is retained in the
-`.bak`. The whole page is admin-only, CSRF-protected and audited.
+web process to have been started with `-c <config>`. **Comments and key
+order are preserved** on save (writes go through `ruamel.yaml`), so a
+hand-commented, git-tracked config survives GUI edits. The whole page is
+admin-only, CSRF-protected and audited.
 
 Machine-readable: `/metrics` (Prometheus), `/api/status`, `/api/devices`,
 `/api/policy`, `/api/device/<name>` (JSON).

@@ -261,7 +261,9 @@ changes. They need `otitbup[ssh]`.
 |---|---|---|
 | `generic_ssh` | any SSH-CLI device netmiko reaches (device_type + commands) | `otitbup[ssh]` |
 | `generic_sftp` | files/directories/globs off any Linux device | `otitbup[sftp]` |
+| `generic_ftp` | files/directories/globs over FTP / FTPS (older & embedded devices) | — (stdlib) |
 | `generic_http` | config exports from web-managed devices (Basic/Digest auth) | — |
+| `generic_https` | same over forced TLS (or set `options.https: true` on any HTTP driver) | — |
 | `generic_file` | watch-folder ingest of anything exported by hand | — |
 | `generic_opcua` / `generic_enip` / `generic_dnp3` | protocol-level identity + fingerprint | see above |
 
@@ -383,6 +385,51 @@ any PEM cert/key) — see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ## Tests
 
+The suite is **~490 tests** across ~50 files, all standard-library
+`pytest` — no network, no real devices, no external services. Drivers are
+exercised against in-process fakes (local HTTP/FTP servers, a fake
+paramiko/SFTP, a local DNP3 outstation, monkeypatched netmiko), so the
+whole thing runs offline in about a minute and a half.
+
 ```bash
-pytest
+pip install -e ".[dev]"     # pytest + ruff (+ cryptography for crypto tests)
+pytest                      # run everything
+pytest -q                   # quiet
+pytest tests/test_offsite.py            # one file
+pytest -k "anomaly or federation"       # by keyword
+pytest -x --ff                          # stop on first failure, failed-first
 ```
+
+What's covered, beyond per-driver collection:
+
+- **Backup engine** — scheduling, cron and interval schedules, maintenance
+  windows and timezones, per-zone concurrency, retries, dry-run/`test`,
+  hooks, recovery and staleness alerting, the file lock.
+- **Storage & integrity** — git store, content-addressed blob store (incl.
+  encryption at rest), manifests and `verify`, retention/pruning, restore
+  bundles and hash verification, the portable export and the encrypted
+  **offsite** copy (file transport end-to-end, path-traversal guard, and
+  the S3 SigV4 signer checked against AWS's published reference vector).
+- **Security** — PBKDF2 auth, roles and RBAC scopes, API tokens and the
+  scoped write API, cookie sessions + CSRF, the tamper-evident audit-log
+  hash chain, and signed-commit verification (skipped where `ssh-keygen`
+  is absent).
+- **Web UI** — every page renders, read/write actions, the SSE event
+  stream, the in-app Markdown doc viewer (with XSS/`javascript:` guards),
+  and the **admin config editor** (validated read-modify-write, comment
+  preservation, per-site/zone/device edits, federation collectors).
+- **Anomaly detection, reports** (HTML/CSV/PDF/DOCX + signing), **policy**
+  checks, **NetBox** reconciliation, discovery, **federation** roll-up,
+  config-as-code drift, and the SNMP/syslog event sinks.
+- **Config & migrations** — config validation, the run-store schema
+  migrations (including a v1→current upgrade preserving data).
+
+Linting is enforced with **ruff**:
+
+```bash
+ruff check src tests
+```
+
+CI (GitHub Actions, `.github/workflows/ci.yml`) runs ruff, the test suite
+on Python 3.11–3.13, and an sdist/wheel build that smoke-tests the
+installed console script — see the *CI/CD* section above.
