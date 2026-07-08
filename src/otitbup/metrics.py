@@ -45,6 +45,14 @@ def _collect(config: AppConfig, store: GitStore, runstore: RunStore,
                 else now - status.last_success
             ),
         })
+    integrity = None
+    try:
+        import json
+        meta = runstore.get_meta("integrity")
+        if meta:
+            integrity = json.loads(meta["value"])
+    except Exception:
+        integrity = None
     return {
         "generated_at": now,
         "totals": {
@@ -55,6 +63,7 @@ def _collect(config: AppConfig, store: GitStore, runstore: RunStore,
             "failing": failing,
             "blob_bytes": blobstore.total_size() if blobstore else 0,
         },
+        "integrity": integrity,
         "devices": per_device,
     }
 
@@ -90,6 +99,17 @@ def metrics_text(config, store, runstore, blobstore=None, now=None) -> str:
         "# HELP otitbup_device_consecutive_failures Consecutive failed backups.",
         "# TYPE otitbup_device_consecutive_failures gauge",
     ]
+    integrity = data.get("integrity")
+    if integrity is not None:
+        lines += [
+            "# HELP otitbup_integrity_ok Last integrity scrub passed (1) or failed (0).",
+            "# TYPE otitbup_integrity_ok gauge",
+            f"otitbup_integrity_ok {1 if integrity.get('ok') else 0}",
+            "# HELP otitbup_integrity_last_check_timestamp_seconds Last integrity scrub (unix).",
+            "# TYPE otitbup_integrity_last_check_timestamp_seconds gauge",
+            f"otitbup_integrity_last_check_timestamp_seconds "
+            f"{integrity.get('at', 0):.0f}",
+        ]
     for dev in data["devices"]:
         labels = (
             f'device="{_esc(dev["device"])}",site="{_esc(dev["site"])}",'

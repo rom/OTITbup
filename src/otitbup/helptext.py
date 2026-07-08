@@ -267,6 +267,24 @@ failing the whole roll-up. Exits non-zero if any collector is unreachable.
 
 See also: status, token, serve.
 """),
+    _c("integrity", "Health & compliance",
+       "full integrity scrub: verify + git fsck (+ signatures)", """
+`otitbup integrity [--all-commits] [--no-fsck] [--signatures] [--alert]`
+runs a complete integrity scrub in one pass: **content** (`verify` re-hashes
+every artifact against its manifest and checks offloaded blobs),
+**repository** (`git fsck` detects missing/broken git objects — silent
+corruption), and optionally **provenance** (`--signatures` re-checks that
+signed commits still verify). Backups rot silently; this is the catch-all
+that proves they haven't.
+
+With `--alert` it behaves exactly like the daemon's scheduled scrub: it
+stores the result (shown on the Health page and in `/metrics` as
+`otitbup_integrity_ok`), emits an `integrity.ok`/`integrity.error` event,
+and alerts on failure. Schedule it from the daemon with
+`integrity.interval_days`. Exits non-zero if any problem is found.
+
+See also: verify, verify-audit, rehearse.
+"""),
     _c("verify", "Health & compliance",
        "re-hash stored backups against their manifests", """
 `otitbup verify [--all-commits]` re-hashes every stored artifact against

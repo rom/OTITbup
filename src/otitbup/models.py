@@ -101,6 +101,7 @@ class AppConfig:
     offsite: dict[str, Any] = field(default_factory=dict)
     capture: dict[str, Any] = field(default_factory=dict)
     integrity: dict[str, Any] = field(default_factory=dict)
+    rehearsal: dict[str, Any] = field(default_factory=dict)
 
     def all_devices(self) -> list[Device]:
         return [d for s in self.sites for z in s.zones for d in z.devices]

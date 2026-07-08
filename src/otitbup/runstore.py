@@ -69,6 +69,11 @@ _MIGRATIONS: list[str] = [
         scope TEXT PRIMARY KEY, reason TEXT, set_by TEXT,
         set_at REAL NOT NULL);
     """,
+    # v7 — small key/value store (e.g. last integrity-check result).
+    """
+    CREATE TABLE IF NOT EXISTS meta (
+        key TEXT PRIMARY KEY, value TEXT, updated_at REAL NOT NULL);
+    """,
 ]
 
 SCHEMA_VERSION = len(_MIGRATIONS)
@@ -260,6 +265,22 @@ class RunStore:
             )
         return False
 
+
+    # ------------------------------------------------------ meta k/v
+
+    def set_meta(self, key: str, value: str, at: float) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO meta (key, value, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, "
+                "updated_at=excluded.updated_at",
+                (key, value, at))
+
+    def get_meta(self, key: str) -> dict | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM meta WHERE key = ?", (key,)).fetchone()
+        return dict(row) if row else None
 
     # --------------------------------------------------- legal holds
 

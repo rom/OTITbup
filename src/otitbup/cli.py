@@ -219,6 +219,22 @@ def main(argv: list[str] | None = None) -> int:
         help="verify the whole history (default: latest per device)",
     )
 
+    p_integrity = sub.add_parser(
+        "integrity",
+        help="full integrity scrub: verify + git fsck (+ signatures)",
+    )
+    p_integrity.add_argument("--all-commits", action="store_true")
+    p_integrity.add_argument(
+        "--no-fsck", action="store_true", help="skip git fsck")
+    p_integrity.add_argument(
+        "--signatures", action="store_true",
+        help="also verify signed-commit signatures",
+    )
+    p_integrity.add_argument(
+        "--alert", action="store_true",
+        help="emit events and alert on failure (as the daemon does)",
+    )
+
     sub.add_parser(
         "status", help="show per-device backup health from the run store"
     )
@@ -885,6 +901,37 @@ def main(argv: list[str] | None = None) -> int:
                if args.all_commits else "")
         )
         return 0 if report.ok else 1
+
+    if args.command == "integrity":
+        import time as _time
+
+        from . import integrity as integrity_mod
+        from .runner import default_blobstore
+        from .runstore import default_runstore
+        store = GitStore(config.data_dir)
+        store.ensure_repo()
+        blobstore = default_blobstore(config)
+        if args.alert:
+            result = integrity_mod.run_scheduled(
+                config, store, blobstore, default_runstore(config),
+                events, AlertManager(
+                    config.alerts,
+                    state_path=Path(config.data_dir).parent
+                    / "alert-state.json"),
+                _time.time(), all_commits=args.all_commits)
+        else:
+            result = integrity_mod.check(
+                config, store, blobstore=blobstore,
+                all_commits=args.all_commits, do_fsck=not args.no_fsck,
+                do_signatures=args.signatures)
+        for problem in result.content_problems:
+            print(f"CONTENT  {problem}")
+        for problem in result.repo_problems:
+            print(f"REPO     {problem}")
+        for problem in result.signature_problems:
+            print(f"SIG      {problem}")
+        print("\n" + result.summary())
+        return 0 if result.ok else 1
 
     if args.command == "status":
         import time

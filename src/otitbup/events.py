@@ -43,6 +43,8 @@ CONFIG_READ = "config.read"
 CONFIG_RELOAD = "config.reload"
 CHANGE_UNEXPECTED = "change.unexpected"
 ANOMALY = "anomaly.detected"
+INTEGRITY_OK = "integrity.ok"
+INTEGRITY_ERROR = "integrity.error"
 LOGIN = "auth.login"
 LOGOUT = "auth.logout"
 USER_CREATE = "user.create"
@@ -57,11 +59,13 @@ _EVENT_IDS: dict[str, int] = {
     LOGIN: 10, LOGOUT: 11,
     USER_CREATE: 12, USER_DELETE: 13, USER_PASSWD: 14,
     CHANGE_UNEXPECTED: 15, ANOMALY: 16,
+    INTEGRITY_OK: 17, INTEGRITY_ERROR: 18,
 }
 _DEFAULT_SEVERITY = {
     BACKUP_ERROR: "error",
     CHANGE_UNEXPECTED: "warning",
     ANOMALY: "warning",
+    INTEGRITY_ERROR: "error",
     USER_CREATE: "notice", USER_DELETE: "notice", USER_PASSWD: "notice",
 }
 _SYSLOG_LEVEL = {

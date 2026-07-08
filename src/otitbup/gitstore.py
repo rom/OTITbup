@@ -330,6 +330,24 @@ class GitStore:
                 problems.append(f"{name}: sha256 mismatch")
         return problems
 
+    def fsck(self) -> list[str]:
+        """Run `git fsck` to detect repository-level corruption (bad or
+        missing objects, broken links). Returns a list of problem lines
+        (empty = healthy). Dangling objects are normal and ignored."""
+        proc = subprocess.run(
+            ["git", "fsck", "--full", "--no-progress", "--no-dangling"],
+            cwd=self.root, capture_output=True, text=True,
+        )
+        problems = []
+        for line in (proc.stdout + proc.stderr).splitlines():
+            line = line.strip()
+            if not line or line.startswith(("Checking", "dangling", "notice:")):
+                continue
+            problems.append(line)
+        if proc.returncode != 0 and not problems:
+            problems.append(f"git fsck exited {proc.returncode}")
+        return problems
+
     def gc(self, aggressive: bool = False) -> str:
         """Repack and prune the repository to keep it small. Safe to run
         while the repo is idle; returns git's output."""
