@@ -299,6 +299,14 @@ PROFILES: dict[str, dict[str, Any]] = {
         "commands": ["show running-config", "show version"],
         "scrub": [r"[Uu]ptime"],
     },
+    "aruba_osswitch": {
+        # Aruba/HPE OS-Switch (2530/2540/2930 ProVision-derived) — the
+        # ArubaOS-Switch CLI, distinct from AOS-CX above.
+        "description": "Aruba/HPE OS-Switch (ArubaOS-Switch) switches",
+        "device_type": "aruba_osswitch",
+        "commands": ["show running-config", "show version"],
+        "scrub": _IOS_SCRUB + [r"[Uu]ptime"],
+    },
     "huawei_vrp": {
         "description": "Huawei VRP switches/routers",
         "device_type": "huawei",
@@ -365,6 +373,34 @@ PROFILES: dict[str, dict[str, Any]] = {
         "device_type": "generic",
         "commands": ["system diagnostics show config"],
         "scrub": [r"[Uu]ptime"],
+    },
+    "stormshield": {
+        # Stormshield SNS network security appliances (used in OT DMZ /
+        # perimeter roles). The serverd CLI prints the config sections.
+        "description": "Stormshield SNS firewalls (CLI)",
+        "device_type": "generic",
+        "commands": ["config"],
+        "scrub": [r"[Uu]ptime", r"[Dd]ate", r"[Tt]ime"],
+    },
+    "phoenix_mguard": {
+        # Phoenix Contact mGuard industrial security appliances
+        # (FL/TC/RS mGuard): firewall/VPN/router boxes with a Linux-style
+        # shell. The full profile lives in gaiconfig-style files; adjust
+        # the export command to your firmware and override if needed.
+        "description": "Phoenix Contact mGuard security appliances (CLI) — "
+                       "verify the export command for your firmware",
+        "device_type": "generic",
+        "commands": ["gaiconfig --get-all", "version"],
+        "scrub": [r"[Uu]ptime"],
+    },
+    "nokia_sros": {
+        # Nokia (Alcatel-Lucent) 7705 SAR / 7750 SR routers seen in
+        # utility WAN and teleprotection networks.
+        "description": "Nokia/Alcatel-Lucent SR OS routers (7705 SAR, "
+                       "7750 SR)",
+        "device_type": "nokia_sros",
+        "commands": ["admin display-config", "show version"],
+        "scrub": [r"[Uu]ptime", r"# Finished", r"# Generated"],
     },
     # ---------------------------------------------- More industrial switches
     "phoenix_fl_switch": {
