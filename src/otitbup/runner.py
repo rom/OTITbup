@@ -59,6 +59,7 @@ class BackupResult:
     commit: str | None = None
     message: str = ""
     expected: bool | None = None   # for a change: was it during maintenance?
+    size_bytes: int | None = None  # total captured bytes (integrity signal)
 
 
 class Runner:
@@ -250,6 +251,7 @@ class Runner:
             commit_hash=result.commit,
             message=result.message,
             expected=result.expected,
+            size_bytes=result.size_bytes,
             ))
             self._check_anomalies(device)
         return result
@@ -336,11 +338,14 @@ class Runner:
                     )
                 secret = self.secrets.get(device.credentials)
             artifacts = driver.collect(device, secret)
+            total_bytes = sum(len(a.data) for a in artifacts)
+            self._check_capture_quality(device, artifacts, total_bytes)
             if self.dry_run:
                 return BackupResult(
                     device=device.qualified_name, ok=True, changed=False,
-                    message=f"dry run OK: {len(artifacts)} artifact(s) "
-                            "collected (not committed)",
+                    size_bytes=total_bytes,
+                    message=f"dry run OK: {len(artifacts)} artifact(s), "
+                            f"{total_bytes} bytes (not committed)",
                 )
             threshold = self.config.retention_for(device).get(
                 "large_file_threshold", 0
@@ -372,9 +377,34 @@ class Runner:
                 commit=commit,
                 message="changed" if commit else "no change",
                 expected=expected,
+                size_bytes=total_bytes,
             )
         except Exception as exc:
             log.error("%s: %s", device.qualified_name, exc)
             return BackupResult(
                 device=device.qualified_name, ok=False, message=str(exc)
             )
+
+    def _check_capture_quality(self, device, artifacts, total_bytes):
+        """Reject a capture that looks truncated or wrong BEFORE it enters the
+        archive: no artifacts, below a minimum size, or missing required
+        content. A backup silently committing a login page or a half-file is
+        the classic silent-corruption failure mode."""
+        import re
+        cfg = self.config.capture or {}
+        opts = device.options
+        if not artifacts:
+            raise RuntimeError("capture produced no artifacts (empty response)")
+        min_bytes = int(opts.get("min_bytes", cfg.get("min_bytes", 0)) or 0)
+        if min_bytes and total_bytes < min_bytes:
+            raise RuntimeError(
+                f"capture too small: {total_bytes} < min_bytes {min_bytes} "
+                "(likely truncated or an error page)")
+        expect = opts.get("expect_match") or cfg.get("expect_match")
+        if expect:
+            blob = b"\n".join(a.data for a in artifacts)
+            text = blob.decode("utf-8", errors="replace")
+            if not re.search(expect, text):
+                raise RuntimeError(
+                    f"capture failed content check: /{expect}/ not found "
+                    "(wrong page or incomplete config?)")

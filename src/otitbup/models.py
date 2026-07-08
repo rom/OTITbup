@@ -99,6 +99,8 @@ class AppConfig:
     desired: dict[str, Any] = field(default_factory=dict)
     anomaly: dict[str, Any] = field(default_factory=dict)
     offsite: dict[str, Any] = field(default_factory=dict)
+    capture: dict[str, Any] = field(default_factory=dict)
+    integrity: dict[str, Any] = field(default_factory=dict)
 
     def all_devices(self) -> list[Device]:
         return [d for s in self.sites for z in s.zones for d in z.devices]

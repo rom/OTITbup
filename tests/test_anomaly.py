@@ -1,9 +1,9 @@
 from otitbup import anomaly
 
 
-def _run(started, dur, ok=True, changed=False):
+def _run(started, dur, ok=True, changed=False, size_bytes=None):
     return {"started_at": started, "finished_at": started + dur,
-            "ok": ok, "changed": changed}
+            "ok": ok, "changed": changed, "size_bytes": size_bytes}
 
 
 def test_no_anomaly_on_steady_history():
@@ -76,6 +76,19 @@ def test_slow_trend_flagged():
 def test_no_slow_trend_when_stable():
     runs = [_run(2000 - i * 100, 2.0) for i in range(20)]
     assert not any(a.kind == "slow_trend"
+                   for a in anomaly.analyze("s/z/d", runs))
+
+
+def test_size_drop_flagged():
+    # Latest capture is 5% of the trailing median — likely truncated.
+    runs = [_run(2000, 2.0, size_bytes=500)]
+    runs += [_run(1900 - i * 100, 2.0, size_bytes=10000) for i in range(12)]
+    assert any(a.kind == "size_drop" for a in anomaly.analyze("s/z/d", runs))
+
+
+def test_no_size_drop_when_stable():
+    runs = [_run(2000 - i * 100, 2.0, size_bytes=10000) for i in range(14)]
+    assert not any(a.kind == "size_drop"
                    for a in anomaly.analyze("s/z/d", runs))
 
 

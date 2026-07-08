@@ -157,4 +157,6 @@ def load_config(path: str | Path) -> AppConfig:
         anomaly=raw.get("anomaly") or {},
         offsite=raw.get("offsite") or {},
         appliance_id=str(raw.get("appliance_id") or ""),
+        capture=raw.get("capture") or {},
+        integrity=raw.get("integrity") or {},
     )
