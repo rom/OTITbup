@@ -13,7 +13,7 @@ from typing import Any
 import yaml
 
 from .models import AppConfig, Device, Site, Zone
-from .windows import parse_interval, parse_window
+from .windows import parse_window, validate_schedule
 
 
 class ConfigError(Exception):
@@ -83,6 +83,7 @@ def load_config(path: str | Path) -> AppConfig:
                     zone_raw.get("retention"),
                     f"zone {site_name}/{zone_name}",
                 ),
+                timezone=zone_raw.get("timezone") or site_raw.get("timezone"),
             )
             if zone.maintenance_window:
                 # Validate early: a bad window should fail at load time,
@@ -108,8 +109,9 @@ def load_config(path: str | Path) -> AppConfig:
                     retention=_parse_retention(
                         dev_raw.get("retention"), f"device {dev_name}"
                     ),
+                    hooks=dev_raw.get("hooks") or {},
                 )
-                parse_interval(device.schedule)
+                validate_schedule(device.schedule)
                 if device.qualified_name in seen_devices:
                     raise ConfigError(
                         f"duplicate device: {device.qualified_name}"
@@ -135,4 +137,11 @@ def load_config(path: str | Path) -> AppConfig:
         tickets=raw.get("tickets") or {},
         netbox=raw.get("netbox") or {},
         strategy=raw.get("strategy") or {},
+        logging=raw.get("logging") or {},
+        hooks=raw.get("hooks") or {},
+        retry=raw.get("retry") or {},
+        api=raw.get("api") or {},
+        ldap=raw.get("ldap") or {},
+        federation=raw.get("federation") or {},
+        housekeeping=raw.get("housekeeping") or {},
     )

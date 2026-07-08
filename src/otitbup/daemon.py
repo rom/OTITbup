@@ -85,16 +85,29 @@ class Daemon:
         self.state_path.write_text(json.dumps(self.state, indent=2))
 
     def _due(self, now: datetime) -> list:
+        from .windows import cron_matches, is_cron
         due = []
         for device in self.config.all_devices():
             zone = self.config.find_zone(device)
-            if not in_window(zone.maintenance_window, now):
+            if not in_window(zone.maintenance_window, now, tz=zone.timezone):
                 continue
             last = self.state.get(device.qualified_name)
-            if last is None:
+            if is_cron(device.schedule):
+                # Cron fires on the matching minute; the poll interval is
+                # coarse, so fire at most once per matching minute.
+                if not cron_matches(device.schedule, now):
+                    continue
+                minute_key = now.strftime("%Y%m%d%H%M")
+                if last == "cron:" + minute_key:
+                    continue
+                self.state[device.qualified_name] = "cron:" + minute_key
                 due.append(device)
                 continue
-            next_run = datetime.fromisoformat(last) + parse_interval(device.schedule)
+            if last is None or last.startswith("cron:"):
+                due.append(device)
+                continue
+            next_run = datetime.fromisoformat(last) + parse_interval(
+                device.schedule)
             if now >= next_run:
                 due.append(device)
         return due

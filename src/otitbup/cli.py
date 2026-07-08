@@ -342,6 +342,8 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    # Re-configure from the config file's `logging` block once loaded
+    # (below); this basicConfig covers pre-config commands.
 
     if args.command == "drivers":
         from .drivers import driver_descriptions
@@ -431,6 +433,9 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as exc:
         print(f"config error: {exc}", file=sys.stderr)
         return 2
+
+    from .logsetup import configure as _configure_logging
+    _configure_logging(config.logging, verbose=args.verbose)
 
     # Emit config.read + process.start once the config is available (skip
     # for read-only introspection commands that don't act on devices).

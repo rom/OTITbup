@@ -272,6 +272,24 @@ class GitStore:
                 problems.append(f"{name}: sha256 mismatch")
         return problems
 
+    def gc(self, aggressive: bool = False) -> str:
+        """Repack and prune the repository to keep it small. Safe to run
+        while the repo is idle; returns git's output."""
+        args = ["gc", "--prune=now"]
+        if aggressive:
+            args.append("--aggressive")
+        return self._git(*args, check=False)
+
+    def repo_size_bytes(self) -> int:
+        total = 0
+        for path in self.root.rglob("*"):
+            if path.is_file():
+                try:
+                    total += path.stat().st_size
+                except OSError:
+                    pass
+        return total
+
     def push(self, remote: str, branch: str = "main") -> None:
         if not [r for r in self._git("remote", check=False).split() if r == "origin"]:
             self._git("remote", "add", "origin", remote)
