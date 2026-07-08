@@ -85,6 +85,12 @@ otitbup search "vlan 30"                # search across the latest config of all
 otitbup baseline set plc-01             # approve current config as the golden baseline
 otitbup baseline drift                  # devices that have drifted from baseline
 otitbup reconcile 10.20.0.0/24          # inventory vs. network (coverage gaps)
+otitbup report --format pdf --sign      # signed compliance report (html/csv/pdf/docx)
+otitbup report-verify report.pdf        # verify a signed report
+otitbup export --out backup.tar.gz      # portable offsite/offline archive (3-2-1)
+otitbup strategy                        # evaluate 3-2-1 / 3-2-1-1-0 posture
+otitbup netbox reconcile                # inventory vs. NetBox (or: netbox import)
+otitbup discover 10.20.0.0/24 --enrich  # scan + probe device identity
 ```
 
 See [docs/USAGE.md](docs/USAGE.md) for a full, task-oriented walkthrough
@@ -152,7 +158,12 @@ per device; see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 |---|---|---|---|---|
 | Inductive Automation | Ignition gateway | `ignition_gateway` | **full `.gwbk` gateway backup** over HTTP | — (stdlib) |
 | Siemens | WinCC / PCS7 project | `wincc` | **project tree** via SFTP | `otitbup[sftp]` |
+| Siemens | WinCC OA (PVSS) project | `wincc_oa` | **project tree** via SFTP | `otitbup[sftp]` |
 | Rockwell | FactoryTalk View project | `factorytalk_view` | **project tree** via SFTP | `otitbup[sftp]` |
+| AVEVA / Wonderware | InTouch / System Platform | `wonderware` | **project tree** via SFTP | `otitbup[sftp]` |
+| AVEVA | Citect / Plant SCADA | `citect` | **project tree** via SFTP | `otitbup[sftp]` |
+| GE / Emerson | iFIX | `ifix` | **project tree** via SFTP | `otitbup[sftp]` |
+| PTC / Kepware | KEPServerEX | `kepware` | **project file** via SFTP | `otitbup[sftp]` |
 | Any SCADA | project directory | `generic_scada` | **project tree** via SFTP | `otitbup[sftp]` |
 | Substation IEDs | SIPROTEC, ABB Relion, GE Multilin, ... | `iec61850_mms` | MMS Identify (vendor/model/rev) + fingerprint — *experimental* | — (stdlib) |
 
@@ -164,22 +175,46 @@ per device; see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 | SEL | RTAC 3530/3505, protection relays | `sel_terminal` | ID / STA / SHO terminal output (settings) | `otitbup[ssh]` |
 | Siemens | SICAM A8000 (CP-8000/8021/8022/8050) | `siemens_sicam` | web-server endpoints (diagnostics/parameters) | — (stdlib) |
 | ABB | RTU520, RTU540, RTU560 (RTU500 series) | `abb_rtu520` / `abb_rtu560` | web-server endpoints (status/config downloads) | — (stdlib) |
+| GE / Emerson | D20 / D25 | `ge_d20` | CLI config; also DNP3/IEC-104 | `otitbup[ssh]` |
+| NovaTech | Orion / OrionLX | `novatech_orion` | Linux CLI; also DNP3/IEC-61850 | `otitbup[ssh]` |
+| Eaton / Cooper | SMP gateway | `smp_gateway` | CLI; also DNP3/IEC-61850 | `otitbup[ssh]` |
+| Survalent | SmartVU / RTU | `survalent_rtu` | CLI; also DNP3 | `otitbup[ssh]` |
+| Netcontrol | Netcon RTUs | `netcontrol_rtu` | SSH CLI; also DNP3/IEC-104/61850 | `otitbup[ssh]` |
 
 ### Network equipment
 
 | Vendor | Switches | Routers | Firewalls |
 |---|---|---|---|
-| Cisco | `cisco_ios` | `cisco_ios` | `cisco_asa` |
+| Cisco | `cisco_ios`, `cisco_nxos` (Nexus), `cisco_sg` (SB) | `cisco_ios` | `cisco_asa` |
+| Juniper | `juniper_junos` | `juniper_junos` | `juniper_srx` |
+| Arista | `arista_eos` | — | — |
+| HPE / Aruba | `hpe_comware`, `hpe_procurve`, `aruba_cx` | — | — |
+| Huawei | `huawei_vrp` | `huawei_vrp` | — |
+| MikroTik | `mikrotik_routeros` | `mikrotik_routeros` | — |
+| Extreme / Dell / Zyxel | `extreme_exos`, `dell_os10`, `dell_powerconnect`, `zyxel` | — | — |
+| Fortinet / Palo Alto / Check Point / Sophos | — | — | `fortinet_fortigate`, `paloalto_panos`, `checkpoint_gaia`, `sophos_xg` |
+| VyOS | — | `vyos` | `vyos` |
 | Siemens SCALANCE | `siemens_scalance` | `siemens_scalance` (M-series 4G/5G) | `siemens_scalance` (S/SC) |
 | Siemens RUGGEDCOM | `ruggedcom_ros` | `ruggedcom_rox` | `ruggedcom_rox` |
-| Hirschmann | `hirschmann_hios`, `hirschmann_classic` | — | `hirschmann_eagle` |
-| Belden | `belden_switch` (Hirschmann family) | — | `hirschmann_eagle` |
+| Hirschmann / Belden | `hirschmann_hios`, `hirschmann_classic`, `belden_switch` | — | `hirschmann_eagle` |
 | Moxa | `moxa_switch` (EDS) | `moxa_edr` | `moxa_edr` |
-| Moxa NPort (serial-to-ethernet) | — | `moxa_nport` (HTTP export) | — |
 | Westermo | `westermo_weos` | `westermo_weos` (RedFox), `westermo_merlin` (4G/5G) | `westermo_weos` |
 | Advantech | `advantech_switch` (EKI) | `advantech_router` (ICR) | — |
+| Phoenix / Red Lion / Korenix / Antaira / Planet | `phoenix_fl_switch`, `redlion_nt`, `korenix`, `antaira`, `planet_switch` | — | — |
 | Netgear | `netgear_switch` (M4300/M4250/ProSAFE) | web-managed → `generic_http` | web-managed → `generic_http` |
-| Omron | `omron_switch` | — (no router/firewall line) | — |
+| Teltonika | — | `teltonika` (cellular) | — |
+| Omron | `omron_switch` | — | — |
+
+### Serial-to-ethernet & protocol gateways
+
+| Vendor | Driver | How |
+|---|---|---|
+| Moxa NPort (serial-to-eth) | `moxa_nport` | HTTP config export |
+| Lantronix / Digi / Perle / Sena (serial servers) | `lantronix`, `digi_connect`, `perle_iolan`, `sena_serial` (CLI); `lantronix_web`, `digi_web` (web) | SSH CLI or HTTP export |
+| Advantech EKI serial | `advantech_eki_serial` | HTTP export |
+| Moxa MGate / HMS Anybus / ProSoft / Red Lion (protocol gateways) | `moxa_mgate`, `hms_anybus`, `prosoft_gateway`, `redlion_gateway` | HTTP export |
+| HMS eWON Flexy/Cosy (remote-access gateway) | `ewon_flexy` | HTTP export |
+| Any web-managed gateway | `generic_gateway` | HTTP export |
 
 All SSH profiles capture full configurations with volatile-line
 scrubbing (uptime, "last change" stamps) so diffs only show real
@@ -239,7 +274,18 @@ page; a retention page; the driver catalog; and an **audit log**
 - **Read/write web UI** — signed-in operators can start a backup, verify
   it, add notes, set baselines and generate reports from the browser;
   admins manage users and re-read the config. Cookie sessions with CSRF,
-  role-based access (viewer/operator/admin), and a full audit log. Optional HTTP Basic auth
+  role-based access (viewer/operator/admin), a full audit log, an online
+  **Help** page and hover **popover help**.
+- **Signed multi-format reports** — compliance reports in HTML, **CSV,
+  PDF and DOCX** (all stdlib), optionally **Ed25519-signed** for auditors
+  (`otitbup report --format pdf --sign`, verify with `report-verify`).
+- **3-2-1 / 3-2-1-1-0 strategy** — the Strategy page (and `otitbup
+  strategy`) evaluates your backup posture: 3 copies, 2 media, 1 offsite,
+  +1 offline, 0 errors — and tells you exactly what's missing. `otitbup
+  export` produces the portable offsite/offline archive.
+- **CMDB / NetBox & ticketing** — `otitbup netbox` reconciles the
+  inventory against NetBox (or imports from it); events open tickets in
+  ServiceNow, Jira, **Request Tracker (RT)** or a generic CMDB webhook. Optional HTTP Basic auth
 (`otitbup passwd`) and TLS (`otitbup certgen` for a self-signed pair, or
 any PEM cert/key) — see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 

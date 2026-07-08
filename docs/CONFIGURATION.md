@@ -376,6 +376,45 @@ tickets:
 Only the event types listed in `on` create tickets, so routine events
 don't flood the queue. Delivery failures are logged, never fatal.
 
+**Request Tracker (RT):** `backend: rt`, `url`, `queue`, and either
+`token` (RT 4.4+ REST 2.0 token) or `username`/`password`.
+
+## netbox
+
+Reconcile the inventory against NetBox (your CMDB/IPAM source of truth) or
+import devices from it. Used by `otitbup netbox reconcile|import`.
+
+```yaml
+netbox:
+  url: https://netbox.example.com
+  token: <api-token>
+  # verify_tls: true
+  # filters: { status: active, role: network }   # NetBox query params
+```
+
+`reconcile` reports devices in NetBox that otitbup does not back up
+(coverage gaps) and inventory devices absent from NetBox. `import` writes
+an inventory-shaped YAML proposal (driver guessed from platform) for
+human review — nothing is added automatically.
+
+## strategy
+
+Declares facts about your 3-2-1 / 3-2-1-1-0 posture that can't be inferred,
+for the Strategy page and `otitbup strategy`.
+
+```yaml
+strategy:
+  offsite: true            # the git remote (git.remote) is genuinely off-site
+  offline:
+    path: /mnt/usb/otitbup-export.tar.gz   # the offline/air-gapped copy
+    max_age_days: 7                        # how fresh it must be to count
+```
+
+otitbup maps the copies to: the local repo (copy 1), a git remote mirror
+(copy 2 / offsite), and a portable `otitbup export` archive (the offline
+copy). `strategy` evaluates all five conditions (3 copies, 2 media, 1
+offsite, 1 offline, 0 errors) and reports what's missing.
+
 ## Files next to the config
 
 | File | Created by | Notes |

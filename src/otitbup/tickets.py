@@ -5,13 +5,14 @@ tickets in ServiceNow, Jira, or any generic webhook — stdlib HTTP, no SDK.
 Configured under `tickets`:
 
     tickets:
-      backend: servicenow        # servicenow | jira | generic
+      backend: servicenow        # servicenow | jira | rt | generic
       url: https://example.service-now.com
-      username: svc-otitbup      # basic auth (servicenow/generic)
+      username: svc-otitbup      # basic auth (servicenow/generic/rt)
       password: ...
       on: [backup.error, change.unexpected]   # event types that open a ticket
       # servicenow: table: incident
       # jira: project: OT, issue_type: Task, token: <PAT>, email: <email>
+      # rt: queue: OT, token: <RT-token>
 
 Delivery failures are logged, never fatal. Only the configured `on` event
 types create tickets, so routine events don't spam the queue.
@@ -47,6 +48,8 @@ class TicketManager:
                 self._servicenow(event_type, summary, detail)
             elif self.backend == "jira":
                 self._jira(event_type, summary, detail)
+            elif self.backend == "rt":
+                self._rt(event_type, summary, detail)
             else:
                 self._generic(event_type, summary, detail)
         except (urllib.error.URLError, OSError, ValueError) as exc:
@@ -90,6 +93,21 @@ class TicketManager:
                 "issuetype": {"name": self.cfg.get("issue_type", "Task")},
             }
         }, {"Authorization": f"Basic {auth}"})
+
+    def _rt(self, event_type, summary, detail) -> None:
+        # Request Tracker REST 2.0: POST a ticket as JSON with a token.
+        url = f"{self.cfg['url'].rstrip('/')}/REST/2.0/ticket"
+        headers = {}
+        if self.cfg.get("token"):
+            headers["Authorization"] = f"token {self.cfg['token']}"
+        elif self.cfg.get("username"):
+            headers = self._basic_header()
+        self._request(url, {
+            "Queue": self.cfg.get("queue", "General"),
+            "Subject": summary,
+            "Content": detail,
+            "ContentType": "text/plain",
+        }, headers)
 
     def _generic(self, event_type, summary, detail) -> None:
         headers = {}

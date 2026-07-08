@@ -118,6 +118,27 @@ def test_activity_page_links_devices(server):
     assert store.last_commit_hash(device)[:7] in text
 
 
+def test_strategy_page(server):
+    base, _, _ = server
+    status, _, body = _get(base + "/strategy")
+    text = body.decode()
+    assert status == 200
+    assert "3-2-1" in text
+    assert "copies" in text
+
+
+def test_help_page_and_popovers(server):
+    base, _, _ = server
+    status, _, body = _get(base + "/help")
+    text = body.decode()
+    assert status == 200
+    assert "Getting started" in text
+    assert "Roles" in text
+    # Popover help markup exists on the drift page.
+    _, _, drift = _get(base + "/drift")
+    assert "class='help'" in drift.decode() or 'class="help"' in drift.decode()
+
+
 def test_drivers_page_marks_in_use(server):
     base, _, _ = server
     status, _, body = _get(base + "/drivers")
