@@ -372,3 +372,24 @@ def test_favicon_and_brand(tmp_path):
         assert b"<svg" in body and b"linearGradient" in body
     finally:
         httpd.shutdown()
+
+
+def test_device_page_on_empty_repo(tmp_path):
+    # A fresh appliance: repo initialised but no backups committed yet.
+    # Viewing a device page must not crash (git log on an empty repo).
+    from otitbup.config import load_config
+    from otitbup.gitstore import GitStore
+    from otitbup.webui import WebUI
+
+    cfg = tmp_path / "otitbup.yml"
+    cfg.write_text(
+        "data_dir: ./data\nsites: [{name: s, zones: [{name: z, "
+        "devices: [{name: sw1, driver: cisco_ios}]}]}]\n")
+    config = load_config(cfg)
+    store = GitStore(config.data_dir)
+    store.ensure_repo()                       # no commits
+    device = config.all_devices()[0]
+    assert store.last_diff(device) == ""
+    page = WebUI(config, store).device(
+        "s/z/sw1", ctx={"role": "admin", "csrf": "t"})
+    assert b"sw1" in page

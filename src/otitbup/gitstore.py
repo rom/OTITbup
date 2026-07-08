@@ -177,13 +177,16 @@ class GitStore:
         return proc.returncode == 0
 
     def last_diff(self, device: Device) -> str:
-        """Diff of the most recent commit touching this device."""
+        """Diff of the most recent commit touching this device. Empty when
+        the repository has no commits yet (a fresh appliance before its
+        first backup)."""
         last = self._git(
-            "log", "-1", "--format=%H", "--", device.path
+            "log", "-1", "--format=%H", "--", device.path, check=False,
         ).strip()
         if not last:
             return ""
-        return self._git("show", "--stat", "--patch", last, "--", device.path)
+        return self._git("show", "--stat", "--patch", last, "--", device.path,
+                         check=False)
 
     def _git_bytes(self, *args: str) -> bytes:
         proc = subprocess.run(["git", *args], cwd=self.root, capture_output=True)
