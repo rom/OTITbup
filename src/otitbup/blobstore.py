@@ -16,11 +16,30 @@ files, and a pruned blob simply reads as "expired by retention".
 """
 from __future__ import annotations
 
+import gzip
 import hashlib
 import os
 from pathlib import Path
 
 _POINTER_VERSION = b"version otitbup-blob-v1"
+
+# Prefix marking a gzip-compressed blob payload. Legacy blobs have no prefix
+# and are returned verbatim, so the format stays backward compatible.
+_COMPRESS_MAGIC = b"\x00OTBZ1\n"
+
+
+def _frame(data: bytes, compress: bool) -> bytes:
+    """Wrap plaintext for storage: gzip + magic prefix when compressing."""
+    if compress:
+        return _COMPRESS_MAGIC + gzip.compress(data)
+    return data
+
+
+def _unframe(payload: bytes) -> bytes:
+    """Reverse _frame: decompress if the payload carries the magic prefix."""
+    if payload.startswith(_COMPRESS_MAGIC):
+        return gzip.decompress(payload[len(_COMPRESS_MAGIC):])
+    return payload
 
 
 def make_pointer(sha256: str, size: int) -> bytes:
@@ -44,17 +63,17 @@ def parse_pointer(data: bytes) -> tuple[str, int] | None:
 
 
 class BlobStore:
-    def __init__(self, root: str | Path, key: str | bytes | None = None):
+    def __init__(self, root: str | Path, key: str | bytes | None = None,
+                 compress: bool = False):
         self.root = Path(root)
         # Optional encryption at rest: blobs are content-addressed by the
         # PLAINTEXT sha256 (so dedup and manifest hashes are unchanged) but
         # written to disk Fernet-encrypted. Protects large artifacts if the
-        # appliance disk/snapshot leaks.
-        self._fernet = None
-        if key:
-            from cryptography.fernet import Fernet
-            self._fernet = Fernet(key if isinstance(key, bytes)
-                                  else key.encode())
+        # appliance disk/snapshot leaks. Optional gzip compression is applied
+        # to new blobs before encryption. Both are transparent to callers and
+        # backward compatible with existing (raw / encrypted-only) blobs.
+        self.compress = compress
+        self._fernet = _make_fernet(key)
 
     def _path(self, sha256: str) -> Path:
         return self.root / sha256[:2] / sha256
@@ -64,7 +83,8 @@ class BlobStore:
         path = self._path(sha256)
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
-            stored = self._fernet.encrypt(data) if self._fernet else data
+            payload = _frame(data, self.compress)
+            stored = self._fernet.encrypt(payload) if self._fernet else payload
             tmp = path.with_suffix(".tmp")
             tmp.write_bytes(stored)
             os.replace(tmp, path)
@@ -75,7 +95,8 @@ class BlobStore:
         if not path.exists():
             raise KeyError(sha256)
         raw = path.read_bytes()
-        return self._fernet.decrypt(raw) if self._fernet else raw
+        payload = self._fernet.decrypt(raw) if self._fernet else raw
+        return _unframe(payload)
 
     def has(self, sha256: str) -> bool:
         return self._path(sha256).exists()
@@ -105,3 +126,49 @@ class BlobStore:
 
     def total_size(self) -> int:
         return sum(self.all_blobs().values())
+
+
+def _make_fernet(key: str | bytes | None):
+    if not key:
+        return None
+    from cryptography.fernet import Fernet
+    return Fernet(key if isinstance(key, bytes) else key.encode())
+
+
+def rotate_key(root: str | Path, old_key, new_key) -> tuple[int, int]:
+    """Re-encrypt every blob under `root` from `old_key` to `new_key`.
+
+    Keys may be None to mean "not encrypted": None->key encrypts a
+    plaintext store, key->None decrypts it, key->key' rotates. Blobs stay
+    content-addressed by their plaintext sha256, so names never change; only
+    the on-disk encryption layer is rewritten (compression framing inside is
+    left untouched). Each file is rewritten atomically. Returns
+    (rotated, skipped)."""
+    root = Path(root)
+    old_fernet = _make_fernet(old_key)
+    new_fernet = _make_fernet(new_key)
+    rotated = skipped = 0
+    for path in sorted(root.glob("??/*")):
+        if not path.is_file() or path.name.endswith(".tmp"):
+            continue
+        raw = path.read_bytes()
+        try:
+            payload = old_fernet.decrypt(raw) if old_fernet else raw
+        except Exception as exc:
+            raise BlobStoreError(
+                f"cannot decrypt {path.name} with the old key: {exc}"
+            ) from exc
+        # Integrity guard: the plaintext must still hash to the blob's name.
+        if hashlib.sha256(_unframe(payload)).hexdigest() != path.name:
+            skipped += 1
+            continue
+        stored = new_fernet.encrypt(payload) if new_fernet else payload
+        tmp = path.with_suffix(".rotate-tmp")
+        tmp.write_bytes(stored)
+        os.replace(tmp, path)
+        rotated += 1
+    return rotated, skipped
+
+
+class BlobStoreError(Exception):
+    pass

@@ -502,6 +502,24 @@ backend.
 See also: passwd.
 """),
 
+    _c("blobkey", "Web UI & secrets",
+       "rotate/enable/disable blob-store encryption", """
+`otitbup blobkey rotate --new-key-file KEY [--old-key-file OLD]` re-encrypts
+every large-artifact blob from the old key to a new one — key rotation for
+encryption at rest. Because blobs are content-addressed by their PLAINTEXT
+sha256, names never change; only the on-disk encryption layer is rewritten
+(each blob atomically, and its plaintext hash is re-checked as an integrity
+guard). Use `--decrypt` to remove encryption, or rotate from an unencrypted
+store by simply providing `--new-key-file`. `otitbup blobkey genkey` prints
+a fresh Fernet key.
+
+Rotate the offsite key by re-pushing (`otitbup offsite push`) with the new
+`offsite.key_file`; existing offsite snapshots stay under their old key.
+Keep a backup/escrow of every key — a lost key makes those blobs (and any
+offsite snapshot) unrecoverable.
+
+See also: integrity, offsite.
+"""),
     _c("verify-audit", "Health & compliance",
        "verify the tamper-evident audit-log chain", """
 `otitbup verify-audit` recomputes the audit log's hash chain and reports

@@ -40,7 +40,8 @@ def default_blobstore(config: AppConfig) -> BlobStore:
     key = os.environ.get("OTITBUP_BLOB_KEY") or enc.get("blob_key")
     if not key and enc.get("blob_key_file"):
         key = Path(enc["blob_key_file"]).read_text().strip()
-    return BlobStore(Path(config.data_dir).parent / "blobs", key=key)
+    return BlobStore(Path(config.data_dir).parent / "blobs", key=key,
+                     compress=bool(enc.get("compress", False)))
 
 
 def default_gitstore(config: AppConfig) -> GitStore:

@@ -105,6 +105,22 @@ def main(argv: list[str] | None = None) -> int:
     p_gc = sub.add_parser("gc", help="repack/prune the backup git repo")
     p_gc.add_argument("--aggressive", action="store_true")
 
+    p_blobkey = sub.add_parser(
+        "blobkey", help="rotate/enable/disable blob-store encryption at rest")
+    blobkey_sub = p_blobkey.add_subparsers(
+        dest="blobkey_command", required=True)
+    p_bkrot = blobkey_sub.add_parser(
+        "rotate", help="re-encrypt every blob to a new key")
+    p_bkrot.add_argument(
+        "--old-key-file",
+        help="current key file (default: the configured encryption key)")
+    p_bkrot.add_argument(
+        "--new-key-file", help="new key file ('-' or omit with --decrypt)")
+    p_bkrot.add_argument(
+        "--decrypt", action="store_true",
+        help="remove encryption (store blobs in plaintext)")
+    blobkey_sub.add_parser("genkey", help="print a new Fernet blob key")
+
     sub.add_parser(
         "verify-audit", help="verify the tamper-evident audit-log chain")
 
@@ -596,6 +612,43 @@ def main(argv: list[str] | None = None) -> int:
         store.gc(aggressive=args.aggressive)
         after = store.repo_size_bytes()
         print(f"git gc: {before / 1048576:.1f} MiB -> {after / 1048576:.1f} MiB")
+        return 0
+
+    if args.command == "blobkey":
+        import os
+
+        from .blobstore import BlobStoreError, rotate_key
+        blobs_dir = Path(config.data_dir).parent / "blobs"
+        if args.blobkey_command == "genkey":
+            from cryptography.fernet import Fernet
+            print(Fernet.generate_key().decode())
+            return 0
+        # rotate
+        enc = config.encryption or {}
+        current = (os.environ.get("OTITBUP_BLOB_KEY") or enc.get("blob_key"))
+        if not current and enc.get("blob_key_file"):
+            current = Path(enc["blob_key_file"]).read_text().strip()
+        old_key = None
+        if args.old_key_file:
+            old_key = Path(args.old_key_file).read_text().strip()
+        elif current:
+            old_key = current
+        new_key = None
+        if not args.decrypt:
+            if not args.new_key_file:
+                print("blobkey rotate: --new-key-file or --decrypt required",
+                      file=sys.stderr)
+                return 2
+            new_key = Path(args.new_key_file).read_text().strip()
+        try:
+            rotated, skipped = rotate_key(blobs_dir, old_key, new_key)
+        except BlobStoreError as exc:
+            print(f"blobkey error: {exc}", file=sys.stderr)
+            return 1
+        print(f"re-encrypted {rotated} blob(s)"
+              + (f", skipped {skipped} (hash mismatch)" if skipped else ""))
+        print("update encryption.blob_key_file in the config to the new key"
+              if new_key else "remove encryption.blob_key* from the config")
         return 0
 
     if args.command == "verify-audit":
