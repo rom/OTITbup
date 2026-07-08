@@ -46,8 +46,10 @@ def test_backup_commits_and_alerts_on_change(config_file):
     results = runner.backup_devices(config.all_devices())
     assert all(r.ok for r in results)
     assert all(r.changed for r in results)
+    # No maintenance set -> changes are classified UNEXPECTED.
     assert len(alerts.notifications) == 1
-    assert "changes detected" in alerts.notifications[0][0]
+    assert "UNEXPECTED changes" in alerts.notifications[0][0]
+    assert all(r.expected is False for r in results)
 
     # Second run, nothing changed: no commit, no alert.
     results = runner.backup_devices(config.all_devices())

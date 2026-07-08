@@ -62,6 +62,7 @@ class Daemon:
         )
         while True:
             self.run_once()
+            self._maybe_report()
             time.sleep(_POLL_SECONDS)
 
     def run_once(self) -> int:
@@ -75,3 +76,37 @@ class Daemon:
                 self.state[device.qualified_name] = now.isoformat()
             self._save_state()
         return len(due)
+
+    def _maybe_report(self) -> None:
+        """Emit a scheduled compliance report every reports.interval (e.g.
+        '7d'), delivered via the same alert channels (email/webhook)."""
+        interval = self.config.reports.get("interval")
+        if not interval:
+            return
+        now = datetime.now(timezone.utc)
+        last = self.state.get("__report__")
+        if last is not None:
+            due_at = datetime.fromisoformat(last) + parse_interval(interval)
+            if now < due_at:
+                return
+        try:
+            from .reports import compliance_report
+            from .runstore import default_runstore
+            html = compliance_report(
+                self.config, self.runner.store, default_runstore(self.config),
+                period_days=int(self.config.reports.get("period_days", 30)),
+            )
+            out = self.config.reports.get("out")
+            if out:
+                Path(out).write_text(html)
+            self.runner.alerts.notify(
+                "otitbup: scheduled compliance report",
+                "Compliance report generated"
+                + (f" at {out}" if out else "")
+                + f" ({len(self.config.all_devices())} devices).",
+            )
+            log.info("scheduled compliance report generated")
+        except Exception as exc:
+            log.warning("scheduled report failed: %s", exc)
+        self.state["__report__"] = now.isoformat()
+        self._save_state()

@@ -51,6 +51,7 @@ webui:
   #   key_file: webui-key.pem
 
 alerts:
+  stale_days: 7           # alert if no successful backup in N days (0 = off)
   webhooks: []
   # syslog:
   #   address: 10.0.0.1
@@ -59,6 +60,19 @@ alerts:
   #   smtp_host: mail.plant.local
   #   from: otitbup@plant.local
   #   to: [ot-team@example.com]
+
+policy:                   # config compliance checks (otitbup policy / UI)
+  # disable: [no-snmpv1v2]         # silence a built-in rule
+  rules: []
+  #  - id: require-ntp
+  #    description: no NTP server configured
+  #    severity: low
+  #    absent: "ntp server"        # ABSENCE is a finding; use `match` for presence
+
+reports:                  # scheduled compliance reports (from the daemon)
+  # interval: 7d                    # omit to disable scheduling
+  # period_days: 30
+  # out: compliance-report.html
 
 sites:
   - name: plant-a

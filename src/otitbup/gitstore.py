@@ -188,6 +188,63 @@ class GitStore:
             args += ["--", device.path]
         return self._git(*args, check=False)
 
+    _NOTES_REF = "refs/notes/otitbup"
+
+    def set_annotation(self, commit: str, text: str) -> None:
+        """Attach/replace a change annotation (a git note) on a commit —
+        e.g. a work-order or MOC number explaining why a config changed."""
+        self._git(
+            "notes", f"--ref={self._NOTES_REF}", "add", "-f",
+            "-m", text, commit,
+        )
+
+    def get_annotation(self, commit: str) -> str:
+        return self._git(
+            "notes", f"--ref={self._NOTES_REF}", "show", commit, check=False
+        ).strip()
+
+    def annotated_commits(self) -> set[str]:
+        """Full hashes of every commit that carries an annotation."""
+        out = self._git(
+            "notes", f"--ref={self._NOTES_REF}", "list", check=False
+        )
+        # Each line is "<note-object> <annotated-commit>".
+        return {
+            line.split()[1] for line in out.splitlines() if len(line.split()) == 2
+        }
+
+    def verify_commit(
+        self, device: Device, commit: str, blobstore=None
+    ) -> list[str]:
+        """Re-hash every artifact at `commit` against the manifest recorded
+        at backup time. Returns a list of problems (empty = intact)."""
+        problems: list[str] = []
+        manifest_path = f"{device.path}/manifest.yml"
+        try:
+            manifest = yaml.safe_load(self.read_file_at(commit, manifest_path))
+        except GitStoreError:
+            return [f"{device.qualified_name}@{commit[:8]}: manifest missing"]
+        if not isinstance(manifest, dict):
+            return [f"{device.qualified_name}@{commit[:8]}: manifest unreadable"]
+        from .blobstore import parse_pointer
+        for name, meta in manifest.items():
+            expected = meta.get("sha256") if isinstance(meta, dict) else None
+            try:
+                data = self.read_file_at(commit, f"{device.path}/{name}")
+            except GitStoreError:
+                problems.append(f"{name}: missing from commit")
+                continue
+            pointer = parse_pointer(data)
+            if pointer:
+                sha, _size = pointer
+                if blobstore is None or not blobstore.has(sha):
+                    problems.append(f"{name}: blob {sha[:8]} absent (expired?)")
+                    continue
+                data = blobstore.get(sha)
+            if expected and hashlib.sha256(data).hexdigest() != expected:
+                problems.append(f"{name}: sha256 mismatch")
+        return problems
+
     def push(self, remote: str, branch: str = "main") -> None:
         if not [r for r in self._git("remote", check=False).split() if r == "origin"]:
             self._git("remote", "add", "origin", remote)

@@ -117,6 +117,81 @@ def main(argv: list[str] | None = None) -> int:
         "--out", help="bundle directory (default: restore-<device>-<commit>)"
     )
 
+    p_verify = sub.add_parser(
+        "verify", help="re-hash stored backups against their manifests"
+    )
+    p_verify.add_argument(
+        "--all-commits", action="store_true",
+        help="verify the whole history (default: latest per device)",
+    )
+
+    p_status = sub.add_parser(
+        "status", help="show per-device backup health from the run store"
+    )
+
+    p_policy = sub.add_parser(
+        "policy", help="run config policy checks over the latest backups"
+    )
+
+    p_annotate = sub.add_parser(
+        "annotate", help="attach a change note (MOC/work order) to a commit"
+    )
+    p_annotate.add_argument("device")
+    p_annotate.add_argument("text", help="annotation text")
+    p_annotate.add_argument(
+        "--commit", help="commit to annotate (default: latest for the device)"
+    )
+
+    p_maint = sub.add_parser(
+        "maintenance",
+        help="mark a device/zone/site in maintenance (changes = expected)",
+    )
+    p_maint.add_argument(
+        "scope", help="device name, 'site/*', or 'site/zone/*'"
+    )
+    p_maint.add_argument(
+        "--off", action="store_true", help="clear maintenance instead of setting"
+    )
+    p_maint.add_argument(
+        "--hours", type=float, help="auto-expire after N hours (default: until cleared)"
+    )
+    p_maint.add_argument("--reason")
+
+    p_report = sub.add_parser(
+        "report", help="write an HTML compliance report"
+    )
+    p_report.add_argument("--out", default="compliance-report.html")
+    p_report.add_argument("--days", type=int, default=30)
+
+    p_dr = sub.add_parser(
+        "dr-plan", help="write an HTML disaster-recovery runbook for a site"
+    )
+    p_dr.add_argument("site")
+    p_dr.add_argument("--out", help="default: dr-runbook-<site>.html")
+
+    p_netrestore = sub.add_parser(
+        "net-restore",
+        help="restore a stored config to a network device (dry run default)",
+    )
+    p_netrestore.add_argument("device")
+    p_netrestore.add_argument("--commit")
+    p_netrestore.add_argument(
+        "--apply", action="store_true",
+        help="push the config (default: dry run, shows the diff only)",
+    )
+
+    p_rehearse = sub.add_parser(
+        "rehearse",
+        help="record a restore-rehearsal result (exports+verifies a bundle)",
+    )
+    p_rehearse.add_argument("device")
+    p_rehearse.add_argument("--by", help="who performed the rehearsal")
+    p_rehearse.add_argument("--notes")
+    p_rehearse.add_argument(
+        "--result", choices=["pass", "fail"],
+        help="override; default derives from bundle hash verification",
+    )
+
     p_passwd = sub.add_parser(
         "passwd", help="hash a web UI password (prints a config snippet)"
     )
@@ -283,6 +358,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "serve":
         from .runner import default_blobstore
+        from .runstore import default_runstore
         from .webui import serve
         store = GitStore(config.data_dir)
         store.ensure_repo()
@@ -303,6 +379,7 @@ def main(argv: list[str] | None = None) -> int:
                 auth=config.webui.get("auth"),
                 tls=tls,
                 blobstore=default_blobstore(config),
+                runstore=default_runstore(config),
             )
         except KeyboardInterrupt:
             return 0
@@ -397,7 +474,190 @@ def main(argv: list[str] | None = None) -> int:
         print("all artifact hashes verified; see RESTORE.md for the checklist")
         return 0
 
+    if args.command == "verify":
+        from .runner import default_blobstore
+        from .verify import verify
+        store = GitStore(config.data_dir)
+        store.ensure_repo()
+        report = verify(
+            config, store, blobstore=default_blobstore(config),
+            all_commits=args.all_commits,
+        )
+        for key, problems in report.problems.items():
+            for problem in problems:
+                print(f"FAIL {key}: {problem}")
+        print(
+            f"verified {report.checked_commits} commit(s) across "
+            f"{report.checked_devices} device(s); "
+            f"{len(report.problems)} with problems"
+            + (f", {report.orphan_blobs} orphan blob(s)"
+               if args.all_commits else "")
+        )
+        return 0 if report.ok else 1
+
+    if args.command == "status":
+        from .runstore import default_runstore
+        import time
+        runstore = default_runstore(config)
+        now = time.time()
+        for device in config.all_devices():
+            st = runstore.status(device.qualified_name)
+            if st.last_success is None:
+                health = "NEVER"
+            elif now - st.last_success > 7 * 86400:
+                health = "STALE"
+            elif not st.last_ok:
+                health = "FAILING"
+            else:
+                health = "ok"
+            age = (
+                "-" if st.last_success is None
+                else f"{(now - st.last_success) / 86400:.1f}d"
+            )
+            print(
+                f"{health:8s} {device.qualified_name:40s} "
+                f"last success {age:8s} "
+                f"fails={st.consecutive_failures} {st.last_message}"
+            )
+        return 0
+
+    if args.command == "policy":
+        from .policy import check_all, severity_rank
+        findings = check_all(config, GitStore(config.data_dir))
+        flat = [f for group in findings.values() for f in group]
+        flat.sort(key=lambda f: severity_rank(f.severity), reverse=True)
+        for f in flat:
+            print(f"{f.severity:8s} {f.device:40s} {f.rule_id:20s} "
+                  f"{f.description} [{f.artifact}]")
+        print(f"\n{len(flat)} finding(s) across {len(findings)} device(s)")
+        return 0 if not flat else 1
+
+    if args.command == "annotate":
+        [device] = config.find_devices([args.device])
+        store = GitStore(config.data_dir)
+        commit = args.commit or store.last_commit_hash(device)
+        if not commit:
+            print(f"no backups for {device.qualified_name}", file=sys.stderr)
+            return 1
+        store.set_annotation(commit, args.text)
+        print(f"annotated {commit[:10]} on {device.qualified_name}")
+        return 0
+
+    if args.command == "maintenance":
+        from .runstore import default_runstore
+        import time
+        runstore = default_runstore(config)
+        now = time.time()
+        if args.off:
+            runstore.clear_maintenance(args.scope)
+            print(f"maintenance cleared for {args.scope}")
+        else:
+            until = now + args.hours * 3600 if args.hours else None
+            runstore.set_maintenance(
+                args.scope, until, now, reason=args.reason,
+                set_by=userEmail_or_none(),
+            )
+            when = (
+                f"until {time.ctime(until)}" if until else "until cleared"
+            )
+            print(f"maintenance set for {args.scope} ({when})")
+        return 0
+
+    if args.command == "report":
+        from .reports import compliance_report
+        from .runstore import default_runstore
+        store = GitStore(config.data_dir)
+        store.ensure_repo()
+        content = compliance_report(
+            config, store, default_runstore(config), period_days=args.days
+        )
+        Path(args.out).write_text(content)
+        print(f"compliance report written to {args.out}")
+        return 0
+
+    if args.command == "dr-plan":
+        from .reports import dr_runbook
+        from .runstore import default_runstore
+        store = GitStore(config.data_dir)
+        store.ensure_repo()
+        try:
+            content = dr_runbook(
+                config, store, default_runstore(config), args.site
+            )
+        except KeyError as exc:
+            print(f"dr-plan error: {exc}", file=sys.stderr)
+            return 2
+        out = args.out or f"dr-runbook-{args.site}.html"
+        Path(out).write_text(content)
+        print(f"DR runbook written to {out}")
+        return 0
+
+    if args.command == "net-restore":
+        from .netrestore import NetRestoreError, restore_network_config
+        [device] = config.find_devices([args.device])
+        store = GitStore(config.data_dir)
+        secrets = load_backend(
+            config.secrets, base_dir=Path(config.data_dir).parent
+        ) if config.secrets else None
+        secret = (
+            secrets.get(device.credentials)
+            if secrets and device.credentials else None
+        )
+        try:
+            result = restore_network_config(
+                store, device, secret, commit=args.commit, apply=args.apply,
+            )
+        except NetRestoreError as exc:
+            print(f"net-restore error: {exc}", file=sys.stderr)
+            return 1
+        if not result.applied:
+            print(f"DRY RUN for {result.device} — candidate config "
+                  f"({len(result.candidate_config.splitlines())} lines) "
+                  "NOT pushed. Re-run with --apply.")
+            print(f"pre-change running config saved "
+                  f"({len(result.pre_config.splitlines())} lines)")
+        else:
+            verdict = "VERIFIED" if result.verified else "MISMATCH after push"
+            print(f"applied to {result.device}: {verdict}")
+            return 0 if result.verified else 1
+        return 0
+
+    if args.command == "rehearse":
+        import tempfile
+        import time
+        from .restore import RestoreError, export_bundle
+        from .runner import default_blobstore
+        from .runstore import default_runstore
+        [device] = config.find_devices([args.device])
+        store = GitStore(config.data_dir)
+        runstore = default_runstore(config)
+        commit = store.last_commit_hash(device)
+        result = args.result
+        if result is None:
+            try:
+                with tempfile.TemporaryDirectory() as tmp:
+                    _, mismatches = export_bundle(
+                        store, device, Path(tmp) / "b", commit=commit,
+                        blobstore=default_blobstore(config),
+                    )
+                result = "pass" if not mismatches else "fail"
+            except RestoreError as exc:
+                print(f"rehearse: {exc}", file=sys.stderr)
+                result = "fail"
+        runstore.record_rehearsal(
+            device.qualified_name, time.time(), commit, result,
+            tested_by=args.by, notes=args.notes,
+        )
+        print(f"recorded restore rehearsal for {device.qualified_name}: "
+              f"{result}")
+        return 0 if result == "pass" else 1
+
     return 0
+
+
+def userEmail_or_none() -> str | None:
+    import os
+    return os.environ.get("USER") or None
 
 
 if __name__ == "__main__":

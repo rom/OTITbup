@@ -64,6 +64,8 @@ code { font-size: .85rem; }
           background: inherit; color: inherit; }
 .zone-head td { background: #f4f6f8; font-weight: 600; font-size: .8rem;
                 text-transform: uppercase; letter-spacing: .04em; }
+.sev-critical, .sev-high { color: #b3261e; font-weight: 600; }
+.sev-medium { color: #b26a00; } .sev-low { color: #5b6570; }
 @media (prefers-color-scheme: dark) {
   body { background: #14181c; color: #e3e7eb; }
   th, td { border-color: #2c333a; } th { color: #98a2ad; }
@@ -95,7 +97,8 @@ def _page(title: str, body: str) -> bytes:
         f"<meta name='viewport' content='width=device-width, initial-scale=1'>"
         f"<title>{html.escape(title)}</title><style>{_STYLE}</style></head>"
         f"<body><header><h1><a href='/'>otitbup</a></h1>"
-        f"<nav><a href='/'>Devices</a><a href='/activity'>Activity</a>"
+        f"<nav><a href='/'>Devices</a><a href='/health'>Health</a>"
+        f"<a href='/activity'>Activity</a><a href='/policy'>Policy</a>"
         f"<a href='/retention'>Retention</a>"
         f"<a href='/drivers'>Drivers</a></nav></header>"
         f"{body}</body></html>"
@@ -106,16 +109,22 @@ def _device_link(device: Device) -> str:
     return f"/device/{quote(device.qualified_name)}"
 
 
+def _device_link_name(qualified_name: str) -> str:
+    return f"/device/{quote(qualified_name)}"
+
+
 class WebUI:
     def __init__(
         self, config: AppConfig, store: GitStore,
         auth: dict | None = None,
         blobstore=None,
+        runstore=None,
     ):
         self.config = config
         self.store = store
         self.auth = auth
         self.blobstore = blobstore
+        self.runstore = runstore
 
     # ------------------------------------------------------------ pages
 
@@ -212,6 +221,102 @@ class WebUI:
             f"<p class='muted'>last {limit} commits</p>"
         )
         return _page("otitbup — activity", body)
+
+    def health(self) -> bytes:
+        import time
+        now = time.time()
+        devices = self.config.all_devices()
+        covered = never = stale = failing = 0
+        rows = []
+        for device in sorted(devices, key=lambda d: d.qualified_name):
+            status = (
+                self.runstore.status(device.qualified_name)
+                if self.runstore else None
+            )
+            if status is None or status.last_success is None:
+                never += 1
+                cell = "<span class='badge never'>never</span>"
+                age = "-"
+            else:
+                covered += 1
+                age_days = (now - status.last_success) / 86400
+                if age_days > 7:
+                    stale += 1
+                    cell = "<span class='badge never'>stale</span>"
+                else:
+                    cell = "<span class='badge'>ok</span>"
+                age = (
+                    f"{age_days:.1f}d" if age_days >= 1
+                    else f"{(now - status.last_success) / 3600:.0f}h"
+                )
+            fails = status.consecutive_failures if status else 0
+            if fails:
+                failing += 1
+            rows.append(
+                f"<tr data-row><td><a href='{_device_link(device)}'>"
+                f"{html.escape(device.qualified_name)}</a></td>"
+                f"<td>{cell}</td><td>{html.escape(age)}</td>"
+                f"<td>{fails or ''}</td>"
+                f"<td>{html.escape(status.last_message if status else '')}</td>"
+                "</tr>"
+            )
+        tiles = (
+            "<div class='tiles'>"
+            f"<div class='tile'><b>{covered}/{len(devices)}</b><span>covered"
+            "</span></div>"
+            f"<div class='tile'><b>{stale}</b><span>stale &gt;7d</span></div>"
+            f"<div class='tile'><b>{never}</b><span>never</span></div>"
+            f"<div class='tile'><b>{failing}</b><span>failing</span></div>"
+            "</div>"
+        )
+        note = (
+            "" if self.runstore else
+            "<p class='muted'>run history unavailable (no run store)</p>"
+        )
+        body = (
+            "<h2>Backup health</h2>" + tiles + note
+            + "<input id='filter' type='search' placeholder='Filter…' "
+              "autocomplete='off'>"
+            + "<table><tr><th>Device</th><th>Status</th><th>Last success</th>"
+              "<th>Consec. fails</th><th>Last message</th></tr>"
+            + "".join(rows) + "</table>"
+            + "<p class='muted'>machine-readable: "
+              "<a href='/metrics'>/metrics</a> (Prometheus) · "
+              "<a href='/api/status'>/api/status</a> (JSON)</p>"
+            + _FILTER_SCRIPT
+        )
+        return _page("otitbup — health", body)
+
+    def policy(self) -> bytes:
+        from .policy import check_all, load_rules, severity_rank
+        findings = check_all(self.config, self.store)
+        rules = load_rules(self.config)
+        flat = [f for group in findings.values() for f in group]
+        flat.sort(key=lambda f: severity_rank(f.severity), reverse=True)
+        rows = "".join(
+            f"<tr data-row><td><a href='{_device_link_name(f.device)}'>"
+            f"{html.escape(f.device)}</a></td>"
+            f"<td class='sev-{html.escape(f.severity)}'>"
+            f"{html.escape(f.severity)}</td>"
+            f"<td><code>{html.escape(f.rule_id)}</code></td>"
+            f"<td>{html.escape(f.description)}</td>"
+            f"<td>{html.escape(f.artifact)}</td></tr>"
+            for f in flat
+        )
+        body = (
+            "<h2>Config policy findings</h2>"
+            f"<p class='muted'>{len(flat)} finding(s) across "
+            f"{len(findings)} device(s) · {len(rules)} rule(s) active</p>"
+            + (
+                "<input id='filter' type='search' placeholder='Filter…' "
+                "autocomplete='off'>"
+                "<table><tr><th>Device</th><th>Severity</th><th>Rule</th>"
+                "<th>Description</th><th>Artifact</th></tr>" + rows
+                + "</table>" + _FILTER_SCRIPT
+                if flat else "<p class='badge'>No policy findings.</p>"
+            )
+        )
+        return _page("otitbup — policy", body)
 
     def retention(self) -> bytes:
         from .models import DEFAULT_RETENTION
@@ -312,17 +417,85 @@ class WebUI:
                     "…</code></td></tr>"
                 )
 
+        annotated = self.store.annotated_commits()
         history_rows = []
         for line in self.store.history(device, limit=30).splitlines():
             match = _HISTORY_LINE.match(line)
             if not match:
                 continue
             chash, date, subject = match.groups()
+            full = self.store.last_commit_hash(device) if not history_rows else None
+            note = ""
+            # Match short hash against annotated full hashes.
+            if any(a.startswith(chash) for a in annotated):
+                annotation = self.store.get_annotation(chash)
+                note = (
+                    f" <span class='badge'>note</span> "
+                    f"{html.escape(annotation.splitlines()[0] if annotation else '')}"
+                )
             history_rows.append(
                 f"<tr><td>{html.escape(date)}</td>"
                 f"<td><a href='{_device_link(device)}/commit/{quote(chash)}'>"
                 f"<code>{html.escape(chash)}</code></a></td>"
-                f"<td>{html.escape(subject)}</td></tr>"
+                f"<td>{html.escape(subject)}{note}</td></tr>"
+            )
+
+        # Run status and rehearsal history (from the run store).
+        status_line = ""
+        rehearsal_block = ""
+        if self.runstore is not None:
+            import time
+            now = time.time()
+            st = self.runstore.status(device.qualified_name)
+            if st.last_attempt is not None:
+                ok = "ok" if st.last_ok else "FAILED"
+                last_success = (
+                    "never" if st.last_success is None
+                    else f"{(now - st.last_success) / 86400:.1f}d ago"
+                )
+                status_line = (
+                    f" · last attempt {ok}"
+                    + (f", {st.consecutive_failures} consecutive failures"
+                       if st.consecutive_failures else "")
+                    + f", last success {html.escape(last_success)}"
+                )
+            reh = self.runstore.rehearsals(device.qualified_name, limit=10)
+            if reh:
+                import datetime as _dt
+                rows = "".join(
+                    "<tr><td>"
+                    + _dt.datetime.fromtimestamp(
+                        r["at"], _dt.timezone.utc
+                    ).strftime("%Y-%m-%d %H:%M")
+                    + f"</td><td>{html.escape(r['result'])}</td>"
+                    f"<td>{html.escape(r.get('tested_by') or '')}</td>"
+                    f"<td>{html.escape(r.get('notes') or '')}</td></tr>"
+                    for r in reh
+                )
+                rehearsal_block = (
+                    "<h3>Restore rehearsals</h3>"
+                    "<table><tr><th>When</th><th>Result</th><th>By</th>"
+                    "<th>Notes</th></tr>" + rows + "</table>"
+                )
+
+        # Policy findings for this device.
+        from .policy import check_device, severity_rank
+        pf = sorted(
+            check_device(self.config, self.store, device),
+            key=lambda f: severity_rank(f.severity), reverse=True,
+        )
+        policy_block = ""
+        if pf:
+            rows = "".join(
+                f"<tr><td class='sev-{html.escape(f.severity)}'>"
+                f"{html.escape(f.severity)}</td>"
+                f"<td><code>{html.escape(f.rule_id)}</code></td>"
+                f"<td>{html.escape(f.description)}</td></tr>" for f in pf
+            )
+            policy_block = (
+                "<h3>Policy findings</h3>"
+                "<table><tr><th>Severity</th><th>Rule</th>"
+                "<th>Description</th></tr>" + rows + "</table>"
             )
 
         diff = self.store.last_diff(device).strip()
@@ -335,8 +508,9 @@ class WebUI:
             f"schedule {html.escape(device.schedule)} · "
             f"window {html.escape(zone.maintenance_window or 'always')} · "
             f"<a href='/retention'>retention</a> "
-            f"{html.escape(policy_line)}</p>"
-            "<h3>Artifacts (latest backup)</h3>"
+            f"{html.escape(policy_line)}{status_line}</p>"
+            + policy_block
+            + "<h3>Artifacts (latest backup)</h3>"
             + (
                 "<table><tr><th>Artifact</th><th>Kind</th><th>sha256</th></tr>"
                 + "".join(artifact_rows) + "</table>"
@@ -348,6 +522,7 @@ class WebUI:
                 + "".join(history_rows) + "</table>"
                 if history_rows else "<p class='muted'>no backups yet</p>"
             )
+            + rehearsal_block
             + "<h3>Latest change</h3>"
             + f"<pre>{html.escape(diff) or 'no backups yet'}</pre>"
         )
@@ -436,6 +611,61 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # route to logging, not stderr
         log.debug(fmt, *args)
 
+    def _api(self, path: str):
+        """Read-only JSON API mirroring the UI, for CMDBs/dashboards."""
+        from .metrics import status_json
+        if path == "/api/status":
+            return status_json(
+                self.ui.config, self.ui.store, self.ui.runstore,
+                self.ui.blobstore,
+            )
+        if path == "/api/devices":
+            return {
+                "devices": [
+                    {
+                        "device": d.qualified_name, "site": d.site,
+                        "zone": d.zone, "driver": d.driver,
+                        "address": d.address, "schedule": d.schedule,
+                    }
+                    for d in self.ui.config.all_devices()
+                ]
+            }
+        if path == "/api/policy":
+            from .policy import check_all
+            findings = check_all(self.ui.config, self.ui.store)
+            return {
+                "findings": [
+                    {
+                        "device": f.device, "rule": f.rule_id,
+                        "severity": f.severity, "description": f.description,
+                        "artifact": f.artifact,
+                    }
+                    for group in findings.values() for f in group
+                ]
+            }
+        if path.startswith("/api/device/"):
+            name = path[len("/api/device/"):]
+            device = self.ui._find(name)
+            if not device:
+                return None
+            status = (
+                self.ui.runstore.status(name) if self.ui.runstore else None
+            )
+            return {
+                "device": name, "driver": device.driver,
+                "address": device.address,
+                "last_success": status.last_success if status else None,
+                "last_attempt": status.last_attempt if status else None,
+                "last_ok": status.last_ok if status else None,
+                "consecutive_failures":
+                    status.consecutive_failures if status else 0,
+                "recent_runs": (
+                    self.ui.runstore.recent_runs(name, limit=20)
+                    if self.ui.runstore else []
+                ),
+            }
+        return None
+
     def _send(self, status: int, content: bytes,
               content_type: str = "text/html; charset=utf-8") -> None:
         self.send_response(status)
@@ -446,6 +676,10 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def do_GET(self):
+        _path = unquote(self.path.split("?", 1)[0])
+        # Liveness probe is always reachable so monitoring can poll it.
+        if _path == "/healthz":
+            return self._send(200, b'{"status":"ok"}\n', "application/json")
         if self.ui.auth and not check_basic_auth(
             self.headers.get("Authorization"), self.ui.auth
         ):
@@ -459,9 +693,37 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         path = unquote(self.path.split("?", 1)[0])
+
+        # Machine-readable endpoints (non-HTML).
+        if path == "/metrics":
+            from .metrics import metrics_text
+            text = metrics_text(
+                self.ui.config, self.ui.store, self.ui.runstore,
+                self.ui.blobstore,
+            )
+            return self._send(200, text.encode(),
+                              "text/plain; version=0.0.4; charset=utf-8")
+        if path == "/healthz":
+            return self._send(200, b'{"status":"ok"}\n', "application/json")
+        if path.startswith("/api/"):
+            result = self._api(path)
+            if result is None:
+                return self._send(
+                    404, b'{"error":"not found"}\n', "application/json"
+                )
+            import json
+            return self._send(
+                200, json.dumps(result, indent=2).encode() + b"\n",
+                "application/json",
+            )
+
         content: bytes | None = None
         if path in ("/", "/index.html"):
             content = self.ui.index()
+        elif path == "/health":
+            content = self.ui.health()
+        elif path == "/policy":
+            content = self.ui.policy()
         elif path == "/activity":
             content = self.ui.activity()
         elif path == "/retention":
@@ -492,13 +754,16 @@ def serve(
     auth: dict | None = None,
     tls: dict | None = None,
     blobstore=None,
+    runstore=None,
 ) -> None:
     if not auth and host not in ("127.0.0.1", "localhost", "::1"):
         log.warning(
             "web UI on %s has NO authentication configured — set "
             "webui.auth in the config (see `otitbup passwd`)", host,
         )
-    ui = WebUI(config, store, auth=auth, blobstore=blobstore)
+    ui = WebUI(
+        config, store, auth=auth, blobstore=blobstore, runstore=runstore
+    )
     server = ThreadingHTTPServer((host, port), partial(_Handler, ui))
     scheme = "http"
     if tls:

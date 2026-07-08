@@ -35,6 +35,15 @@ otitbup discover 10.20.0.0/24  # sequential scan -> YAML proposal for review
 otitbup restore plc-01 --out ./bundle   # hash-verified restore bundle
 otitbup retention              # show effective policies + prune dry run
 otitbup retention --apply      # delete expired large-artifact blobs
+otitbup status                 # per-device backup health (last success, fails)
+otitbup verify                 # re-hash stored backups against manifests
+otitbup policy                 # config policy/compliance findings
+otitbup annotate plc-01 "MOC-1234"      # attach a change note to a commit
+otitbup maintenance plant-a/cell-1/* --hours 8   # changes now "expected"
+otitbup report --out report.html        # HTML compliance report
+otitbup dr-plan plant-a        # HTML disaster-recovery runbook for a site
+otitbup net-restore core-sw-01 [--apply]   # push a stored config (dry run default)
+otitbup rehearse plc-01 --by me         # record a restore-rehearsal result
 ```
 
 ### Encrypted secrets
@@ -134,11 +143,35 @@ changes. They need `otitbup[ssh]`.
 
 `otitbup serve` — read-only by design (the YAML config stays the source
 of truth): dashboard with summary tiles, per-zone grouping and live
-filtering; per-device pages with artifact lists, backup history, diffs
-and the effective retention policy; per-commit diff views; raw artifact
-viewing; an activity feed across all devices; a retention page (policy
-per device with per-field source, blob-store usage); and the driver
-catalog. Optional HTTP Basic auth
+filtering; a **health** page (coverage, staleness, consecutive failures);
+per-device pages with artifact lists, history, diffs, run status,
+annotations, policy findings, rehearsal log and effective retention;
+per-commit diff views; raw artifact viewing; activity feed; a **policy**
+page; a retention page; and the driver catalog. Machine-readable
+endpoints: `/metrics` (Prometheus), `/api/status` · `/api/devices` ·
+`/api/policy` · `/api/device/<name>` (JSON), and `/healthz` (liveness,
+no auth). Optional HTTP Basic auth and TLS.
+
+## Operations, compliance & recovery
+
+- **Health & metrics** — persisted run results (SQLite) distinguish
+  "unchanged" from "unreachable"; `otitbup status`, the Health page,
+  Prometheus `/metrics`, and a staleness alert ("no successful backup in
+  N days") make silent failure impossible.
+- **Verification** — `otitbup verify` re-hashes stored artifacts against
+  the manifest recorded at capture time and checks blob integrity.
+- **Change management** — `otitbup annotate` links a change to a work
+  order (git notes); maintenance mode classifies changes as expected vs.
+  **unexpected** (the unauthorized-change signal); compliance reports
+  (on demand or scheduled) cover coverage, changes, unannotated changes,
+  policy findings and rehearsal status.
+- **Config policy checks** — built-in and custom rules flag insecure
+  configuration (telnet, SNMP public, weak passwords) across vendors.
+- **Recovery** — guided restore bundles for PLCs/RTUs; **automated
+  restore for network gear** (`otitbup net-restore`, dry run by default,
+  pre-change capture + post-change verify); per-site **DR runbooks**
+  (`otitbup dr-plan`); and restore-**rehearsal** tracking surfaced in the
+  UI and reports. Optional HTTP Basic auth
 (`otitbup passwd`) and TLS (`otitbup certgen` for a self-signed pair, or
 any PEM cert/key) — see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
