@@ -15,6 +15,12 @@ _REGISTRY: dict[str, str | type[Driver]] = {
     "schneider_modbus": "otitbup.drivers.schneider_modbus:SchneiderModbusDriver",
     "generic_http": "otitbup.drivers.generic_http:GenericHTTPDriver",
     "moxa_nport": "otitbup.drivers.generic_http:MoxaNPortDriver",
+    "snmp_fingerprint": "otitbup.drivers.snmp_fp:SNMPFingerprintDriver",
+    "iec61850_mms": "otitbup.drivers.iec61850:IEC61850MMSDriver",
+    "ignition_gateway": "otitbup.drivers.hmi:IgnitionGatewayDriver",
+    "wincc": "otitbup.drivers.hmi:WinCCDriver",
+    "factorytalk_view": "otitbup.drivers.hmi:FactoryTalkViewDriver",
+    "generic_scada": "otitbup.drivers.hmi:GenericSCADADriver",
     "generic_opcua": "otitbup.drivers.generic_opcua:GenericOPCUADriver",
     "generic_dnp3": "otitbup.drivers.generic_dnp3:GenericDNP3Driver",
     "mitsubishi_mc": "otitbup.drivers.mitsubishi_mc:MitsubishiMCDriver",
@@ -46,6 +52,13 @@ for _profile in _NETWORK_PROFILES:
 
 
 _CORE_DESCRIPTIONS = {
+    "snmp_fingerprint": "any SNMP agent: system group identity + fingerprint",
+    "iec61850_mms": "IEC 61850 IEDs: MMS Identify (vendor/model/rev), experimental",
+    "ignition_gateway": "Inductive Automation Ignition: full .gwbk over HTTP",
+    "wincc": "Siemens WinCC/PCS7 project tree via SFTP",
+    "factorytalk_view": "Rockwell FactoryTalk View project tree via SFTP",
+    "generic_scada": "vendor-neutral SCADA project fetch via SFTP",
+    "netcontrol_rtu": "Netcontrol Netcon RTUs (SSH CLI; also DNP3/IEC-104/61850)",
     "generic_file": "watch-folder ingest of engineer-exported project files",
     "generic_ssh": "any SSH-CLI device via netmiko device_type",
     "generic_sftp": "fetch files/dirs from Linux devices over SFTP",

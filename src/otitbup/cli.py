@@ -30,7 +30,10 @@ from .secrets import load_backend
 def _build_events(config):
     from .events import EventBus
     from .runstore import default_runstore
-    return EventBus(config.events, runstore=default_runstore(config))
+    return EventBus(
+        config.events, runstore=default_runstore(config),
+        tickets=config.tickets,
+    )
 
 
 def _build_runner(config, force: bool = False, events=None) -> Runner:
@@ -142,6 +145,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_discover.add_argument(
         "--out", default="discovered.yml", help="proposal file to write"
+    )
+    p_discover.add_argument(
+        "--enrich", action="store_true",
+        help="probe each finding's identity (vendor/model) via SNMP/driver",
     )
 
     p_retention = sub.add_parser(
@@ -574,9 +581,15 @@ def main(argv: list[str] | None = None) -> int:
         if not findings:
             print("no new devices found")
             return 0
+        if args.enrich:
+            from .discovery import enrich
+            print("enriching findings (identity probe) ...")
+            enrich(findings)
         for finding in findings:
             ports = ", ".join(str(p) for p in finding.open_ports)
-            print(f"  {finding.address:16s} ports {ports:20s} -> {finding.driver}")
+            extra = f"  [{finding.identity}]" if finding.identity else ""
+            print(f"  {finding.address:16s} ports {ports:20s} "
+                  f"-> {finding.driver}{extra}")
         Path(args.out).write_text(
             proposal_yaml(findings, args.site, args.zone)
         )

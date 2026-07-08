@@ -21,11 +21,16 @@ from dataclasses import dataclass, field
 # Probe order doubles as driver-suggestion priority: a device answering on
 # 102 is treated as an S7 CPU even if it also serves Modbus.
 DEFAULT_PORTS: dict[int, str] = {
-    102: "siemens_s7",        # S7comm / ISO-on-TCP
+    102: "siemens_s7",        # S7comm / ISO-on-TCP (also IEC 61850 MMS)
     44818: "rockwell_enip",   # EtherNet/IP
     502: "schneider_modbus",  # Modbus TCP
+    20000: "generic_dnp3",    # DNP3
+    4840: "generic_opcua",    # OPC UA
     22: "generic_ssh",        # network equipment
 }
+
+# UDP ports probed only when enrichment is requested (SNMP has no TCP).
+_ENRICH_UDP_PORTS = {161: "snmp_fingerprint"}
 
 
 @dataclass
@@ -33,6 +38,7 @@ class Finding:
     address: str
     open_ports: list[int] = field(default_factory=list)
     driver: str = ""
+    identity: str = ""       # filled by enrichment (vendor/model string)
 
 
 def scan(
@@ -75,6 +81,53 @@ def scan(
     return findings
 
 
+def _identity_string(finding: Finding) -> str:
+    """Best-effort vendor/model probe for one finding, using the cheapest
+    identity source available. Never raises."""
+    from .models import Device
+
+    device = Device(
+        name="probe", driver=finding.driver, site="_", zone="_",
+        address=finding.address,
+    )
+    # SNMP first if the agent answered (works across almost everything).
+    try:
+        from .snmp import SYS_DESCR, SYS_NAME, snmp_get
+        values = snmp_get(finding.address, [SYS_DESCR, SYS_NAME], timeout=1.5)
+        descr = values.get(SYS_DESCR) or values.get(SYS_NAME)
+        if descr:
+            return str(descr).splitlines()[0][:120]
+    except Exception:
+        pass
+    # Otherwise the finding's own identity driver (EtherNet/IP, Modbus, ...).
+    from .drivers import get_driver
+    from .drivers.base import DriverError
+    try:
+        artifacts = get_driver(finding.driver).collect(device, None)
+        for artifact in artifacts:
+            if artifact.name.endswith((".yml", ".txt")):
+                import yaml
+                data = yaml.safe_load(artifact.data) or {}
+                if isinstance(data, dict):
+                    for key in ("product_name", "ProductName", "VendorName",
+                                "ProductCode", "cpu_model", "ModuleTypeName",
+                                "device_manufacturer_name",
+                                "product_name_and_model"):
+                        if data.get(key):
+                            return str(data[key])[:120]
+    except (DriverError, Exception):
+        pass
+    return ""
+
+
+def enrich(findings: list[Finding], timeout: float = 1.5) -> list[Finding]:
+    """Populate each finding's identity via its driver / SNMP. Sequential
+    and best-effort, matching the OT-safe posture of the scan."""
+    for finding in findings:
+        finding.identity = _identity_string(finding)
+    return findings
+
+
 def proposal_yaml(
     findings: list[Finding], site: str, zone: str
 ) -> str:
@@ -99,6 +152,8 @@ def proposal_yaml(
             f"{finding.address.replace('.', '-')}"
         )
         ports = ", ".join(str(p) for p in finding.open_ports)
+        if finding.identity:
+            lines.append(f"          # identity: {finding.identity}")
         lines += [
             f"          # open ports: {ports}",
             f"          - name: {name}",

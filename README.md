@@ -36,12 +36,14 @@ not.
 ## Documentation
 
 - [docs/USAGE.md](docs/USAGE.md) — task-oriented guide to using the tool
+- [docs/FAQ.md](docs/FAQ.md) — frequently asked questions
 - [docs/CONFIGURATION.md](docs/CONFIGURATION.md) — full `otitbup.yml`
   reference (inventory, secrets, retention, policy, reports, events,
-  web UI auth/TLS/roles, alerts)
+  tickets, web UI auth/TLS/roles, alerts)
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout and design
 - [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) — scope and decisions from
   the requirements interview
+- [packaging/](packaging/) — systemd units, Dockerfile, and the SNMP MIB
 
 ## Quick start
 
@@ -138,9 +140,21 @@ per device; see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 | Phoenix Contact | PLCnext (AXC F, RFC) | `phoenix_plcnext` | **deployed project** (/opt/plcnext/projects) via SFTP | `otitbup[sftp]` |
 | Codesys family (Festo, Bosch Rexroth ctrlX, ...) | Linux-based controllers | `codesys_ssh` | project/settings files via SFTP (paths per device) | `otitbup[sftp]` |
 | GE / Emerson | PACSystems RX3i, RSTi-EP | `ge_pacsystems` | CIP identity + fingerprint (EtherNet/IP enabled) | — (stdlib) |
+| Netcontrol | Netcon 100/500/3000 RTUs & gateways | `netcontrol_rtu` | SSH CLI config; also DNP3/IEC-104/IEC-61850 | `otitbup[ssh]` |
 | Any vendor | OPC UA server exposed | `generic_opcua` | build info, namespaces, optional nodes + fingerprint | `otitbup[opcua]` |
 | Any vendor | EtherNet/IP device | `generic_enip` | CIP identity + fingerprint | — (stdlib) |
+| Any vendor | SNMP agent (switch, UPS, gateway, RTU, ...) | `snmp_fingerprint` | system group (descr/name/location) + fingerprint | — (stdlib) |
 | Any vendor | engineering-tool project exports (TIA Portal, Studio 5000, EcoStruxure, GX Works, Sysmac, PME, ...) | `generic_file` | **full project files** from a watch folder | — |
+
+### HMI / SCADA & substation IEDs
+
+| Vendor | Equipment | Driver | Captures | Extra install |
+|---|---|---|---|---|
+| Inductive Automation | Ignition gateway | `ignition_gateway` | **full `.gwbk` gateway backup** over HTTP | — (stdlib) |
+| Siemens | WinCC / PCS7 project | `wincc` | **project tree** via SFTP | `otitbup[sftp]` |
+| Rockwell | FactoryTalk View project | `factorytalk_view` | **project tree** via SFTP | `otitbup[sftp]` |
+| Any SCADA | project directory | `generic_scada` | **project tree** via SFTP | `otitbup[sftp]` |
+| Substation IEDs | SIPROTEC, ABB Relion, GE Multilin, ... | `iec61850_mms` | MMS Identify (vendor/model/rev) + fingerprint — *experimental* | — (stdlib) |
 
 ### RTUs
 

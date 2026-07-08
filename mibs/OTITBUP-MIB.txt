@@ -1,0 +1,146 @@
+OTITBUP-MIB DEFINITIONS ::= BEGIN
+
+-- Formal definition of the SNMPv2c notifications (traps) emitted by
+-- otitbup. The enterprise root here uses the placeholder PEN 99999 to
+-- match the default `events.snmp_trap.enterprise_oid` (1.3.6.1.4.1.99999).
+-- Replace 99999 with your organisation's IANA Private Enterprise Number
+-- in BOTH this MIB and the otitbup config so the two agree.
+
+IMPORTS
+    MODULE-IDENTITY, OBJECT-TYPE, NOTIFICATION-TYPE, enterprises
+        FROM SNMPv2-SMI
+    DisplayString
+        FROM SNMPv2-TC;
+
+otitbup MODULE-IDENTITY
+    LAST-UPDATED "202607080000Z"
+    ORGANIZATION "otitbup"
+    CONTACT-INFO "https://github.com/rom/OTITbup"
+    DESCRIPTION  "Operational event notifications for the otitbup OT/IT
+                  backup tool."
+    ::= { enterprises 99999 }
+
+-- otitbup .0 is the notifications subtree (snmpTrapOID = otitbup.0.N),
+-- otitbup .1 is the varbind objects carried by each trap.
+
+otitbupNotifications OBJECT IDENTIFIER ::= { otitbup 0 }
+otitbupObjects       OBJECT IDENTIFIER ::= { otitbup 1 }
+
+-- ---------------------------------------------------------------- objects
+
+otitbupEventType OBJECT-TYPE
+    SYNTAX      DisplayString
+    MAX-ACCESS  accessible-for-notify
+    STATUS      current
+    DESCRIPTION "The event type, e.g. backup.error, auth.login."
+    ::= { otitbupObjects 1 }
+
+otitbupEventMessage OBJECT-TYPE
+    SYNTAX      DisplayString
+    MAX-ACCESS  accessible-for-notify
+    STATUS      current
+    DESCRIPTION "Human-readable event message."
+    ::= { otitbupObjects 2 }
+
+otitbupEventSeverity OBJECT-TYPE
+    SYNTAX      DisplayString
+    MAX-ACCESS  accessible-for-notify
+    STATUS      current
+    DESCRIPTION "Severity: info, notice, warning, error."
+    ::= { otitbupObjects 3 }
+
+-- ---------------------------------------------------------- notifications
+-- Trap suffix numbers match events._EVENT_IDS in the source.
+
+otitbupProcessStart NOTIFICATION-TYPE
+    OBJECTS { otitbupEventType, otitbupEventMessage, otitbupEventSeverity }
+    STATUS  current
+    DESCRIPTION "An otitbup process started."
+    ::= { otitbupNotifications 1 }
+
+otitbupProcessStop NOTIFICATION-TYPE
+    OBJECTS { otitbupEventType, otitbupEventMessage, otitbupEventSeverity }
+    STATUS  current
+    DESCRIPTION "An otitbup process stopped."
+    ::= { otitbupNotifications 2 }
+
+otitbupWebuiStart NOTIFICATION-TYPE
+    OBJECTS { otitbupEventType, otitbupEventMessage, otitbupEventSeverity }
+    STATUS  current
+    DESCRIPTION "The web UI started."
+    ::= { otitbupNotifications 3 }
+
+otitbupWebuiStop NOTIFICATION-TYPE
+    OBJECTS { otitbupEventType, otitbupEventMessage, otitbupEventSeverity }
+    STATUS  current
+    DESCRIPTION "The web UI stopped."
+    ::= { otitbupNotifications 4 }
+
+otitbupBackupStart NOTIFICATION-TYPE
+    OBJECTS { otitbupEventType, otitbupEventMessage, otitbupEventSeverity }
+    STATUS  current
+    DESCRIPTION "A device backup started."
+    ::= { otitbupNotifications 5 }
+
+otitbupBackupStop NOTIFICATION-TYPE
+    OBJECTS { otitbupEventType, otitbupEventMessage, otitbupEventSeverity }
+    STATUS  current
+    DESCRIPTION "A device backup finished."
+    ::= { otitbupNotifications 6 }
+
+otitbupBackupError NOTIFICATION-TYPE
+    OBJECTS { otitbupEventType, otitbupEventMessage, otitbupEventSeverity }
+    STATUS  current
+    DESCRIPTION "A device backup failed."
+    ::= { otitbupNotifications 7 }
+
+otitbupConfigRead NOTIFICATION-TYPE
+    OBJECTS { otitbupEventType, otitbupEventMessage, otitbupEventSeverity }
+    STATUS  current
+    DESCRIPTION "The config file was read."
+    ::= { otitbupNotifications 8 }
+
+otitbupConfigReload NOTIFICATION-TYPE
+    OBJECTS { otitbupEventType, otitbupEventMessage, otitbupEventSeverity }
+    STATUS  current
+    DESCRIPTION "The config file was re-read."
+    ::= { otitbupNotifications 9 }
+
+otitbupLogin NOTIFICATION-TYPE
+    OBJECTS { otitbupEventType, otitbupEventMessage, otitbupEventSeverity }
+    STATUS  current
+    DESCRIPTION "A user logged into the web UI."
+    ::= { otitbupNotifications 10 }
+
+otitbupLogout NOTIFICATION-TYPE
+    OBJECTS { otitbupEventType, otitbupEventMessage, otitbupEventSeverity }
+    STATUS  current
+    DESCRIPTION "A user logged out of the web UI."
+    ::= { otitbupNotifications 11 }
+
+otitbupUserCreate NOTIFICATION-TYPE
+    OBJECTS { otitbupEventType, otitbupEventMessage, otitbupEventSeverity }
+    STATUS  current
+    DESCRIPTION "A user account was created."
+    ::= { otitbupNotifications 12 }
+
+otitbupUserDelete NOTIFICATION-TYPE
+    OBJECTS { otitbupEventType, otitbupEventMessage, otitbupEventSeverity }
+    STATUS  current
+    DESCRIPTION "A user account was deleted."
+    ::= { otitbupNotifications 13 }
+
+otitbupUserPasswd NOTIFICATION-TYPE
+    OBJECTS { otitbupEventType, otitbupEventMessage, otitbupEventSeverity }
+    STATUS  current
+    DESCRIPTION "A user password was changed."
+    ::= { otitbupNotifications 14 }
+
+otitbupChangeUnexpected NOTIFICATION-TYPE
+    OBJECTS { otitbupEventType, otitbupEventMessage, otitbupEventSeverity }
+    STATUS  current
+    DESCRIPTION "An unexpected (out-of-maintenance) config change was
+                 detected on a device."
+    ::= { otitbupNotifications 15 }
+
+END

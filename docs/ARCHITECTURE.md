@@ -50,6 +50,8 @@ otitbup.yml (inventory, source of truth, versioned by the operator)
 | `scaffold.py` | `otitbup init` — starter config/secrets scaffolding |
 | `events.py` | Event bus: audit + Python log + syslog + SNMPv2c traps (stdlib BER encoder) |
 | `sessions.py` | In-memory web sessions (cookie login/logout, CSRF token) |
+| `snmp.py` | Minimal SNMPv2c GET client + BER decoder (fingerprint driver, discovery enrichment) |
+| `tickets.py` | Ticketing hooks (ServiceNow/Jira/generic) fired from the event bus |
 | `gitstore.py` | Local git repo; per-device commits; `manifest.yml` with sha256 fingerprints (change detection for binaries); optional push to remote |
 | `runner.py` | Orchestration: per-zone concurrency semaphores, maintenance-window checks, change/failure alerts |
 | `daemon.py` | Scheduler loop; per-device interval state in `state.json` |

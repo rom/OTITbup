@@ -1,0 +1,28 @@
+[Unit]
+Description=otitbup backup scheduler
+Documentation=https://github.com/rom/OTITbup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=otitbup
+Group=otitbup
+WorkingDirectory=/var/lib/otitbup
+ExecStart=/opt/otitbup/venv/bin/otitbup -c /etc/otitbup/otitbup.yml daemon
+# Reload the inventory without a restart: systemctl reload otitbup-daemon
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=10
+
+# Hardening — the collector is read-only toward devices and only writes
+# under its state directory.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/otitbup
+StateDirectory=otitbup
+
+[Install]
+WantedBy=multi-user.target

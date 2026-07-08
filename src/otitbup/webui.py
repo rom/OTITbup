@@ -866,10 +866,36 @@ class WebUI:
                 f"<td>{html.escape(subject)}{note}</td></tr>"
             )
 
-        # Run status and rehearsal history (from the run store).
+        # Run status, health timeline, and rehearsal history.
         status_line = ""
         rehearsal_block = ""
+        timeline_block = ""
         if self.runstore is not None:
+            import datetime as _dt
+            runs = self.runstore.recent_runs(device.qualified_name, limit=60)
+            if runs:
+                cells = ""
+                for run in reversed(runs):   # oldest -> newest
+                    when = _dt.datetime.fromtimestamp(
+                        run["started_at"], _dt.timezone.utc
+                    ).strftime("%Y-%m-%d %H:%M")
+                    if not run["ok"]:
+                        color, sym = "#b3261e", "fail"
+                    elif run["changed"]:
+                        color, sym = "#0b57d0", "change"
+                    else:
+                        color, sym = "#1b7a2f", "ok"
+                    cells += (
+                        f"<span title='{when}: {sym}' style='display:inline-"
+                        f"block;width:10px;height:18px;margin:1px;background:"
+                        f"{color};border-radius:2px'></span>"
+                    )
+                timeline_block = (
+                    "<h3>Health timeline "
+                    "<span class='muted' style='font-weight:normal'>"
+                    "(oldest → newest; green ok, blue change, red fail)"
+                    "</span></h3><p>" + cells + "</p>"
+                )
             import time
             now = time.time()
             st = self.runstore.status(device.qualified_name)
@@ -1001,6 +1027,7 @@ class WebUI:
             f"<a href='/retention'>retention</a> "
             f"{html.escape(policy_line)}{status_line}</p>"
             + action_bar
+            + timeline_block
             + policy_block
             + "<h3>Artifacts (latest backup)</h3>"
             + (

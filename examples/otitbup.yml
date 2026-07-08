@@ -89,6 +89,14 @@ events:                   # fan out operational events to syslog / SNMP traps
   #   port: 162
   #   community: public
   #   enterprise_oid: 1.3.6.1.4.1.99999   # replace with YOUR enterprise OID
+                                          # (MIB: mibs/OTITBUP-MIB.txt)
+
+tickets:                  # open a ticket on selected events
+  # backend: servicenow                # servicenow | jira | generic
+  # url: https://example.service-now.com
+  # username: svc-otitbup
+  # password: change-me
+  # on: [backup.error, change.unexpected]
 
 sites:
   - name: plant-a

@@ -25,6 +25,7 @@ retention: { ... }      # global retention defaults (section below)
 policy:    { ... }      # config policy checks      (section below)
 reports:   { ... }      # scheduled compliance reports (section below)
 events:    { ... }      # syslog + SNMP trap event sinks (section below)
+tickets:   { ... }      # open tickets on events    (section below)
 sites:     [ ... ]      # the inventory             (section below)
 ```
 
@@ -352,7 +353,28 @@ Event types emitted: `process.start`/`process.stop`,
 `<enterprise_oid>.0.<event-number>`; the trap carries the event type,
 message and severity as string varbinds under `<enterprise_oid>.1.{1,2,3}`.
 Replace the placeholder `enterprise_oid` with your organisation's IANA
-enterprise number. Sink failures are logged, never fatal.
+enterprise number. Sink failures are logged, never fatal. A formal MIB is
+provided in `mibs/OTITBUP-MIB.txt`.
+
+## tickets
+
+Open a ticket when specific events fire — typically backup failures and
+unexpected changes. Backends: `servicenow`, `jira`, or `generic` (a plain
+JSON webhook). Stdlib HTTP, no SDK.
+
+```yaml
+tickets:
+  backend: servicenow          # servicenow | jira | generic
+  url: https://example.service-now.com
+  username: svc-otitbup        # basic auth (servicenow / generic)
+  password: ...
+  on: [backup.error, change.unexpected]   # event types that open a ticket
+  # servicenow: { table: incident }
+  # jira: { project: OT, issue_type: Task, email: <email>, token: <PAT> }
+```
+
+Only the event types listed in `on` create tickets, so routine events
+don't flood the queue. Delivery failures are logged, never fatal.
 
 ## Files next to the config
 

@@ -1,8 +1,9 @@
 # OTITbup — Usage guide
 
 A task-oriented walkthrough of the tool. For the exhaustive config-file
-reference see [CONFIGURATION.md](CONFIGURATION.md); for design see
-[ARCHITECTURE.md](ARCHITECTURE.md).
+reference see [CONFIGURATION.md](CONFIGURATION.md); for common questions
+see [FAQ.md](FAQ.md); for deployment see [../packaging/](../packaging/);
+for design see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Contents
 
@@ -211,7 +212,9 @@ otitbup reconcile 10.20.0.0/24                   # inventory vs. network
 Both are opt-in, strictly sequential TCP-connect scans (OT-safe). Discovery
 proposes an inventory-shaped YAML for review; reconciliation reports
 **unmanaged** hosts (on the network, not backed up) and **unreachable**
-devices (in inventory, no response) — coverage you can prove.
+devices (in inventory, no response) — coverage you can prove. Add
+`--enrich` to discovery to probe each finding's identity (vendor/model via
+SNMP or the matching identity driver) and annotate the proposal.
 
 ## 13. The web UI
 
@@ -255,7 +258,20 @@ syslog and SNMPv2c traps. Emitted events:
 
 All events are always written to the audit log (visible at `/audit`) and
 Python logging; syslog/SNMP are additional sinks. Both are stdlib — no
-pysnmp or external agent required.
+pysnmp or external agent required. A formal MIB defining the trap OIDs is
+in `mibs/OTITBUP-MIB.txt`.
+
+**Ticketing** — set `tickets` (see CONFIGURATION.md) to open a
+ServiceNow/Jira/generic-webhook ticket when selected events fire (by
+default `backup.error` and `change.unexpected`), so failures and
+unauthorized changes land in your queue automatically.
+
+## Deploying as a service
+
+Run the scheduler and web UI as services with the systemd units or Docker
+files in [`packaging/`](../packaging/). The web service exposes an
+unauthenticated `/healthz` for liveness, and the daemon reloads its config
+on `SIGHUP` (`systemctl reload otitbup-daemon`) or when the file changes.
 
 ## 15. Secrets
 

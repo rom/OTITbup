@@ -41,6 +41,7 @@ BACKUP_STOP = "backup.stop"
 BACKUP_ERROR = "backup.error"
 CONFIG_READ = "config.read"
 CONFIG_RELOAD = "config.reload"
+CHANGE_UNEXPECTED = "change.unexpected"
 LOGIN = "auth.login"
 LOGOUT = "auth.logout"
 USER_CREATE = "user.create"
@@ -54,9 +55,11 @@ _EVENT_IDS: dict[str, int] = {
     CONFIG_READ: 8, CONFIG_RELOAD: 9,
     LOGIN: 10, LOGOUT: 11,
     USER_CREATE: 12, USER_DELETE: 13, USER_PASSWD: 14,
+    CHANGE_UNEXPECTED: 15,
 }
 _DEFAULT_SEVERITY = {
     BACKUP_ERROR: "error",
+    CHANGE_UNEXPECTED: "warning",
     USER_CREATE: "notice", USER_DELETE: "notice", USER_PASSWD: "notice",
 }
 _SYSLOG_LEVEL = {
@@ -153,11 +156,16 @@ def build_snmpv2_trap(
 # ------------------------------------------------------------- EventBus
 
 class EventBus:
-    def __init__(self, cfg: dict[str, Any] | None = None, runstore=None):
+    def __init__(
+        self, cfg: dict[str, Any] | None = None, runstore=None,
+        tickets: dict[str, Any] | None = None,
+    ):
         self.cfg = cfg or {}
         self.runstore = runstore
         self._start = time.monotonic()
         self._request_id = 0
+        from .tickets import TicketManager
+        self.tickets = TicketManager(tickets)
 
     def emit(
         self, event_type: str, message: str, *,
@@ -177,6 +185,10 @@ class EventBus:
             self._to_syslog(event)
         if self.cfg.get("snmp_trap"):
             self._to_snmp(event)
+        if self.tickets.wants(event.type):
+            self.tickets.open_ticket(
+                event.type, event.message, event.detail or event.message
+            )
 
     def _to_audit(self, event: Event) -> None:
         if self.runstore is None:
