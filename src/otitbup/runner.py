@@ -11,11 +11,19 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
+from pathlib import Path
+
 from .alerts import AlertManager
+from .blobstore import BlobStore
 from .drivers import get_driver
 from .gitstore import GitStore
 from .models import AppConfig, Device
 from .secrets import SecretsBackend
+
+
+def default_blobstore(config: AppConfig) -> BlobStore:
+    """The blob store lives next to (not inside) the backup repo."""
+    return BlobStore(Path(config.data_dir).parent / "blobs")
 
 log = logging.getLogger("otitbup.runner")
 
@@ -43,6 +51,7 @@ class Runner:
         self.secrets = secrets
         self.alerts = alerts or AlertManager(config.alerts)
         self.force = force
+        self.blobstore = default_blobstore(config)
 
     def backup_devices(self, devices: list[Device]) -> list[BackupResult]:
         self.store.ensure_repo()
@@ -107,7 +116,13 @@ class Runner:
                         )
                     secret = self.secrets.get(device.credentials)
                 artifacts = driver.collect(device, secret)
-                commit = self.store.write_and_commit(device, artifacts)
+                threshold = self.config.retention_for(device).get(
+                    "large_file_threshold", 0
+                )
+                commit = self.store.write_and_commit(
+                    device, artifacts,
+                    blobstore=self.blobstore, threshold=threshold,
+                )
                 if commit:
                     log.info("%s: changed, commit %s", device.qualified_name, commit[:10])
                 else:

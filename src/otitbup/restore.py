@@ -79,6 +79,7 @@ def export_bundle(
     device: Device,
     out_dir: str | Path,
     commit: str | None = None,
+    blobstore=None,
 ) -> tuple[str, list[str]]:
     """Export the device's artifacts at `commit` (default: latest backup)
     into `out_dir`. Returns (commit, hash_mismatches)."""
@@ -105,11 +106,25 @@ def export_bundle(
             store.read_file_at(commit, manifest_path)
         ) or {}
 
+    from .blobstore import parse_pointer
+
     mismatches: list[str] = []
     prefix = device.path + "/"
     for repo_path in files:
         relative = repo_path[len(prefix):]
         data = store.read_file_at(commit, repo_path)
+        pointer = parse_pointer(data)
+        if pointer:
+            # Offloaded artifact: resolve the real content from the blob
+            # store; content expired by retention is a hard mismatch.
+            sha, _size = pointer
+            try:
+                if blobstore is None:
+                    raise KeyError(sha)
+                data = blobstore.get(sha)
+            except KeyError:
+                mismatches.append(f"{relative} (content expired by retention)")
+                continue
         target = artifacts_dir / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)

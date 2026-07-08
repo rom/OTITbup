@@ -96,6 +96,15 @@ def main(argv: list[str] | None = None) -> int:
         "--out", default="discovered.yml", help="proposal file to write"
     )
 
+    p_retention = sub.add_parser(
+        "retention",
+        help="show effective retention policies and prune expired blobs",
+    )
+    p_retention.add_argument(
+        "--apply", action="store_true",
+        help="delete expired blobs (default: dry run, print only)",
+    )
+
     p_restore = sub.add_parser(
         "restore",
         help="export a hash-verified restore bundle (no device writes)",
@@ -273,6 +282,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
     if args.command == "serve":
+        from .runner import default_blobstore
         from .webui import serve
         store = GitStore(config.data_dir)
         store.ensure_repo()
@@ -292,6 +302,7 @@ def main(argv: list[str] | None = None) -> int:
                 port=args.port or int(config.webui.get("port", 8080)),
                 auth=config.webui.get("auth"),
                 tls=tls,
+                blobstore=default_blobstore(config),
             )
         except KeyboardInterrupt:
             return 0
@@ -323,8 +334,44 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
+    if args.command == "retention":
+        from .retention import apply as retention_apply
+        from .retention import describe_policy, plan
+        from .runner import default_blobstore
+        store = GitStore(config.data_dir)
+        store.ensure_repo()
+        blobstore = default_blobstore(config)
+        prune_plan = plan(config, store, blobstore)
+        for dplan in prune_plan.devices:
+            sources = ", ".join(
+                f"{key}={dplan.sources[key]}"
+                for key in sorted(dplan.policy)
+                if dplan.sources.get(key) not in (None, "default")
+            )
+            print(
+                f"{dplan.device:40s} {describe_policy(dplan.policy):45s} "
+                f"backups kept {dplan.kept_backups}/{dplan.backups}"
+                + (f"   [{sources}]" if sources else "")
+            )
+        print(
+            f"\nblob store: {prune_plan.blob_count} blob(s), "
+            f"{prune_plan.blob_bytes / 1048576:.1f} MiB total; "
+            f"{len(prune_plan.deletable)} expired "
+            f"({prune_plan.deletable_bytes / 1048576:.1f} MiB)"
+        )
+        if not prune_plan.deletable:
+            return 0
+        if args.apply:
+            freed = retention_apply(prune_plan, blobstore)
+            print(f"pruned {len(prune_plan.deletable)} blob(s), "
+                  f"freed {freed / 1048576:.1f} MiB")
+        else:
+            print("dry run — re-run with --apply to delete")
+        return 0
+
     if args.command == "restore":
         from .restore import RestoreError, export_bundle
+        from .runner import default_blobstore
         [device] = config.find_devices([args.device])
         store = GitStore(config.data_dir)
         try:
@@ -334,7 +381,8 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             out = args.out or f"restore-{device.name}-{commit[:8]}"
             commit, mismatches = export_bundle(
-                store, device, out, commit=commit
+                store, device, out, commit=commit,
+                blobstore=default_blobstore(config),
             )
         except RestoreError as exc:
             print(f"restore error: {exc}", file=sys.stderr)

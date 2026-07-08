@@ -26,6 +26,31 @@ def _require(mapping: dict[str, Any], key: str, context: str) -> Any:
     return mapping[key]
 
 
+_RETENTION_KEYS = {"keep_versions", "keep_days", "large_file_threshold"}
+
+
+def _parse_retention(raw: Any, context: str) -> dict[str, int]:
+    if not raw:
+        return {}
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{context}: retention must be a mapping")
+    unknown = set(raw) - _RETENTION_KEYS
+    if unknown:
+        raise ConfigError(
+            f"{context}: unknown retention key(s): {', '.join(sorted(unknown))} "
+            f"(valid: {', '.join(sorted(_RETENTION_KEYS))})"
+        )
+    parsed = {}
+    for key, value in raw.items():
+        try:
+            parsed[key] = int(value)
+        except (TypeError, ValueError):
+            raise ConfigError(f"{context}: retention.{key} must be an integer")
+        if parsed[key] < 0:
+            raise ConfigError(f"{context}: retention.{key} must be >= 0")
+    return parsed
+
+
 def load_config(path: str | Path) -> AppConfig:
     path = Path(path)
     if not path.exists():
@@ -43,6 +68,9 @@ def load_config(path: str | Path) -> AppConfig:
     seen_devices: set[str] = set()
     for site_raw in raw.get("sites", []) or []:
         site_name = _require(site_raw, "name", "site")
+        site_retention = _parse_retention(
+            site_raw.get("retention"), f"site {site_name}"
+        )
         zones: list[Zone] = []
         for zone_raw in site_raw.get("zones", []) or []:
             zone_name = _require(zone_raw, "name", f"site {site_name}: zone")
@@ -51,6 +79,10 @@ def load_config(path: str | Path) -> AppConfig:
                 site=site_name,
                 maintenance_window=zone_raw.get("maintenance_window"),
                 max_concurrent=int(zone_raw.get("max_concurrent", 1)),
+                retention=_parse_retention(
+                    zone_raw.get("retention"),
+                    f"zone {site_name}/{zone_name}",
+                ),
             )
             if zone.maintenance_window:
                 # Validate early: a bad window should fail at load time,
@@ -73,6 +105,9 @@ def load_config(path: str | Path) -> AppConfig:
                     schedule=str(dev_raw.get("schedule", "1d")),
                     credentials=dev_raw.get("credentials"),
                     options=dev_raw.get("options") or {},
+                    retention=_parse_retention(
+                        dev_raw.get("retention"), f"device {dev_name}"
+                    ),
                 )
                 parse_interval(device.schedule)
                 if device.qualified_name in seen_devices:
@@ -82,7 +117,9 @@ def load_config(path: str | Path) -> AppConfig:
                 seen_devices.add(device.qualified_name)
                 zone.devices.append(device)
             zones.append(zone)
-        sites.append(Site(name=site_name, zones=zones))
+        sites.append(
+            Site(name=site_name, zones=zones, retention=site_retention)
+        )
 
     return AppConfig(
         data_dir=data_dir,
@@ -91,4 +128,5 @@ def load_config(path: str | Path) -> AppConfig:
         alerts=raw.get("alerts") or {},
         git=raw.get("git") or {},
         webui=raw.get("webui") or {},
+        retention=_parse_retention(raw.get("retention"), "retention"),
     )

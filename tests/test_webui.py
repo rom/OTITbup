@@ -120,6 +120,23 @@ def test_drivers_page_marks_in_use(server):
     assert "siemens_s7" in text
 
 
+def test_retention_page_shows_policies(server):
+    base, _, _ = server
+    status, _, body = _get(base + "/retention")
+    text = body.decode()
+    assert status == 200
+    assert "plant-a/cell-1/plc-01" in text
+    assert "unlimited" in text            # no limits configured in fixture
+    assert "otitbup retention" in text    # points at the prune command
+    assert "Offload threshold" in text
+
+
+def test_device_page_shows_retention_policy(server):
+    base, _, _ = server
+    _, _, body = _get(base + "/device/plant-a/cell-1/plc-01")
+    assert "retention" in body.decode()
+
+
 def test_unknown_routes_404(server):
     base, _, _ = server
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))

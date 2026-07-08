@@ -54,16 +54,29 @@ class GitStore:
             self._git("config", "user.name", "otitbup")
             self._git("config", "user.email", "otitbup@localhost")
 
-    def write_and_commit(self, device: Device, artifacts: list[Artifact]) -> str | None:
+    def write_and_commit(
+        self,
+        device: Device,
+        artifacts: list[Artifact],
+        blobstore=None,
+        threshold: int | None = None,
+    ) -> str | None:
         """Replace the device's directory contents with `artifacts` and
-        commit. Returns the commit hash, or None if nothing changed."""
+        commit. Returns the commit hash, or None if nothing changed.
+
+        With a blobstore and a non-zero threshold, artifacts of at least
+        `threshold` bytes are stored content-addressed in the blob store
+        and a pointer file is committed instead (see blobstore.py) — the
+        manifest always records the real content hash either way."""
+        from .blobstore import make_pointer
+
         with self._lock:
             device_dir = self.root / device.path
             if device_dir.exists():
                 shutil.rmtree(device_dir)
             device_dir.mkdir(parents=True)
 
-            manifest: dict[str, dict[str, str]] = {}
+            manifest: dict[str, dict] = {}
             for artifact in artifacts:
                 target = device_dir / artifact.name
                 if not target.resolve().is_relative_to(device_dir.resolve()):
@@ -71,11 +84,25 @@ class GitStore:
                         f"artifact escapes device dir: {artifact.name}"
                     )
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(artifact.data)
-                manifest[artifact.name] = {
-                    "sha256": hashlib.sha256(artifact.data).hexdigest(),
+                sha256 = hashlib.sha256(artifact.data).hexdigest()
+                entry: dict = {
+                    "sha256": sha256,
                     "kind": artifact.kind,
+                    "size": len(artifact.data),
                 }
+                if (
+                    blobstore is not None
+                    and threshold
+                    and len(artifact.data) >= threshold
+                ):
+                    blobstore.put(artifact.data)
+                    target.write_bytes(
+                        make_pointer(sha256, len(artifact.data))
+                    )
+                    entry["offloaded"] = True
+                else:
+                    target.write_bytes(artifact.data)
+                manifest[artifact.name] = entry
             with open(device_dir / "manifest.yml", "w") as fh:
                 yaml.safe_dump(manifest, fh, sort_keys=True)
 
@@ -114,6 +141,18 @@ class GitStore:
             "log", "-1", "--format=%H", "--", device.path, check=False
         ).strip()
         return commit or None
+
+    def device_commits(self, device: Device) -> list[tuple[str, int]]:
+        """(commit hash, unix timestamp) per backup, newest first."""
+        out = self._git(
+            "log", "--format=%H %ct", "--", device.path, check=False
+        )
+        commits = []
+        for line in out.splitlines():
+            commit, _, timestamp = line.partition(" ")
+            if commit and timestamp.isdigit():
+                commits.append((commit, int(timestamp)))
+        return commits
 
     def commit_summary(self, commit: str) -> str:
         return self._git(

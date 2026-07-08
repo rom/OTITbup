@@ -31,11 +31,13 @@ otitbup.yml (inventory, source of truth, versioned by the operator)
 | `models.py` | Site → Zone → Device dataclasses; multi-site-ready hierarchy |
 | `config.py` | YAML inventory loading with load-time validation (schedules, windows, duplicates) |
 | `windows.py` | Interval schedules (`30m`, `4h`, `1d`) and maintenance windows (`22:00-06:00`, overnight-aware) |
-| `secrets.py` | `SecretsBackend` interface; `plainfile` and `encryptedfile` (Fernet) backends; Vault/CyberArk slot in later |
+| `secrets.py` | `SecretsBackend` interface; `plainfile`, `encryptedfile` (Fernet), `vault` (HashiCorp KV v2, stdlib HTTP) and `cyberark` (CCP REST, incl. client-cert auth) backends |
 | `drivers/` | `Driver.collect(device, secrets) -> [Artifact]`; registry with lazy imports; read-only by contract. PLC: `siemens_s7`, `rockwell_enip`, `schneider_modbus`, `mitsubishi_mc`, `omron_fins`, `beckhoff_ads`, `generic_opcua`, `generic_file`. RTU: `generic_dnp3`, `sel_terminal`, `siemens_sicam`, `abb_rtu520`/`abb_rtu560`. Network: `generic_ssh` + vendor profiles and `generic_http` for web-managed gear — run `otitbup drivers` for the full list |
 | `discovery.py` | Opt-in sequential TCP probe of known OT/IT ports; emits an inventory-shaped YAML *proposal* for human review — never edits the inventory |
 | `auth.py` | PBKDF2 password hashing and HTTP Basic verification for the web UI |
 | `restore.py` | Guided restore: exports hash-verified artifacts + RESTORE.md checklist with driver-specific vendor-tool instructions; performs no device writes |
+| `blobstore.py` | Content-addressed store for large artifacts (sha256, deduplicated); pointer files go into git |
+| `retention.py` | Hierarchical retention policies (device > zone > site > global), prune planning/apply; never rewrites git history |
 | `gitstore.py` | Local git repo; per-device commits; `manifest.yml` with sha256 fingerprints (change detection for binaries); optional push to remote |
 | `runner.py` | Orchestration: per-zone concurrency semaphores, maintenance-window checks, change/failure alerts |
 | `daemon.py` | Scheduler loop; per-device interval state in `state.json` |
