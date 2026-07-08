@@ -89,6 +89,23 @@ Bachmann, B&R, Emerson ROC/FloBoss) — each capturing what the device's open
 protocol exposes (SSH CLI, HTTP export, SFTP project files, or DNP3
 attributes).
 
+**Device GUIDs & provenance.** Every device has a stable **GUID** for
+chain-of-custody: pin it with `guid:` on the device, or leave it out and a
+UUIDv5 is derived from the qualified name (so every device always has one).
+
+```bash
+otitbup guids            # list each device's GUID, pinned vs. derived
+otitbup guids --assign   # pin a random UUIDv4 for devices lacking one
+```
+
+`--assign` writes a persistent UUIDv4 into the config so the identity
+survives a device rename. Each backup records provenance in the
+`manifest.yml` (`provenance: {device_guid, driver}`) and in the commit's
+`Device-GUID` / `Driver` / `Tool-Version` / `Appliance` / `Captured-At`
+trailers — tamper-evident under signed commits and queryable with
+`git log`. Set the top-level `appliance_id` to name this appliance in the
+trailers. See CONFIGURATION.md.
+
 ## 4. Running backups
 
 ```bash
@@ -121,6 +138,16 @@ system or notify a chat channel. Hooks get the device context in
 `OTITBUP_*` env vars, run with a 120s timeout, and a failing hook is logged
 but never fails the backup. See CONFIGURATION.md.
 
+**Capture quality.** A capture that produced no artifacts, is smaller than
+`capture.min_bytes`, or is missing the `capture.expect_match` content is
+**rejected before it enters the archive** — the backup fails with a clear
+message (`capture too small…`, `capture failed content check…`) and nothing
+is committed, so a truncated download or an error page never masquerades as
+a good backup. Set the guards globally under `capture` or per device via
+`options.min_bytes` / `options.expect_match`. The statistical companion is
+the `size_drop` anomaly detector (§8), which flags a capture far below a
+device's trailing median size.
+
 ## 5. Scheduling (the daemon)
 
 ```bash
@@ -149,7 +176,18 @@ timezone that interprets `maintenance_window`.
 
 The daemon also runs light **housekeeping** (`git gc`, per
 `housekeeping.gc_interval_days`) and, after each backup, **anomaly
-detection** (see §8).
+detection** (see §8). On their own intervals it runs several scheduled
+maintenance jobs — each off unless its interval is set:
+
+- **integrity scrub** (`integrity.interval_days`) — verify + `git fsck`
+  (+ optional signature check); persists the result, emits an event, and
+  alerts on failure (see §8).
+- **offsite push** (`offsite.interval_days`) — build/encrypt/upload a
+  snapshot (see §11).
+- **restore rehearsals** (`rehearsal.interval_days`) — export + verify a
+  bundle per device across all devices, alerting on any failure.
+
+It still emits scheduled compliance reports when `reports.interval` is set.
 
 ## 6. Inspecting backups
 
@@ -225,8 +263,31 @@ intermittent, missed by both the failure and recovery alerts), and **slow
 trends** (a gradual, sustained slowdown a single-point z-score misses). It
 runs automatically after each backup — emitting an `anomaly.detected` event
 and alert — and on demand with `otitbup anomalies`. Tune the thresholds
-under `anomaly` (sigma, history depth, change windows, flap and trend
-windows); see CONFIGURATION.md.
+under `anomaly` (sigma, history depth, change windows, flap, trend and
+`size_drop` windows); see CONFIGURATION.md.
+
+### Integrity & scrubbing
+
+```bash
+otitbup integrity                   # one-pass scrub: verify + git fsck
+otitbup integrity --all-commits     # walk full history, not just latest
+otitbup integrity --signatures      # + re-verify signed-commit signatures
+otitbup integrity --no-fsck         # skip the git fsck leg
+otitbup integrity --alert           # persist result, emit event, alert on failure
+```
+
+`integrity` is a one-pass continuous-integrity scrub that combines content
+verification (`verify`: re-hash artifacts vs. manifests + blob presence),
+repository health (`git fsck`), and — with `--signatures` — signed-commit
+signature verification. `--alert` behaves like the daemon: it persists the
+result, emits an `integrity.ok` / `integrity.error` event (fanned out to
+syslog/SNMP/tickets), and alerts on failure.
+
+Schedule it from the daemon with `integrity.interval_days` (0/unset = off),
+tuning `all_commits`, `fsck` and `signatures` under the `integrity` config.
+The last result surfaces on `/api/status` (an `integrity` object) and
+`/metrics` (`otitbup_integrity_ok`,
+`otitbup_integrity_last_check_timestamp_seconds`). See CONFIGURATION.md.
 
 ## 9. Policy & compliance
 
@@ -281,6 +342,24 @@ Text configs stay in git forever; artifacts ≥ `large_file_threshold` are
 offloaded to a deduplicated blob store and expire by `keep_versions` /
 `keep_days`, set globally and overridable per site/zone/device. Git history
 is never rewritten. Run `--apply` from cron.
+
+**Legal holds & retention lock.** Two controls keep content out of the
+prune:
+
+```bash
+otitbup hold set plant-a/cell-1/plc-01 --reason "litigation 2026-14"
+otitbup hold set "plant-a/*"            # a whole site (or site/zone/*, or *)
+otitbup hold list                       # active holds
+otitbup hold clear plant-a/cell-1/plc-01
+```
+
+A **legal hold** exempts a held scope's entire offloaded history from
+pruning until cleared — shown as `[HELD]` in `otitbup retention`. The
+config-level **retention lock** (`retention.lock_days: N`) keeps everything
+captured within the last `N` days regardless of `keep_versions` /
+`keep_days` — a minimum-retention / WORM window. For true off-appliance
+immutability, point the git remote or `offsite` target at an append-only /
+object-locked store (WORM, e.g. S3 Object Lock). See CONFIGURATION.md.
 
 ### Backup strategy (3-2-1 / 3-2-1-1-0)
 
@@ -517,6 +596,28 @@ Backends: `plainfile`, `encryptedfile` (Fernet), `vault` (HashiCorp KV v2)
 and `cyberark` (Central Credential Provider) — the last two are stdlib
 HTTP clients needing no extra dependencies. See CONFIGURATION.md.
 
+### Blob-store key rotation & compression
+
+Separate from the *secrets* key, the **blob store** (offloaded large
+artifacts) can be encrypted at rest with `encryption.blob_key`. Rotate that
+key, or enable/disable encryption, with `blobkey`:
+
+```bash
+otitbup blobkey genkey                                   # print a new Fernet key
+otitbup blobkey rotate --new-key-file new.key --old-key-file old.key
+otitbup blobkey rotate --new-key-file new.key            # encrypt plaintext blobs
+otitbup blobkey rotate --old-key-file old.key --decrypt  # remove encryption
+```
+
+Every blob is re-encrypted from the old key to the new one; blobs stay
+content-addressed by their plaintext sha256, so names never change and each
+blob's plaintext hash is re-verified as a guard. Rotate the **offsite** key
+separately by re-pushing with the new `offsite.key_file` (old snapshots
+stay under their old key). **Keep a key backup/escrow** — a lost key makes
+those blobs and snapshots unrecoverable. Set `encryption.compress: true` to
+gzip new blobs before encryption (backward compatible with existing blobs).
+See CONFIGURATION.md.
+
 ## 16. Command reference
 
 Two built-in guides: **`otitbup help`** prints every command grouped by
@@ -528,17 +629,20 @@ full description (arguments, examples, related commands) of one command.
 | `help` / `explain <cmd>` | list commands; describe one at length |
 | `init` | scaffold a starter config |
 | `validate` / `list` / `drivers` | check config; list devices; list drivers |
+| `guids [--assign]` | list device GUIDs (pinned vs. derived); `--assign` pins a UUIDv4 |
 | `backup [devices] [--site --zone --force --dry-run]` | run a backup |
 | `test [devices] [--site --zone]` | dry-run connectivity/credential test (no commit) |
 | `daemon [--once]` | scheduler |
 | `serve [--host --port]` | web UI |
 | `log` / `diff [--from --to]` / `search` | inspect history and configs |
 | `status` / `verify [--all-commits]` / `policy` | health, integrity, compliance |
+| `integrity [--all-commits --no-fsck --signatures --alert]` | one-pass scrub: verify + git fsck (+ signatures) |
 | `anomalies` | statistical anomalies (slow backups, change storms) |
 | `annotate` / `maintenance` | change management |
 | `baseline set|clear|drift` | golden-config drift |
 | `desired [--diff]` | drift vs. declared config-as-code (`desired.dir`) |
 | `retention [--apply]` | prune large-artifact blobs |
+| `hold set|clear|list <scope>` | legal holds exempting a scope from retention |
 | `gc [--aggressive]` | repack/prune the backup git repo |
 | `restore` / `net-restore [--apply]` / `dr-plan` / `rehearse` | recovery |
 | `discover [--enrich]` / `reconcile` / `netbox` | find devices; prove coverage |
@@ -550,3 +654,4 @@ full description (arguments, examples, related commands) of one command.
 | `token create|list|delete` | manage scoped API tokens |
 | `passwd` / `certgen` | web UI credentials and TLS |
 | `secrets genkey|encrypt|decrypt` | secrets management |
+| `blobkey genkey|rotate` | blob-store encryption key rotation / (de)encryption |

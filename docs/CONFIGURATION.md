@@ -17,13 +17,18 @@ lives in [`examples/otitbup.yml`](../examples/otitbup.yml).
 ```yaml
 data_dir: ./data        # backup git repository; relative paths resolve
                         # against the config file's directory
+appliance_id: plant-a-01  # name recorded in commit provenance trailers
+                          # (section below; defaults to the hostname)
 secrets:    { ... }     # credential backend        (section below)
 git:        { ... }     # remote mirroring + commit signing (section below)
 encryption: { ... }     # blob-store encryption at rest (section below)
 offsite:    { ... }     # encrypted offsite snapshot copy (section below)
 webui:      { ... }     # web UI: host/port/auth/TLS/RBAC (section below)
 alerts:     { ... }     # change/failure/staleness alerts (section below)
-retention:  { ... }     # global retention defaults (section below)
+retention:  { ... }     # global retention defaults + lock/holds (section below)
+capture:    { ... }     # capture-quality guards    (section below)
+integrity:  { ... }     # scheduled continuous-integrity scrub (section below)
+rehearsal:  { ... }     # scheduled restore rehearsals (section below)
 policy:     { ... }     # config policy checks      (section below)
 reports:    { ... }     # scheduled compliance reports (section below)
 events:     { ... }     # syslog + SNMP trap event sinks (section below)
@@ -60,6 +65,11 @@ sites:
         devices:
           - name: plc-01             # required; unique as site/zone/name
             driver: siemens_s7       # required; see `otitbup drivers`
+            guid: 7f3a...            # optional stable device GUID; if absent
+                                     # a UUIDv5 is derived from the qualified
+                                     # name (so every device always has one).
+                                     # `otitbup guids --assign` pins a random
+                                     # UUIDv4 that survives a rename
             address: 10.20.0.10      # IP/hostname (driver-dependent)
             schedule: 12h            # poll interval: Ns / Nm / Nh / Nd
                                      # (default 1d); OR a 5-field cron
@@ -106,6 +116,8 @@ one-line description. The recurring ones:
 | `ams_net_id`, `ams_port` | `beckhoff_ads` | ADS target (default `<address>.1.1`, 851) |
 | `endpoint`, `nodes` | `generic_opcua` | endpoint URL override; extra nodes to read |
 | `max_file_size` | file-fetch drivers | skip files larger than this (default 100 MiB) |
+| `min_bytes` | any driver | reject a capture below this many bytes (per-device capture guard; see [capture](#capture)) |
+| `expect_match` | any driver | regex that must appear in the captured content, else the backup fails (per-device; see [capture](#capture)) |
 
 Vendor SSH profiles (e.g. `cisco_ios`, `hirschmann_hios`, plus enterprise
 and OT presets such as `juniper_junos`, `arista_eos`, `fortinet_fortigate`,
@@ -132,6 +144,10 @@ retention:                        # global defaults
   keep_days: 365                  # ...and of any backup newer than this
   large_file_threshold: 1048576   # offload artifacts >= this many bytes
                                   # (0 disables offloading)
+  lock_days: 90                   # WORM/minimum-retention window: never prune
+                                  # blobs captured within the last N days,
+                                  # regardless of keep_versions/keep_days
+                                  # (0/unset = off)
 
 sites:
   - name: plant-a
@@ -160,6 +176,89 @@ Rules:
 - `otitbup restore` resolves pointers back to full content; a bundle
   whose content was expired by retention is flagged, never silently
   empty.
+
+### Retention lock & legal holds
+
+Two independent controls exempt content from pruning:
+
+- **Retention lock** (`retention.lock_days: N`, above) is a config-level
+  minimum-retention / WORM window: any blob captured within the last `N`
+  days survives `retention --apply` regardless of `keep_versions` /
+  `keep_days`. Set it site/zone/device-wide like the other retention
+  fields.
+- **Legal holds** are a runtime state (not config), set with the CLI. A
+  held scope's entire offloaded history is exempt from pruning until the
+  hold is cleared — shown as `[HELD]` in `otitbup retention`:
+  ```bash
+  otitbup hold set plant-a/cell-1/plc-01 --reason "litigation 2026-14"
+  otitbup hold set "plant-a/cell-1/*"        # a whole zone
+  otitbup hold set "plant-a/*"               # a whole site
+  otitbup hold set "*"                       # everything
+  otitbup hold list                          # active holds
+  otitbup hold clear plant-a/cell-1/plc-01   # release
+  ```
+  The scope is a device qualified name, `site/zone/*`, `site/*`, or `*`.
+
+For true **off-appliance immutability**, point the git remote or the
+`offsite` target at an append-only / object-locked store (WORM — e.g. S3
+Object Lock), so even the appliance cannot rewrite or delete shipped
+copies.
+
+## capture
+
+Capture-quality guards reject a silently truncated, empty or wrong capture
+**before** it enters the archive — nothing is committed on failure.
+
+```yaml
+capture:                          # global defaults (per-device overrides
+                                  # via device options.min_bytes /
+                                  # options.expect_match)
+  min_bytes: 256                  # reject a capture below this many bytes
+  expect_match: "hostname"        # regex that must appear in the content
+```
+
+A capture is rejected if it produced no artifacts, is below `min_bytes`,
+or is missing the `expect_match` content — the backup fails with a clear
+message (`capture too small…`, `capture failed content check…`) and
+nothing is committed. Set the same keys per device under `options`
+(`options.min_bytes`, `options.expect_match`), which override the global
+`capture` defaults for that device. The complementary statistical guard is
+the [`size_drop`](#anomaly) anomaly detector, which flags a capture far
+below a device's trailing median size after the fact.
+
+## integrity
+
+Continuous-integrity scrubbing driven by the daemon (on demand via
+`otitbup integrity`). One pass combines content verification (re-hash
+artifacts vs. manifests + blob presence), repository health (`git fsck`),
+and optional signed-commit signature verification.
+
+```yaml
+integrity:
+  interval_days: 7       # run a scheduled scrub this often (0/unset = off)
+  all_commits: false     # walk full history, not just the latest per device
+  fsck: true             # run `git fsck` on the repo (default true)
+  signatures: false      # re-verify signed-commit signatures
+```
+
+The scheduled scrub persists its result, emits an `integrity.ok` /
+`integrity.error` event (fanned out to syslog/SNMP/tickets like other
+events), and alerts on failure. The last result is exposed on the JSON
+`/api/status` (an `integrity` object) and Prometheus `/metrics`
+(`otitbup_integrity_ok`, `otitbup_integrity_last_check_timestamp_seconds`).
+
+## rehearsal
+
+Scheduled restore rehearsals driven by the daemon: export + verify a
+restore bundle for every device on a cadence, alerting on any failure.
+
+```yaml
+rehearsal:
+  interval_days: 30      # rehearse every device this often (0/unset = off)
+```
+
+Complements the daemon's scheduled [`integrity`](#integrity) scrub and
+scheduled `offsite.interval_days` push (see [offsite](#offsite)).
 
 ## secrets
 
@@ -247,6 +346,33 @@ user.signingkey=<key> -S`), giving a tamper-evident, verifiable authorship
 chain over the whole history. Verify with `git log --show-signature` or
 the gitstore's `verify_commit_signature`.
 
+## Provenance & manifest (chain of custody)
+
+Every device carries a **GUID** — pinned with `device.guid`, or otherwise a
+stable UUIDv5 derived from the device's qualified name (so every device
+always has one). `otitbup guids` lists each device's GUID and whether it is
+*pinned* (config) or *derived*; `otitbup guids --assign` writes a
+persistent random UUIDv4 into the config for devices lacking one, so the
+identity survives a rename. Devices added in the web Config editor get a
+random UUIDv4.
+
+Provenance is recorded per backup in two places:
+
+- **The manifest.** `manifest.yml` is now
+  `{provenance: {device_guid, driver}, artifacts: {name: {sha256, kind,
+  size, offloaded?}}}`. The `provenance` fields are stable, so re-captures
+  don't produce spurious commits; older flat manifests are still read via a
+  compatibility helper.
+- **Commit trailers.** Each backup commit carries `Device-GUID`, `Driver`,
+  `Tool-Version`, `Appliance` and `Captured-At` trailers — tamper-evident
+  under signed commits and queryable via `git log`. The top-level
+  `appliance_id:` names the appliance in the `Appliance` trailer (defaults
+  to the hostname).
+
+```yaml
+appliance_id: plant-a-01   # optional; recorded in the Appliance trailer
+```
+
 ## encryption
 
 Encrypt the **blob store** (the content-addressed store for offloaded
@@ -257,6 +383,9 @@ encryption:
   blob_key: <fernet-key>            # or:
   # blob_key_file: blob.key         # a file holding the key; or set
   #                                 # OTITBUP_BLOB_KEY in the environment
+  compress: true                    # gzip new blobs before encryption
+                                    # (default false; backward compatible
+                                    # with existing raw/encrypted blobs)
 ```
 
 Generate a key:
@@ -270,6 +399,28 @@ manifest hashes are unchanged — only the on-disk bytes become ciphertext.
 This encrypts **only** the blob store; the git repo, `runstore.db` and the
 secrets file are **not** covered — use full-disk encryption (LUKS) for
 those.
+
+**Compression at rest.** `encryption.compress: true` gzip-compresses each
+new blob before it is encrypted. It is backward compatible: pre-existing
+raw or encrypted blobs are read unchanged, and only newly written blobs
+are compressed.
+
+**Key rotation.** `otitbup blobkey rotate` re-encrypts every blob from the
+old key to a new one (or enables/disables encryption entirely):
+
+```bash
+otitbup blobkey genkey                                   # print a new Fernet key
+otitbup blobkey rotate --new-key-file new.key --old-key-file old.key
+otitbup blobkey rotate --new-key-file new.key            # encrypt plaintext blobs
+otitbup blobkey rotate --old-key-file old.key --decrypt  # remove encryption
+```
+
+Blobs stay content-addressed by their plaintext sha256, so names never
+change; each blob's plaintext hash is re-verified during rotation as a
+guard. Rotate the **offsite** key separately by re-pushing with the new
+`offsite.key_file` (old snapshots stay readable under their old key).
+**KEEP A KEY BACKUP/ESCROW** — a lost key makes the encrypted blobs (and
+offsite snapshots) unrecoverable.
 
 ## webui
 
@@ -571,6 +722,9 @@ offsite:
                                        # keep it OFF the remote — it is the
                                        # only thing that can decrypt.
   transport: s3                        # file | sftp | s3
+  interval_days: 1                     # daemon pushes a snapshot this often
+                                       # (0/unset = off; on-demand via
+                                       # `otitbup offsite push`)
 ```
 
 **file** — a directory: local disk, an NFS/SMB mount, or removable media.
@@ -688,12 +842,14 @@ logged, never fatal to the backup. Environment passed to the hook:
 
 ## anomaly
 
-Statistical anomaly detection over run history. Four detectors: **slow
+Statistical anomaly detection over run history. Five detectors: **slow
 backup** (a single run whose duration is a z-score outlier), **change
 storm** (a spike in the change rate), **flapping** (a device oscillating
 between success and failure — intermittent, caught by neither the failure
-nor recovery alert), and **slow trend** (a gradual, sustained slowdown a
-single-point z-score misses). Runs automatically after each backup —
+nor recovery alert), **slow trend** (a gradual, sustained slowdown a
+single-point z-score misses), and **size drop** (the latest capture far
+below the device's trailing median size — a truncated download or error
+page that still "succeeded"). Runs automatically after each backup —
 emitting an `anomaly.detected` event and alert — and on demand via
 `otitbup anomalies`.
 
@@ -710,6 +866,9 @@ anomaly:
   flap_transitions: 3    # ok/fail transitions in that window that trip it
   trend_window: 5        # recent-run window for the slow-trend average
   trend_ratio: 2.0       # recent/baseline mean-duration multiplier that trips
+  size_drop: 0.5         # flag if the latest capture size is below this
+                         # fraction of the trailing median (0.5 = < 50%);
+                         # 0 disables the detector
   history: 50            # runs to load per device
 ```
 
@@ -720,7 +879,10 @@ Flapping fires when the last `flap_window` runs contain at least
 `flap_transitions` success↔failure transitions (and at least one of each).
 Slow trend fires when the mean duration over the last `trend_window` runs
 is at least `trend_ratio`× the older baseline mean — a creep no single
-z-score would catch.
+z-score would catch. Size drop fires when the latest captured size is
+below `size_drop`× the device's trailing median size — catching a
+truncated download or an error page that the collect step still reported
+as success (captured size is recorded per run).
 
 ## housekeeping
 
@@ -781,7 +943,7 @@ each collector a scoped, read-only token with `otitbup token create`.
 |---|---|---|
 | `data/` | `otitbup backup` | the backup git repository (`data_dir`) |
 | `blobs/` | `otitbup backup` | content-addressed store for offloaded large artifacts; pruned by `otitbup retention --apply` |
-| `runstore.db` | `otitbup backup` | SQLite: run results, rehearsals, maintenance state (feeds status/metrics/reports); safe to delete (loses history) |
+| `runstore.db` | `otitbup backup` | SQLite: run results, rehearsals, maintenance state, legal holds, last integrity result (feeds status/metrics/reports); safe to delete (loses history) |
 | `state.json` | `otitbup daemon` | per-device last-run times; safe to delete (forces a run) |
 | `otitbup.key` | `otitbup secrets genkey` | Fernet key, mode 0600 |
 | `webui-cert.pem`, `webui-key.pem` | `otitbup certgen` | TLS pair, key mode 0600 |
