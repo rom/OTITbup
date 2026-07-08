@@ -79,6 +79,11 @@ code { font-size: .85rem; }
 .help:hover .pop, .help:focus .pop { visibility: visible; opacity: 1; }
 .ok { color: #1b7a2f; } .miss { color: #b3261e; }
 .strat { font-size: 1.05rem; padding: .3rem 0; }
+.doc { line-height: 1.6; } .doc h1 { display: block; font-size: 1.5rem; }
+.doc h2 { border-bottom: 1px solid #dde3e8; padding-bottom: .3rem; }
+.doc blockquote { border-left: 3px solid #dde3e8; margin: .8rem 0;
+        padding: .2rem 0 .2rem 1rem; color: #5b6570; }
+.doc li { margin: .2rem 0; } .doc table { margin: 1rem 0; }
 @media (prefers-color-scheme: dark) {
   body { background: #14181c; color: #e3e7eb; }
   th, td { border-color: #2c333a; } th { color: #98a2ad; }
@@ -120,6 +125,38 @@ def _page(title: str, body: str) -> bytes:
         f"<a href='/logout'>Logout</a></nav></header>"
         f"{body}</body></html>"
     ).encode()
+
+
+# Slug -> docs filename for the in-app manual viewer.
+_DOC_FILES = {
+    "usage": "USAGE.md",
+    "configuration": "CONFIGURATION.md",
+    "faq": "FAQ.md",
+    "releasenotes": "RELEASENOTES.md",
+    "architecture": "ARCHITECTURE.md",
+}
+
+
+def _find_doc(slug: str):
+    """Locate a bundled Markdown manual by slug. Returns a Path or None.
+    Searches the OTITBUP_DOCS_DIR override, then the docs/ directory in the
+    source tree relative to this package, then ./docs."""
+    import os
+    filename = _DOC_FILES.get(slug)
+    if filename is None:
+        return None
+    candidates = []
+    env = os.environ.get("OTITBUP_DOCS_DIR")
+    if env:
+        candidates.append(Path(env) / filename)
+    # src/otitbup/webui.py -> repo root is parents[2]; docs/ sits there.
+    here = Path(__file__).resolve()
+    candidates.append(here.parents[2] / "docs" / filename)
+    candidates.append(Path("docs") / filename)
+    for path in candidates:
+        if path.is_file():
+            return path
+    return None
 
 
 def _device_link(device: Device) -> str:
@@ -1107,12 +1144,37 @@ class WebUI:
             f"<h3>{html.escape(t)}</h3><p>{html.escape(b)}</p>"
             for t, b in sections
         )
-        body = (
-            "<h2>Help</h2>"
+        # Link to the full manuals, rendered in-app when the docs directory
+        # is reachable (source deployments); otherwise the links are hidden.
+        doc_links = []
+        for slug, label in (("usage", "Usage guide"),
+                            ("configuration", "Configuration reference"),
+                            ("faq", "FAQ"),
+                            ("releasenotes", "Release notes")):
+            if _find_doc(slug) is not None:
+                doc_links.append(f"<a href='/help/{slug}'>{label}</a>")
+        manuals = (
+            "<p class='muted'>Full manuals: " + " · ".join(doc_links) + "</p>"
+            if doc_links else
             "<p class='muted'>Full guides: USAGE.md, CONFIGURATION.md and "
-            "FAQ.md in the docs directory.</p>" + blocks
+            "FAQ.md in the docs directory.</p>"
         )
+        body = "<h2>Help</h2>" + manuals + blocks
         return _page("otitbup — help", body)
+
+    def doc_page(self, slug: str) -> bytes | None:
+        """Render a bundled Markdown manual (USAGE/FAQ/CONFIGURATION/…) to
+        HTML for in-app viewing. Returns None if the doc isn't found."""
+        path = _find_doc(slug)
+        if path is None:
+            return None
+        from . import mdrender
+        rendered = mdrender.render(path.read_text(encoding="utf-8"))
+        body = (
+            "<p class='muted'><a href='/help'>&larr; Help</a></p>"
+            f"<article class='doc'>{rendered}</article>"
+        )
+        return _page(f"otitbup — {slug}", body)
 
     def drivers(self) -> bytes:
         from .drivers import driver_descriptions
@@ -1711,6 +1773,9 @@ class _Handler(BaseHTTPRequestHandler):
             content = self.ui.strategy()
         elif path == "/help":
             content = self.ui.help_page()
+        elif path.startswith("/help/"):
+            content = self.ui.doc_page(path[len("/help/"):].strip("/"))
+            # None -> fall through to the 404 handling below.
         elif path == "/policy":
             content = self.ui.policy()
         elif path == "/activity":
