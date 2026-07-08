@@ -17,11 +17,12 @@ lives in [`examples/otitbup.yml`](../examples/otitbup.yml).
 ```yaml
 data_dir: ./data        # backup git repository; relative paths resolve
                         # against the config file's directory
-secrets: { ... }        # credential backend        (section below)
-git:     { ... }        # remote mirroring          (section below)
-webui:   { ... }        # web UI: host/port/auth/TLS (section below)
-alerts:  { ... }        # change/failure alerts     (section below)
-sites:   [ ... ]        # the inventory             (section below)
+secrets:   { ... }      # credential backend        (section below)
+git:       { ... }      # remote mirroring          (section below)
+webui:     { ... }      # web UI: host/port/auth/TLS (section below)
+alerts:    { ... }      # change/failure alerts     (section below)
+retention: { ... }      # global retention defaults (section below)
+sites:     [ ... ]      # the inventory             (section below)
 ```
 
 ## The inventory: sites → zones → devices
@@ -78,12 +79,57 @@ Vendor SSH profiles (e.g. `cisco_ios`, `hirschmann_hios`) are presets —
 any of `device_type`, `commands`, `port`, `scrub` set in `options`
 overrides the preset for that device.
 
+## retention
+
+Retention controls repo growth. Git keeps the full history of small/text
+artifacts forever (cheap, and desirable for configs); artifacts at or
+above `large_file_threshold` are **offloaded** to a content-addressed
+blob store (`<data_dir>/../blobs`, deduplicated across devices and
+versions) with a small pointer file committed to git instead. Retention
+then expires old blob content as plain file deletions — **git history is
+never rewritten**.
+
+```yaml
+retention:                        # global defaults
+  keep_versions: 30               # keep blobs of the newest N backups
+  keep_days: 365                  # ...and of any backup newer than this
+  large_file_threshold: 1048576   # offload artifacts >= this many bytes
+                                  # (0 disables offloading)
+
+sites:
+  - name: plant-a
+    retention: {keep_days: 730}          # site override
+    zones:
+      - name: cell-1
+        retention: {keep_versions: 10}   # zone override
+        devices:
+          - name: plc-01
+            retention: {keep_versions: 5}  # device override
+```
+
+Rules:
+
+- Resolution is per field: device > zone > site > global > built-in
+  defaults (`keep_versions: 0`, `keep_days: 0`, threshold 1 MiB).
+- `0` means unlimited. `keep_versions` and `keep_days` are OR'd — a
+  backup's content survives if it is recent enough by either rule.
+- A blob shared by several devices survives while ANY device retains it.
+- `otitbup retention` shows every device's effective policy (with which
+  level set each field) and what would be pruned — it is a dry run;
+  `otitbup retention --apply` deletes. Run it from cron for automatic
+  enforcement.
+- The web UI's **Retention** page shows the same: effective policy per
+  device with per-field sources, plus blob-store usage.
+- `otitbup restore` resolves pointers back to full content; a bundle
+  whose content was expired by retention is flagged, never silently
+  empty.
+
 ## secrets
 
 ```yaml
 secrets:
-  backend: plainfile     # plainfile | encryptedfile
-  path: secrets.yml      # relative to the config file's directory
+  backend: plainfile     # plainfile | encryptedfile | vault | cyberark
+  path: secrets.yml      # file backends: relative to the config file's dir
   # key_file: otitbup.key   # encryptedfile only; or set OTITBUP_KEY
 ```
 
@@ -107,6 +153,42 @@ otitbup secrets decrypt secrets.enc --key-file otitbup.key   # view/edit
 
 Then set `backend: encryptedfile`, `path: secrets.enc`, and either
 `key_file` or the `OTITBUP_KEY` environment variable on the service.
+
+### HashiCorp Vault (KV v2)
+
+```yaml
+secrets:
+  backend: vault
+  url: https://vault.plant.local:8200
+  mount: secret            # KV v2 mount point (default: secret)
+  path_prefix: otitbup     # secret path: <mount>/data/<prefix>/<name>
+  # token_file: vault.token   # or set VAULT_TOKEN on the service
+  # verify_tls: true
+  # ca_cert: internal-ca.pem
+```
+
+Each device credential is one KV v2 secret whose keys are the credential
+fields — e.g. `vault kv put secret/otitbup/plc-01 username=backup
+password=...`. Stdlib HTTP client, no hvac dependency; requests bypass
+any proxy environment.
+
+### CyberArk Central Credential Provider (CCP)
+
+```yaml
+secrets:
+  backend: cyberark
+  url: https://ccp.plant.local
+  app_id: otitbup
+  safe: OT-Backup
+  # folder: Root
+  # object_prefix: otitbup-      # object looked up: <prefix><name>
+  # client_cert: appcert.pem     # CCP client-certificate authentication
+  # client_key: appkey.pem
+  # verify_tls: true / ca_cert: internal-ca.pem
+```
+
+The CCP account's `UserName` becomes `username`, its `Content` becomes
+`password`; `Address`/`Port` properties pass through lowercased.
 
 ## git (remote mirroring)
 
@@ -163,6 +245,7 @@ never block backups.
 | File | Created by | Notes |
 |---|---|---|
 | `data/` | `otitbup backup` | the backup git repository (`data_dir`) |
+| `blobs/` | `otitbup backup` | content-addressed store for offloaded large artifacts; pruned by `otitbup retention --apply` |
 | `state.json` | `otitbup daemon` | per-device last-run times; safe to delete (forces a run) |
 | `otitbup.key` | `otitbup secrets genkey` | Fernet key, mode 0600 |
 | `webui-cert.pem`, `webui-key.pem` | `otitbup certgen` | TLS pair, key mode 0600 |

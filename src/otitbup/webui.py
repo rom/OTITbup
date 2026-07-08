@@ -96,6 +96,7 @@ def _page(title: str, body: str) -> bytes:
         f"<title>{html.escape(title)}</title><style>{_STYLE}</style></head>"
         f"<body><header><h1><a href='/'>otitbup</a></h1>"
         f"<nav><a href='/'>Devices</a><a href='/activity'>Activity</a>"
+        f"<a href='/retention'>Retention</a>"
         f"<a href='/drivers'>Drivers</a></nav></header>"
         f"{body}</body></html>"
     ).encode()
@@ -109,10 +110,12 @@ class WebUI:
     def __init__(
         self, config: AppConfig, store: GitStore,
         auth: dict | None = None,
+        blobstore=None,
     ):
         self.config = config
         self.store = store
         self.auth = auth
+        self.blobstore = blobstore
 
     # ------------------------------------------------------------ pages
 
@@ -210,6 +213,68 @@ class WebUI:
         )
         return _page("otitbup — activity", body)
 
+    def retention(self) -> bytes:
+        from .models import DEFAULT_RETENTION
+        from .retention import describe_policy
+
+        def _cell(policy: dict, sources: dict, key: str) -> str:
+            value = policy.get(key, 0)
+            if key == "large_file_threshold":
+                if not value:
+                    shown = "off"
+                elif value >= 1024:
+                    shown = f"{value // 1024} KiB"
+                else:
+                    shown = f"{value} B"
+            else:
+                shown = str(value) if value else "unlimited"
+            source = sources.get(key, "default")
+            note = (
+                f" <span class='muted'>({html.escape(source)})</span>"
+                if source != "default" else ""
+            )
+            return f"{html.escape(shown)}{note}"
+
+        rows = []
+        for device in self.config.all_devices():
+            policy = self.config.retention_for(device)
+            sources = self.config.retention_sources(device)
+            rows.append(
+                f"<tr data-row><td><a href='{_device_link(device)}'>"
+                f"{html.escape(device.qualified_name)}</a></td>"
+                f"<td>{_cell(policy, sources, 'keep_versions')}</td>"
+                f"<td>{_cell(policy, sources, 'keep_days')}</td>"
+                f"<td>{_cell(policy, sources, 'large_file_threshold')}</td>"
+                "</tr>"
+            )
+        tiles = ""
+        if self.blobstore is not None:
+            blobs = self.blobstore.all_blobs()
+            tiles = (
+                "<div class='tiles'>"
+                f"<div class='tile'><b>{len(blobs)}</b><span>blobs</span></div>"
+                f"<div class='tile'><b>{sum(blobs.values()) / 1048576:.1f}"
+                "</b><span>MiB offloaded</span></div>"
+                "</div>"
+            )
+        defaults = describe_policy(dict(DEFAULT_RETENTION))
+        global_policy = {**DEFAULT_RETENTION, **self.config.retention}
+        body = (
+            "<h2>Retention policies</h2>"
+            + tiles
+            + f"<p class='muted'>built-in defaults: {html.escape(defaults)}"
+              " · global config: "
+              f"{html.escape(describe_policy(global_policy))}</p>"
+            + "<table><tr><th>Device</th><th>Keep versions</th>"
+              "<th>Keep days</th><th>Offload threshold</th></tr>"
+            + "".join(rows) + "</table>"
+            + "<p class='muted'>effective policy per device: device &gt; "
+              "zone &gt; site &gt; global &gt; default (per field); "
+              "expired blobs are pruned with <code>otitbup retention "
+              "--apply</code> — git history is never rewritten</p>"
+        )
+        return _page("otitbup — retention", body)
+
     def drivers(self) -> bytes:
         from .drivers import driver_descriptions
         in_use = {d.driver for d in self.config.all_devices()}
@@ -261,12 +326,16 @@ class WebUI:
             )
 
         diff = self.store.last_diff(device).strip()
+        from .retention import describe_policy
+        policy_line = describe_policy(self.config.retention_for(device))
         body = (
             f"<h2>{html.escape(device.qualified_name)}</h2>"
             f"<p class='muted'>driver {html.escape(device.driver)} · "
             f"address {html.escape(device.address or '-')} · "
             f"schedule {html.escape(device.schedule)} · "
-            f"window {html.escape(zone.maintenance_window or 'always')}</p>"
+            f"window {html.escape(zone.maintenance_window or 'always')} · "
+            f"<a href='/retention'>retention</a> "
+            f"{html.escape(policy_line)}</p>"
             "<h3>Artifacts (latest backup)</h3>"
             + (
                 "<table><tr><th>Artifact</th><th>Kind</th><th>sha256</th></tr>"
@@ -317,6 +386,19 @@ class WebUI:
             data = self.store.read_file_at(commit, f"{device.path}/{clean}")
         except Exception:
             return None
+        from .blobstore import parse_pointer
+        pointer = parse_pointer(data)
+        if pointer:
+            sha, _size = pointer
+            try:
+                if self.blobstore is None:
+                    raise KeyError(sha)
+                data = self.blobstore.get(sha)
+            except KeyError:
+                data = (
+                    data + b"\n# offloaded content expired by retention "
+                    b"or blob store unavailable\n"
+                )
         content_type = "text/plain; charset=utf-8"
         if b"\x00" in data:
             content_type = "application/octet-stream"
@@ -382,6 +464,8 @@ class _Handler(BaseHTTPRequestHandler):
             content = self.ui.index()
         elif path == "/activity":
             content = self.ui.activity()
+        elif path == "/retention":
+            content = self.ui.retention()
         elif path == "/drivers":
             content = self.ui.drivers()
         elif path.startswith("/device/"):
@@ -407,13 +491,14 @@ def serve(
     host: str = "127.0.0.1", port: int = 8080,
     auth: dict | None = None,
     tls: dict | None = None,
+    blobstore=None,
 ) -> None:
     if not auth and host not in ("127.0.0.1", "localhost", "::1"):
         log.warning(
             "web UI on %s has NO authentication configured — set "
             "webui.auth in the config (see `otitbup passwd`)", host,
         )
-    ui = WebUI(config, store, auth=auth)
+    ui = WebUI(config, store, auth=auth, blobstore=blobstore)
     server = ThreadingHTTPServer((host, port), partial(_Handler, ui))
     scheme = "http"
     if tls:

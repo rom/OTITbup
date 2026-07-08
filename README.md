@@ -33,6 +33,8 @@ otitbup passwd                 # hash a web UI password (webui.auth)
 otitbup certgen                # self-signed TLS pair (webui.tls)
 otitbup discover 10.20.0.0/24  # sequential scan -> YAML proposal for review
 otitbup restore plc-01 --out ./bundle   # hash-verified restore bundle
+otitbup retention              # show effective policies + prune dry run
+otitbup retention --apply      # delete expired large-artifact blobs
 ```
 
 ### Encrypted secrets
@@ -46,6 +48,20 @@ otitbup secrets decrypt secrets.enc --key-file otitbup.key   # to view/edit
 
 Then point the config at it (`backend: encryptedfile`, `path: secrets.enc`,
 `key_file: otitbup.key` — or provide the key via `OTITBUP_KEY`).
+
+**HashiCorp Vault** (KV v2) and **CyberArk CCP** are supported as secret
+backends too — stdlib HTTP clients, no extra dependencies; see
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+
+### Retention
+
+Text configs stay in git forever (cheap); artifacts above a size
+threshold are offloaded to a deduplicated blob store and expire by
+policy — `keep_versions` / `keep_days`, settable globally and overridden
+per site, zone, or device. `otitbup retention` shows every device's
+effective policy and prunes with `--apply`; the web UI's Retention page
+shows the same. Git history is never rewritten. See
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ## Supported equipment
 
@@ -118,9 +134,11 @@ changes. They need `otitbup[ssh]`.
 
 `otitbup serve` — read-only by design (the YAML config stays the source
 of truth): dashboard with summary tiles, per-zone grouping and live
-filtering; per-device pages with artifact lists, backup history and
-diffs; per-commit diff views; raw artifact viewing; an activity feed
-across all devices; and the driver catalog. Optional HTTP Basic auth
+filtering; per-device pages with artifact lists, backup history, diffs
+and the effective retention policy; per-commit diff views; raw artifact
+viewing; an activity feed across all devices; a retention page (policy
+per device with per-field source, blob-store usage); and the driver
+catalog. Optional HTTP Basic auth
 (`otitbup passwd`) and TLS (`otitbup certgen` for a self-signed pair, or
 any PEM cert/key) — see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
