@@ -63,7 +63,7 @@ def _recv(sock: socket.socket, timeout: float) -> bytes:
                 break
             body += chunk
         return header + body
-    except socket.timeout:
+    except TimeoutError:
         return b""
 
 
@@ -125,7 +125,7 @@ class IEC61850MMSDriver(Driver):
         if strings:
             # IdentifyResponse order is vendor, model, revision.
             for label, value in zip(
-                ("vendor", "model", "revision"), strings
+                ("vendor", "model", "revision"), strings, strict=False
             ):
                 info[label] = value
             info["all_strings"] = strings

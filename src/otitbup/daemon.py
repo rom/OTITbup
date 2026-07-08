@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from .models import AppConfig
@@ -85,16 +85,29 @@ class Daemon:
         self.state_path.write_text(json.dumps(self.state, indent=2))
 
     def _due(self, now: datetime) -> list:
+        from .windows import cron_matches, is_cron
         due = []
         for device in self.config.all_devices():
             zone = self.config.find_zone(device)
-            if not in_window(zone.maintenance_window, now):
+            if not in_window(zone.maintenance_window, now, tz=zone.timezone):
                 continue
             last = self.state.get(device.qualified_name)
-            if last is None:
+            if is_cron(device.schedule):
+                # Cron fires on the matching minute; the poll interval is
+                # coarse, so fire at most once per matching minute.
+                if not cron_matches(device.schedule, now):
+                    continue
+                minute_key = now.strftime("%Y%m%d%H%M")
+                if last == "cron:" + minute_key:
+                    continue
+                self.state[device.qualified_name] = "cron:" + minute_key
                 due.append(device)
                 continue
-            next_run = datetime.fromisoformat(last) + parse_interval(device.schedule)
+            if last is None or last.startswith("cron:"):
+                due.append(device)
+                continue
+            next_run = datetime.fromisoformat(last) + parse_interval(
+                device.schedule)
             if now >= next_run:
                 due.append(device)
         return due
@@ -110,6 +123,7 @@ class Daemon:
             self.reload()  # pick up config edits without a restart
             self.run_once()
             self._maybe_report()
+            self._maybe_gc()
             time.sleep(_POLL_SECONDS)
 
     def _install_sighup(self) -> None:
@@ -127,7 +141,7 @@ class Daemon:
 
     def run_once(self) -> int:
         """One scheduler tick. Returns the number of devices backed up."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         due = self._due(now)
         if due:
             log.info("due: %s", ", ".join(d.qualified_name for d in due))
@@ -143,7 +157,7 @@ class Daemon:
         interval = self.config.reports.get("interval")
         if not interval:
             return
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         last = self.state.get("__report__")
         if last is not None:
             due_at = datetime.fromisoformat(last) + parse_interval(interval)
@@ -169,4 +183,28 @@ class Daemon:
         except Exception as exc:
             log.warning("scheduled report failed: %s", exc)
         self.state["__report__"] = now.isoformat()
+        self._save_state()
+
+    def _maybe_gc(self) -> None:
+        """Run `git gc` every housekeeping.gc_interval_days to keep the
+        backup repo compact. 0/unset disables."""
+        days = int(self.config.housekeeping.get("gc_interval_days", 0))
+        if days <= 0:
+            return
+        now = datetime.now(UTC)
+        last = self.state.get("__gc__")
+        if last is not None:
+            due_at = datetime.fromisoformat(last) + timedelta(days=days)
+            if now < due_at:
+                return
+        try:
+            before = self.runner.store.repo_size_bytes()
+            self.runner.store.gc(
+                aggressive=bool(self.config.housekeeping.get("gc_aggressive")))
+            after = self.runner.store.repo_size_bytes()
+            log.info("housekeeping git gc: %.1f -> %.1f MiB",
+                     before / 1048576, after / 1048576)
+        except Exception as exc:
+            log.warning("housekeeping git gc failed: %s", exc)
+        self.state["__gc__"] = now.isoformat()
         self._save_state()

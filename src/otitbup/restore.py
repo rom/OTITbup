@@ -8,9 +8,8 @@ instructions. A human performs the actual restore with vendor tools.
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import hashlib
+from pathlib import Path
 
 import yaml
 

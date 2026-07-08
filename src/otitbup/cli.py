@@ -1,5 +1,7 @@
 """otitbup command-line interface.
 
+    otitbup help                       # grouped list of all commands
+    otitbup explain backup             # full description of one command
     otitbup -c otitbup.yml validate
     otitbup -c otitbup.yml list
     otitbup -c otitbup.yml backup [--all | DEVICE ...] [--force]
@@ -36,8 +38,10 @@ def _build_events(config):
     )
 
 
-def _build_runner(config, force: bool = False, events=None) -> Runner:
-    store = GitStore(config.data_dir)
+def _build_runner(config, force: bool = False, events=None,
+                  dry_run: bool = False) -> Runner:
+    from .runner import default_gitstore
+    store = default_gitstore(config)
     secrets = load_backend(
         config.secrets, base_dir=Path(config.data_dir).parent
     ) if config.secrets else None
@@ -51,6 +55,7 @@ def _build_runner(config, force: bool = False, events=None) -> Runner:
         ),
         force=force,
         events=events or _build_events(config),
+        dry_run=dry_run,
     )
 
 
@@ -69,6 +74,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("validate", help="check the config file and exit")
     sub.add_parser("list", help="list configured devices")
     sub.add_parser("drivers", help="list available drivers")
+    sub.add_parser(
+        "help", help="list the commands with a short description")
+    p_explain = sub.add_parser(
+        "explain", help="describe a command at length")
+    p_explain.add_argument("topic", help="the command to explain")
 
     p_init = sub.add_parser("init", help="scaffold a starter config")
     p_init.add_argument("--dir", default=".", help="directory to write into")
@@ -81,6 +91,35 @@ def main(argv: list[str] | None = None) -> int:
         "--force", action="store_true",
         help="ignore maintenance windows",
     )
+    p_backup.add_argument(
+        "--dry-run", action="store_true",
+        help="collect but don't commit (test reachability/auth)",
+    )
+
+    p_test = sub.add_parser(
+        "test", help="test reachability/credentials without committing")
+    p_test.add_argument("devices", nargs="*", help="devices (default: all)")
+    p_test.add_argument("--site", action="append")
+    p_test.add_argument("--zone", action="append")
+
+    p_gc = sub.add_parser("gc", help="repack/prune the backup git repo")
+    p_gc.add_argument("--aggressive", action="store_true")
+
+    sub.add_parser(
+        "verify-audit", help="verify the tamper-evident audit-log chain")
+
+    p_token = sub.add_parser("token", help="manage scoped API tokens")
+    token_sub = p_token.add_subparsers(dest="token_command", required=True)
+    p_tcreate = token_sub.add_parser("create", help="create an API token")
+    p_tcreate.add_argument("name")
+    p_tcreate.add_argument("--role", default="operator",
+                           choices=["viewer", "operator", "admin"])
+    p_tcreate.add_argument("--scopes", default="*",
+                           help="space-separated site/zone globs")
+    p_tcreate.add_argument("--days", type=int, help="expiry in days")
+    token_sub.add_parser("list", help="list API tokens")
+    p_tdel = token_sub.add_parser("delete", help="delete a token by name")
+    p_tdel.add_argument("name")
 
     p_diff = sub.add_parser("diff", help="show a device's change or a range")
     p_diff.add_argument("device")
@@ -180,11 +219,29 @@ def main(argv: list[str] | None = None) -> int:
         help="verify the whole history (default: latest per device)",
     )
 
-    p_status = sub.add_parser(
+    sub.add_parser(
         "status", help="show per-device backup health from the run store"
     )
 
-    p_policy = sub.add_parser(
+    sub.add_parser(
+        "anomalies",
+        help="report statistical anomalies (slow backups, change storms)",
+    )
+
+    p_desired = sub.add_parser(
+        "desired",
+        help="compare live backups against declared config-as-code",
+    )
+    p_desired.add_argument(
+        "--diff", action="store_true", help="show the unified diff for drift"
+    )
+
+    sub.add_parser(
+        "federation",
+        help="roll up health from federated site collectors",
+    )
+
+    sub.add_parser(
         "policy", help="run config policy checks over the latest backups"
     )
 
@@ -242,7 +299,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_export.add_argument("--out", default="otitbup-export.tar.gz")
 
-    p_strategy = sub.add_parser(
+    sub.add_parser(
         "strategy", help="evaluate the 3-2-1 / 3-2-1-1-0 backup strategy"
     )
 
@@ -335,12 +392,25 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    # Re-configure from the config file's `logging` block once loaded
+    # (below); this basicConfig covers pre-config commands.
 
     if args.command == "drivers":
         from .drivers import driver_descriptions
         for name, description in driver_descriptions().items():
             print(f"{name:20s} {description}")
         return 0
+
+    if args.command == "help":
+        from .helptext import render_help
+        print(render_help())
+        return 0
+
+    if args.command == "explain":
+        from .helptext import render_explain
+        text, found = render_explain(args.topic)
+        print(text, file=sys.stdout if found else sys.stderr)
+        return 0 if found else 2
 
     if args.command == "init":
         from .scaffold import init_project
@@ -414,6 +484,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"config error: {exc}", file=sys.stderr)
         return 2
 
+    from .logsetup import configure as _configure_logging
+    _configure_logging(config.logging, verbose=args.verbose)
+
     # Emit config.read + process.start once the config is available (skip
     # for read-only introspection commands that don't act on devices).
     from .events import CONFIG_READ, PROCESS_START, PROCESS_STOP
@@ -448,13 +521,73 @@ def main(argv: list[str] | None = None) -> int:
         if not devices:
             print("no devices matched the selection", file=sys.stderr)
             return 1
-        runner = _build_runner(config, force=args.force, events=events)
+        runner = _build_runner(config, force=args.force, events=events,
+                               dry_run=args.dry_run)
         results = runner.backup_devices(devices)
         for result in results:
             status = "OK " if result.ok else "FAIL"
             print(f"{status} {result.device:40s} {result.message}")
         events.emit(PROCESS_STOP, "otitbup backup finished", detail="backup")
         return 0 if all(r.ok for r in results) else 1
+
+    if args.command == "test":
+        try:
+            devices = config.select(
+                names=args.devices, sites=args.site, zones=args.zone)
+        except KeyError as exc:
+            print(f"test error: {exc}", file=sys.stderr)
+            return 2
+        runner = _build_runner(config, force=True, events=events,
+                               dry_run=True)
+        results = runner.backup_devices(devices)
+        for result in results:
+            status = "OK  " if result.ok else "FAIL"
+            print(f"{status} {result.device:40s} {result.message}")
+        return 0 if all(r.ok for r in results) else 1
+
+    if args.command == "gc":
+        from .runner import default_gitstore
+        store = default_gitstore(config)
+        store.ensure_repo()
+        before = store.repo_size_bytes()
+        store.gc(aggressive=args.aggressive)
+        after = store.repo_size_bytes()
+        print(f"git gc: {before / 1048576:.1f} MiB -> {after / 1048576:.1f} MiB")
+        return 0
+
+    if args.command == "verify-audit":
+        from .runstore import default_runstore
+        intact, bad_id = default_runstore(config).verify_audit()
+        if intact:
+            print("audit log intact (hash chain verified)")
+            return 0
+        print(f"AUDIT TAMPERING DETECTED at entry id {bad_id}",
+              file=sys.stderr)
+        return 1
+
+    if args.command == "token":
+        from . import apitoken
+        from .runstore import default_runstore
+        runstore = default_runstore(config)
+        if args.token_command == "create":
+            plaintext = apitoken.create(
+                runstore, args.name, args.role, args.scopes, args.days)
+            print(f"token '{args.name}' created (role={args.role}, "
+                  f"scopes={args.scopes}):")
+            print(f"\n  {plaintext}\n")
+            print("store it now — it is not shown again.")
+        elif args.token_command == "list":
+            import datetime as _dt
+            for t in runstore.list_api_tokens():
+                exp = ("never" if not t["expires_at"] else
+                       _dt.datetime.fromtimestamp(
+                           t["expires_at"], _dt.UTC).strftime("%Y-%m-%d"))
+                print(f"{t['name']:20s} role={t['role']:9s} "
+                      f"scopes={t['scopes']:12s} expires={exp}")
+        elif args.token_command == "delete":
+            n = runstore.delete_api_token(args.name)
+            print(f"deleted {n} token(s)")
+        return 0
 
     if args.command == "diff":
         [device] = config.find_devices([args.device])
@@ -489,9 +622,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if hits else 1
 
     if args.command == "baseline":
-        from .baseline import all_drift, drift_diff
-        from .runstore import default_runstore
         import time
+
+        from .baseline import all_drift
+        from .runstore import default_runstore
         store = GitStore(config.data_dir)
         runstore = default_runstore(config)
         if args.baseline_command == "set":
@@ -528,8 +662,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if not drifted else 1
 
     if args.command == "reconcile":
-        from .reconcile import reconcile
         from .discovery import proposal_yaml
+        from .reconcile import reconcile
         result = reconcile(
             config, args.subnets, timeout=args.timeout, delay=args.delay
         )
@@ -726,8 +860,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if report.ok else 1
 
     if args.command == "status":
-        from .runstore import default_runstore
         import time
+
+        from .runstore import default_runstore
         runstore = default_runstore(config)
         now = time.time()
         for device in config.all_devices():
@@ -750,6 +885,75 @@ def main(argv: list[str] | None = None) -> int:
                 f"fails={st.consecutive_failures} {st.last_message}"
             )
         return 0
+
+    if args.command == "anomalies":
+        from . import anomaly
+        from .runstore import default_runstore
+        runstore = default_runstore(config)
+        history = int(config.anomaly.get("history", 50))
+        found = 0
+        for device in config.all_devices():
+            runs = runstore.recent_runs(device.qualified_name, limit=history)
+            for finding in anomaly.analyze(
+                device.qualified_name, runs, config.anomaly
+            ):
+                found += 1
+                print(f"{finding.kind:14s} {finding.device:40s} "
+                      f"{finding.message}")
+        print(f"\n{found} anomaly(ies) across {len(config.all_devices())} "
+              "device(s)", file=sys.stderr)
+        return 0 if not found else 1
+
+    if args.command == "desired":
+        from . import desired as desired_mod
+        from .runner import default_blobstore
+        store = GitStore(config.data_dir)
+        store.ensure_repo()
+        results = desired_mod.check_all(
+            config, store, blobstore=default_blobstore(config))
+        drifted = 0
+        for res in results:
+            state = "in-sync" if res.in_sync else "DRIFTED"
+            if not res.in_sync:
+                drifted += 1
+            print(f"{state:8s} {res.device:40s} "
+                  f"{res.drifted}/{res.checked} artifact(s) drifted")
+            if args.diff:
+                for art in res.artifacts:
+                    if art.status == "drift" and art.diff:
+                        print(art.diff)
+                    elif art.status == "missing":
+                        print(f"  {art.artifact}: not in any backup")
+        if not results:
+            print("no devices have a desired-config declaration "
+                  f"(set desired.dir; looked in "
+                  f"{config.desired.get('dir', 'desired')})",
+                  file=sys.stderr)
+        print(f"\n{drifted} device(s) drifted from desired config",
+              file=sys.stderr)
+        return 0 if not drifted else 1
+
+    if args.command == "federation":
+        from . import federation
+        healths = federation.poll_all(config.federation)
+        if not healths:
+            print("no collectors configured (set federation.collectors)",
+                  file=sys.stderr)
+            return 0
+        for h in healths:
+            if h.ok:
+                t = h.totals
+                print(f"OK   {h.name:20s} devices={t['devices']:4d} "
+                      f"covered={t['covered']:4d} stale={t['stale']:3d} "
+                      f"failing={t['failing']:3d}")
+            else:
+                print(f"DOWN {h.name:20s} {h.error}")
+        agg = federation.aggregate(healths)
+        t = agg["totals"]
+        print(f"\n{agg['reachable']}/{agg['collectors']} collectors reachable; "
+              f"total devices={t['devices']} covered={t['covered']} "
+              f"stale={t['stale']} failing={t['failing']}")
+        return 0 if agg["unreachable"] == 0 else 1
 
     if args.command == "policy":
         from .policy import check_all, severity_rank
@@ -774,8 +978,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "maintenance":
-        from .runstore import default_runstore
         import time
+
+        from .runstore import default_runstore
         runstore = default_runstore(config)
         now = time.time()
         if args.off:
@@ -865,8 +1070,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if result.satisfies_321 else 1
 
     if args.command == "netbox":
-        from .netbox import (NetBoxClient, NetBoxError, import_proposal,
-                             reconcile_netbox)
+        from .netbox import NetBoxClient, NetBoxError, import_proposal, reconcile_netbox
         nb = config.netbox or {}
         url = args.url or nb.get("url")
         token = args.token or nb.get("token")
@@ -948,6 +1152,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "rehearse":
         import tempfile
         import time
+
         from .restore import RestoreError, export_bundle
         from .runner import default_blobstore
         from .runstore import default_runstore

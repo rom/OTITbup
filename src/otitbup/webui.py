@@ -25,7 +25,6 @@ from urllib.parse import quote, unquote
 
 import yaml
 
-from .auth import check_basic_auth
 from .gitstore import GitStore
 from .models import AppConfig, Device
 
@@ -189,6 +188,14 @@ class WebUI:
         from .events import NullEventBus
         from .sessions import SessionStore
         self.events = events or NullEventBus()
+        # Attach an in-process broadcaster so the live-activity page can
+        # stream events over SSE. Harmless on a NullEventBus (never emits).
+        if getattr(self.events, "broadcaster", None) is None:
+            from .events import Broadcaster
+            try:
+                self.events.broadcaster = Broadcaster()
+            except AttributeError:
+                pass
         self.sessions = SessionStore()
 
     def all_users(self) -> dict:
@@ -200,7 +207,7 @@ class WebUI:
             base = dict(self._static_users)
         else:
             base = build_users(self.auth, self.config.webui.get("users"))
-        for name, rec in base.items():
+        for rec in base.values():
             rec.setdefault("source", "config")
         if self.runstore is not None:
             for name, rec in self.runstore.get_users().items():
@@ -379,6 +386,7 @@ class WebUI:
         self, username: str, password: str, role: str, actor: str
     ) -> tuple[bool, str]:
         import time
+
         from .auth import ROLES, hash_password
         from .events import USER_CREATE
         if self.runstore is None:
@@ -520,8 +528,36 @@ class WebUI:
                 f"<tr data-row><td>{html.escape(date)}</td>"
                 f"<td>{device_cell}</td><td>{commit_cell}</td></tr>"
             )
+        # Live panel: fed by the /events/stream SSE endpoint. Degrades
+        # gracefully — with JS off (or no event bus) the panel stays empty
+        # and the commit table below is the full record.
+        live = (
+            "<h2>Live activity</h2>"
+            "<p class='muted' id='live-status'>connecting to event stream…</p>"
+            "<ul id='live-events' class='live-events'></ul>"
+            "<script>(function(){\n"
+            "  var status=document.getElementById('live-status');\n"
+            "  var list=document.getElementById('live-events');\n"
+            "  if(!window.EventSource){status.textContent="
+            "'live updates need EventSource support';return;}\n"
+            "  var es=new EventSource('/events/stream');\n"
+            "  es.onopen=function(){status.textContent='live — streaming events';};\n"
+            "  es.onerror=function(){status.textContent="
+            "'stream disconnected, retrying…';};\n"
+            "  es.onmessage=function(e){\n"
+            "    var d; try{d=JSON.parse(e.data);}catch(_){return;}\n"
+            "    var li=document.createElement('li');\n"
+            "    li.className='sev-'+(d.severity||'info');\n"
+            "    var t=new Date().toLocaleTimeString();\n"
+            "    li.textContent='['+t+'] '+d.type+': '+d.message;\n"
+            "    list.insertBefore(li,list.firstChild);\n"
+            "    while(list.childNodes.length>50){list.removeChild(list.lastChild);}\n"
+            "  };\n"
+            "})();</script>"
+        )
         body = (
-            f"<h2>Recent backups</h2>"
+            live
+            + "<h2>Recent backups</h2>"
             "<table><tr><th>When</th><th>Device</th><th>Commit</th></tr>"
             + ("".join(rows) or "<tr><td colspan='3'>no backups yet</td></tr>")
             + "</table>"
@@ -536,14 +572,14 @@ class WebUI:
         import datetime as _dt
         import time
         now = now if now is not None else time.time()
-        today = _dt.datetime.fromtimestamp(now, _dt.timezone.utc).date()
+        today = _dt.datetime.fromtimestamp(now, _dt.UTC).date()
         buckets = {}
         for i in range(days):
             day = today - _dt.timedelta(days=days - 1 - i)
             buckets[day] = [0, 0, 0]
         for run in runs:
             day = _dt.datetime.fromtimestamp(
-                run["started_at"], _dt.timezone.utc).date()
+                run["started_at"], _dt.UTC).date()
             if day in buckets:
                 buckets[day][0] += 1
                 if run["changed"]:
@@ -557,6 +593,7 @@ class WebUI:
 
     def dashboard(self) -> bytes:
         import time
+
         from . import charts
         now = time.time()
         devices = self.config.all_devices()
@@ -875,7 +912,7 @@ class WebUI:
         rows = "".join(
             "<tr data-row><td>"
             + _dt.datetime.fromtimestamp(
-                r["at"], _dt.timezone.utc
+                r["at"], _dt.UTC
             ).strftime("%Y-%m-%d %H:%M:%S")
             + f"</td><td>{html.escape(r.get('actor') or '-')}</td>"
             f"<td>{html.escape(r.get('role') or '-')}</td>"
@@ -1125,7 +1162,6 @@ class WebUI:
             if not match:
                 continue
             chash, date, subject = match.groups()
-            full = self.store.last_commit_hash(device) if not history_rows else None
             note = ""
             # Match short hash against annotated full hashes.
             if any(a.startswith(chash) for a in annotated):
@@ -1153,7 +1189,7 @@ class WebUI:
                 cells = ""
                 for run in reversed(runs[:60]):   # oldest -> newest
                     when = _dt.datetime.fromtimestamp(
-                        run["started_at"], _dt.timezone.utc
+                        run["started_at"], _dt.UTC
                     ).strftime("%Y-%m-%d %H:%M")
                     if not run["ok"]:
                         color, sym = charts.FAIL, "fail"
@@ -1201,7 +1237,7 @@ class WebUI:
                 rows = "".join(
                     "<tr><td>"
                     + _dt.datetime.fromtimestamp(
-                        r["at"], _dt.timezone.utc
+                        r["at"], _dt.UTC
                     ).strftime("%Y-%m-%d %H:%M")
                     + f"</td><td>{html.escape(r['result'])}</td>"
                     f"<td>{html.escape(r.get('tested_by') or '')}</td>"
@@ -1484,6 +1520,46 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(content)
 
+    def _sse_stream(self) -> None:
+        """Stream live events as Server-Sent Events. Each connected browser
+        gets its own broadcaster subscription; a periodic heartbeat keeps
+        proxies from timing the connection out and detects a dead client."""
+        import json
+        broadcaster = getattr(self.ui.events, "broadcaster", None)
+        if broadcaster is None:
+            return self._send(503, b'{"error":"no event stream"}\n',
+                              "application/json")
+        queue = broadcaster.subscribe()
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            self.wfile.write(b": connected\n\n")
+            self.wfile.flush()
+            import queue as _q
+            while True:
+                try:
+                    event = queue.get(timeout=15)
+                except _q.Empty:
+                    self.wfile.write(b": ping\n\n")   # heartbeat
+                    self.wfile.flush()
+                    continue
+                payload = json.dumps({
+                    "type": event.type, "message": event.message,
+                    "severity": event.severity, "actor": event.actor,
+                    "detail": event.detail,
+                })
+                self.wfile.write(
+                    f"event: {event.type}\ndata: {payload}\n\n".encode())
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass  # client went away
+        finally:
+            broadcaster.unsubscribe(queue)
+
     def _cookie_token(self) -> str | None:
         cookie = self.headers.get("Cookie", "")
         for part in cookie.split(";"):
@@ -1493,17 +1569,39 @@ class _Handler(BaseHTTPRequestHandler):
         return None
 
     def _identify(self) -> dict | None:
-        """Resolve the request identity: cookie session first (browser),
-        then HTTP Basic (API/CLI/scrapers). Returns {username, role, token,
-        via} or None."""
+        """Resolve the request identity, in order: cookie session (browser),
+        Bearer API token (automation), trusted SSO header (behind an auth
+        proxy), then HTTP Basic (CLI/scrapers)."""
         session = self.ui.sessions.get(self._cookie_token())
         if session:
             return {
                 "username": session.username, "role": session.role,
+                "scopes": getattr(session, "scopes", "*"),
                 "token": session.token, "via": "session",
             }
+        # Bearer API token.
+        authz = self.headers.get("Authorization", "")
+        if authz.startswith("Bearer ") and self.ui.runstore is not None:
+            from . import apitoken
+            ident = apitoken.authenticate(self.ui.runstore, authz[7:])
+            if ident:
+                ident["via"] = "token"
+                return ident
+        # Trusted SSO header (an upstream proxy did OIDC/SAML and set it).
+        header_name = self.ui.config.webui.get("trusted_header")
+        if header_name:
+            user = self.headers.get(header_name)
+            if user:
+                role = self.ui.config.webui.get("trusted_default_role",
+                                                "viewer")
+                # Optional role from a second header.
+                role_header = self.ui.config.webui.get("trusted_role_header")
+                if role_header and self.headers.get(role_header):
+                    role = self.headers.get(role_header)
+                return {"username": user, "role": role, "scopes": "*",
+                        "via": "sso"}
         from .auth import authenticate
-        ident = authenticate(self.headers.get("Authorization"), self.ui.users)
+        ident = authenticate(authz, self.ui.users)
         if ident:
             ident["via"] = "basic"
         return ident
@@ -1546,7 +1644,7 @@ class _Handler(BaseHTTPRequestHandler):
         # Audit page views (not assets/API/metrics/liveness) for compliance.
         if (
             self.ui.runstore is not None
-            and not path.startswith(("/api/", "/metrics"))
+            and not path.startswith(("/api/", "/metrics", "/events/"))
             and "/artifact/" not in path
         ):
             import time
@@ -1558,6 +1656,10 @@ class _Handler(BaseHTTPRequestHandler):
                 )
             except Exception:
                 pass
+
+        # Live event stream (Server-Sent Events) for the activity page.
+        if path == "/events/stream":
+            return self._sse_stream()
 
         # Machine-readable endpoints.
         if path == "/metrics":
@@ -1655,10 +1757,16 @@ class _Handler(BaseHTTPRequestHandler):
             return self._handle_logout()
 
         identity = self._identify()
+
+        # Write API (JSON): Bearer token or session; no CSRF for token auth.
+        if path.startswith("/api/"):
+            return self._api_post(path, identity)
+
         if self.ui.users and identity is None:
             return self._send(401, _page("unauthorized", "<p>sign in</p>"))
         actor = identity["username"] if identity else "anonymous"
         role = identity["role"] if identity else "admin"
+        scopes = identity.get("scopes", "*") if identity else "*"
 
         # CSRF: cookie-session POSTs must echo the session token.
         if identity and identity["via"] == "session":
@@ -1666,7 +1774,8 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._send(403, _page("forbidden", "<p>bad CSRF token</p>"))
 
         from .auth import role_rank
-        ok, message, back = self._dispatch_post(path, form, actor, role, role_rank)
+        ok, message, back = self._dispatch_post(
+            path, form, actor, role, role_rank, scopes)
         if ok is None:
             return self._send(404, _page("not found", "<p>not found</p>"))
         return self._send(
@@ -1681,10 +1790,17 @@ class _Handler(BaseHTTPRequestHandler):
             f"{form.get('username', '')}:{form.get('password', '')}".encode()
         ).decode()
         ident = authenticate(header, self.ui.users)
+        if ident is None and self.ui.config.ldap:
+            # Fall back to LDAP/AD if configured.
+            from .auth import ldap_authenticate
+            ident = ldap_authenticate(
+                self.ui.config.ldap, form.get("username", ""),
+                form.get("password", ""))
         if ident is None:
             return self._send(200, self.ui.login_page(
                 error="invalid username or password", next_url=next_url))
-        session = self.ui.sessions.create(ident["username"], ident["role"])
+        session = self.ui.sessions.create(
+            ident["username"], ident["role"], ident.get("scopes", "*"))
         self.ui.events.emit(
             LOGIN, f"login: {ident['username']} ({ident['role']})",
             actor=ident["username"], detail=ident["username"],
@@ -1709,8 +1825,43 @@ class _Handler(BaseHTTPRequestHandler):
                 "otitbup_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
         })
 
-    def _dispatch_post(self, path, form, actor, role, role_rank):
+    def _api_post(self, path: str, identity: dict | None) -> None:
+        """JSON write API. Auth by Bearer token or session; enforces role
+        (operator+) and scope. POST /api/device/<qn>/{backup,verify}."""
+        import json
+
+        from .auth import role_rank, scope_allows
+        if self.ui.users and identity is None:
+            return self._send(
+                401, b'{"error":"unauthorized"}\n', "application/json",
+                headers={"WWW-Authenticate": 'Bearer'})
+        role = identity["role"] if identity else "admin"
+        scopes = identity.get("scopes", "*") if identity else "*"
+        if role_rank(role) < role_rank("operator"):
+            return self._send(403, b'{"error":"operator role required"}\n',
+                              "application/json")
+        if path.startswith("/api/device/") and path.count("/") >= 5:
+            rest = path[len("/api/device/"):]
+            qn, _, verb = rest.rpartition("/")
+            if not scope_allows(scopes, qn):
+                return self._send(403, b'{"error":"out of scope"}\n',
+                                  "application/json")
+            actor = identity["username"] if identity else "api"
+            if verb == "backup":
+                ok, msg = self.ui.action_backup(qn, actor)
+            elif verb == "verify":
+                ok, msg = self.ui.action_verify(qn)
+            else:
+                return self._send(404, b'{"error":"not found"}\n',
+                                  "application/json")
+            body = json.dumps({"ok": ok, "message": msg}).encode() + b"\n"
+            return self._send(200 if ok else 500, body, "application/json")
+        return self._send(404, b'{"error":"not found"}\n', "application/json")
+
+    def _dispatch_post(self, path, form, actor, role, role_rank, scopes="*"):
         """Returns (ok|None, message, back_url). ok is None for 404."""
+        from .auth import scope_allows
+
         def need(level):
             return not self.ui.users or role_rank(role) >= role_rank(level)
 
@@ -1752,6 +1903,8 @@ class _Handler(BaseHTTPRequestHandler):
                 back = _device_link_name(qn)
                 if not need("operator"):
                     return False, "operator role required", back
+                if not scope_allows(scopes, qn):
+                    return False, "device out of your scope", back
                 if verb == "backup":
                     ok, msg = self.ui.action_backup(qn, actor)
                     return ok, msg, back
@@ -1779,7 +1932,6 @@ def serve(
     events=None,
     config_path=None,
 ) -> None:
-    from .auth import build_users
     secrets = None
     if config.secrets:
         from pathlib import Path as _P

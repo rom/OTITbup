@@ -17,16 +17,25 @@ lives in [`examples/otitbup.yml`](../examples/otitbup.yml).
 ```yaml
 data_dir: ./data        # backup git repository; relative paths resolve
                         # against the config file's directory
-secrets:   { ... }      # credential backend        (section below)
-git:       { ... }      # remote mirroring          (section below)
-webui:     { ... }      # web UI: host/port/auth/TLS (section below)
-alerts:    { ... }      # change/failure/staleness alerts (section below)
-retention: { ... }      # global retention defaults (section below)
-policy:    { ... }      # config policy checks      (section below)
-reports:   { ... }      # scheduled compliance reports (section below)
-events:    { ... }      # syslog + SNMP trap event sinks (section below)
-tickets:   { ... }      # open tickets on events    (section below)
-sites:     [ ... ]      # the inventory             (section below)
+secrets:    { ... }     # credential backend        (section below)
+git:        { ... }     # remote mirroring + commit signing (section below)
+encryption: { ... }     # blob-store encryption at rest (section below)
+webui:      { ... }     # web UI: host/port/auth/TLS/RBAC (section below)
+alerts:     { ... }     # change/failure/staleness alerts (section below)
+retention:  { ... }     # global retention defaults (section below)
+policy:     { ... }     # config policy checks      (section below)
+reports:    { ... }     # scheduled compliance reports (section below)
+events:     { ... }     # syslog + SNMP trap event sinks (section below)
+tickets:    { ... }     # open tickets on events    (section below)
+logging:    { ... }     # log level/format/rotation (section below)
+retry:      { ... }     # per-device collection retries (section below)
+hooks:      { ... }     # global pre/post backup shell hooks (section below)
+anomaly:    { ... }     # statistical anomaly detection (section below)
+housekeeping: { ... }   # periodic git gc from the daemon (section below)
+desired:    { ... }     # config-as-code intended-state dir (section below)
+federation: { ... }     # site-collector health roll-up (section below)
+ldap:       { ... }     # optional LDAP/AD web UI login (section below)
+sites:      [ ... ]     # the inventory             (section below)
 ```
 
 ## The inventory: sites → zones → devices
@@ -40,6 +49,10 @@ sites:
                                             # overnight ranges allowed;
                                             # devices are only polled
                                             # inside the window
+        timezone: Europe/Berlin      # optional IANA name; the zone's
+                                     # maintenance_window is interpreted in
+                                     # this timezone (falls back to the
+                                     # site timezone, then system local)
         max_concurrent: 1            # simultaneous connections into this
                                      # zone (default 1 = strictly
                                      # sequential; OT-safe)
@@ -48,13 +61,27 @@ sites:
             driver: siemens_s7       # required; see `otitbup drivers`
             address: 10.20.0.10      # IP/hostname (driver-dependent)
             schedule: 12h            # poll interval: Ns / Nm / Nh / Nd
-                                     # (default 1d); used by `daemon`
+                                     # (default 1d); OR a 5-field cron
+                                     # expression, e.g. "0 2 * * *";
+                                     # used by `daemon`
             credentials: plc-01      # optional: key into the secrets file
+            hooks:                   # optional; override the global hooks
+              pre:  ./notify.sh start
+              post: ./notify.sh done
             options: { ... }         # driver-specific, see below
 ```
 
 Device names can be used bare on the CLI (`otitbup backup plc-01`) when
 unambiguous, or fully qualified (`plant-a/cell-1/plc-01`).
+
+**Schedules** accept either the interval form (`30m`, `12h`, `1d`, `Ns`)
+or a 5-field cron expression (`"0 2 * * *"` = 02:00 daily). Cron fields
+support `*`, `*/n`, ranges (`1-5`), and lists (`1,3,5`); day-of-week
+Sunday is `0` or `7`. Cron firing is evaluated in the device's zone
+`timezone`.
+
+**Per-device hooks** (`device.hooks: {pre:, post:}`) override the global
+`hooks` block for that device; see [hooks](#hooks).
 
 ### Driver options
 
@@ -200,11 +227,43 @@ The CCP account's `UserName` becomes `username`, its `Content` becomes
 git:
   push: true
   remote: git@gitlab.plant.local:ot/backups.git
+  sign:
+    key_file: /etc/otitbup/commit-signing-ed25519   # SSH private key
 ```
 
 The local repository in `data_dir` is always the primary store; when
 `push` is enabled the repo is mirrored to `remote` after each backup run.
 Push failures are logged, never fatal.
+
+**Signed commits.** When `git.sign.key_file` points at an SSH private
+key, every backup commit is SSH-signed (`git -c gpg.format=ssh -c
+user.signingkey=<key> -S`), giving a tamper-evident, verifiable authorship
+chain over the whole history. Verify with `git log --show-signature` or
+the gitstore's `verify_commit_signature`.
+
+## encryption
+
+Encrypt the **blob store** (the content-addressed store for offloaded
+large artifacts) at rest with Fernet. Needs `otitbup[crypto]`.
+
+```yaml
+encryption:
+  blob_key: <fernet-key>            # or:
+  # blob_key_file: blob.key         # a file holding the key; or set
+  #                                 # OTITBUP_BLOB_KEY in the environment
+```
+
+Generate a key:
+
+```bash
+python -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())"
+```
+
+Blobs stay content-addressed by the **plaintext** sha256, so dedup and
+manifest hashes are unchanged — only the on-disk bytes become ciphertext.
+This encrypts **only** the blob store; the git repo, `runstore.db` and the
+secrets file are **not** covered — use full-disk encryption (LUKS) for
+those.
 
 ## webui
 
@@ -253,6 +312,80 @@ deleted and have passwords changed via the GUI, which is what emits the
 (in `auth`/`users`) are static and cannot be edited from the UI. Sessions
 are cookie-based (real login/logout); HTTP Basic is still accepted for the
 API, metrics scraping and the CLI.
+
+### Scopes (RBAC)
+
+Beyond the role, a user (config `users:` entry or DB user), session and
+API token carries `scopes` — a space-separated list of globs matched
+against a device's qualified name (`site/zone/name`):
+
+```yaml
+webui:
+  users:
+    - {username: alice, password_hash: pbkdf2_sha256$..., role: admin}
+    - {username: pa-op, password_hash: pbkdf2_sha256$..., role: operator,
+       scopes: "plant-a/*"}          # may only act on plant-a devices
+    - {username: cell1, password_hash: pbkdf2_sha256$..., role: operator,
+       scopes: "plant-a/cell-1/*"}   # only cell-1
+```
+
+Globs: `*` (everything, the default), `plant-a/*`, `plant-a/cell-1/*`.
+Device **write** actions (backup, verify) are denied — in the UI, the
+write API and the CLI-issued tokens — when the device's qualified name is
+out of scope. Read access is unaffected.
+
+### Enterprise SSO via a trusted header
+
+An upstream reverse proxy can terminate OIDC/SAML and pass the
+authenticated identity in a header; the web UI trusts it and creates a
+session:
+
+```yaml
+webui:
+  trusted_header: X-Forwarded-User        # header carrying the username
+  trusted_role_header: X-Forwarded-Role   # optional; else the default
+  trusted_default_role: viewer            # role when no role header (default viewer)
+```
+
+**Only enable this behind such a proxy** — the header is trivially
+spoofable if the UI is reachable directly. A trusted-header user's role
+maps into the same viewer/operator/admin ladder; scopes default to `*`.
+
+### Scoped write API
+
+The web server also exposes a small write API for machine callers:
+
+| Endpoint | Effect |
+|---|---|
+| `POST /api/device/<qualified-name>/backup` | back up one device |
+| `POST /api/device/<qualified-name>/verify` | verify one device |
+
+Authenticate with **either** an `Authorization: Bearer <token>` API token
+(see `otitbup token`, [USAGE.md](USAGE.md)) **or** an active cookie
+session. Requires **operator+** and the device in scope. No CSRF is needed
+for token auth (the token is a header, not a cookie). Returns JSON
+`{"ok": bool, "message": str}`; `401` if unauthenticated, `403` for wrong
+role (`operator role required`) or `out of scope`. Nothing is required in
+the config — tokens are managed entirely via the CLI.
+
+## ldap
+
+Optional LDAP/AD bind login as a **fallback** for the web UI: login tries
+local users first, then LDAP. Needs `otitbup[ldap]` (ldap3).
+
+```yaml
+ldap:
+  url: ldaps://dc.plant.local
+  user_dn_template: "uid={username},ou=people,dc=plant,dc=local"
+  group_base: ou=groups,dc=plant,dc=local
+  default_role: viewer               # role for a user in no mapped group
+  role_map:                          # LDAP group -> otitbup role
+    ot-admins: admin
+    ot-ops: operator
+```
+
+The `{username}` placeholder in `user_dn_template` is filled at login;
+group membership under `group_base` is mapped to a role via `role_map`.
 
 ## alerts
 
@@ -414,6 +547,133 @@ otitbup maps the copies to: the local repo (copy 1), a git remote mirror
 (copy 2 / offsite), and a portable `otitbup export` archive (the offline
 copy). `strategy` evaluates all five conditions (3 copies, 2 media, 1
 offsite, 1 offline, 0 errors) and reports what's missing.
+
+## logging
+
+Configured via `logsetup.configure` right after the config loads.
+
+```yaml
+logging:
+  level: info            # debug | info | warning | error
+  format: text           # text | json
+  file: /var/log/otitbup/otitbup.log   # omit to log to stderr only
+  max_bytes: 10485760    # rotate at this size (default 10 MiB)
+  backups: 5             # rotated files to keep (default 5)
+```
+
+`json` format emits one structured record per line for log shippers.
+
+## retry
+
+Retries transient collection failures per device.
+
+```yaml
+retry:
+  attempts: 1            # total tries per device (default 1 = no retry)
+  backoff: 2.0           # seconds; doubles each retry: backoff * 2**(attempt-1)
+```
+
+With `attempts: 3, backoff: 2.0` a device is tried up to three times,
+sleeping 2s then 4s between tries. Applies only to transient failures.
+
+## hooks
+
+Global shell commands run before and after **each** device backup.
+Overridable per device (`device.hooks`, which wins over these).
+
+```yaml
+hooks:
+  pre:  /etc/otitbup/pre-hook.sh
+  post: /etc/otitbup/post-hook.sh
+```
+
+Each hook runs with `shell=True` and a 120s timeout; a failing hook is
+logged, never fatal to the backup. Environment passed to the hook:
+
+| Variable | Value |
+|---|---|
+| `OTITBUP_DEVICE` | device name |
+| `OTITBUP_SITE` / `OTITBUP_ZONE` | site / zone |
+| `OTITBUP_DRIVER` | driver id |
+| `OTITBUP_ADDRESS` | device address |
+| `OTITBUP_PHASE` | `pre` or `post` |
+| `OTITBUP_OK` | `1`/`0` — backup succeeded (post only) |
+
+## anomaly
+
+Statistical anomaly detection over run history: slow-backup outliers
+(duration z-score) and change storms (a spike in the change rate). Runs
+automatically after each backup — emitting an `anomaly.detected` event and
+alert — and on demand via `otitbup anomalies`.
+
+```yaml
+anomaly:
+  enabled: true          # default true
+  sigma: 3.0             # duration z-score threshold (slow outlier)
+  duration_floor: 5.0    # ignore runs faster than N seconds
+  min_history: 8         # runs needed before judging a device
+  change_window: 5       # recent-run window for change storms
+  change_recent: 0.8     # recent change-rate that trips
+  change_baseline: 0.2   # max long-run change-rate for it to fire
+  history: 50            # runs to load per device
+```
+
+A change storm fires only when the recent change-rate exceeds
+`change_recent` **and** the long-run baseline stays below
+`change_baseline` (i.e. a genuine spike, not a chronically churny device).
+
+## housekeeping
+
+Periodic `git gc` driven by the daemon to keep the backup repo small
+(equivalent to `otitbup gc`).
+
+```yaml
+housekeeping:
+  gc_interval_days: 7    # run git gc this often (omit/0 to disable)
+  gc_aggressive: false   # git gc --aggressive when true
+```
+
+## desired
+
+Config-as-code: a directory of **intended** device configs to compare live
+backups against (`otitbup desired`). Resolved relative to the config file,
+like `data_dir`.
+
+```yaml
+desired:
+  dir: ./desired               # intended-config tree
+  strip_trailing_ws: true      # ignore trailing whitespace when diffing
+```
+
+Layout mirrors the inventory: `<dir>/<site>/<zone>/<device>/<artifact-name>`.
+Unlike a golden **baseline** (an approved *past* backup), a desired config
+is what you declare the device *should* be, versioned alongside the
+inventory.
+
+## federation
+
+Roll up health from federated **site collectors** (the Purdue-model /
+site-collector pattern). A central appliance polls each collector's
+read-only `GET /api/status` over HTTPS with a scoped Bearer token and
+aggregates health; used by `otitbup federation`.
+
+```yaml
+federation:
+  role: central                # informational label, e.g. "central"
+  collectors:
+    - name: plant-a
+      url: https://collector-a.plant.local:8080
+      token: <api-token>       # or token_file: plant-a.token
+      verify_tls: true
+    - name: plant-b
+      url: https://collector-b.plant.local:8080
+      token_file: plant-b.token
+```
+
+The federation link is a **control plane** only — it carries health, not
+backups. Backup **bytes** federate separately over plain git: each
+collector pushes to a shared remote via `git.push` / `git.remote`. Issue
+each collector a scoped, read-only token with `otitbup token create`.
 
 ## Files next to the config
 

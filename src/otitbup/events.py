@@ -42,6 +42,7 @@ BACKUP_ERROR = "backup.error"
 CONFIG_READ = "config.read"
 CONFIG_RELOAD = "config.reload"
 CHANGE_UNEXPECTED = "change.unexpected"
+ANOMALY = "anomaly.detected"
 LOGIN = "auth.login"
 LOGOUT = "auth.logout"
 USER_CREATE = "user.create"
@@ -55,11 +56,12 @@ _EVENT_IDS: dict[str, int] = {
     CONFIG_READ: 8, CONFIG_RELOAD: 9,
     LOGIN: 10, LOGOUT: 11,
     USER_CREATE: 12, USER_DELETE: 13, USER_PASSWD: 14,
-    CHANGE_UNEXPECTED: 15,
+    CHANGE_UNEXPECTED: 15, ANOMALY: 16,
 }
 _DEFAULT_SEVERITY = {
     BACKUP_ERROR: "error",
     CHANGE_UNEXPECTED: "warning",
+    ANOMALY: "warning",
     USER_CREATE: "notice", USER_DELETE: "notice", USER_PASSWD: "notice",
 }
 _SYSLOG_LEVEL = {
@@ -80,6 +82,42 @@ class Event:
     severity: str = "info"
     actor: str | None = None
     detail: str | None = None
+
+
+class Broadcaster:
+    """In-process fan-out of live events to connected web clients (SSE).
+
+    Each subscriber gets its own bounded queue; a slow or dead client fills
+    its queue and is silently dropped rather than blocking the emitter. This
+    is deliberately memory-only and single-process — it matches the
+    appliance's single web process and needs no broker."""
+
+    def __init__(self, maxsize: int = 100):
+        import queue
+        import threading
+        self._queue = queue
+        self._subscribers: set = set()
+        self._lock = threading.Lock()
+        self._maxsize = maxsize
+
+    def subscribe(self):
+        q = self._queue.Queue(maxsize=self._maxsize)
+        with self._lock:
+            self._subscribers.add(q)
+        return q
+
+    def unsubscribe(self, q) -> None:
+        with self._lock:
+            self._subscribers.discard(q)
+
+    def publish(self, event: Event) -> None:
+        with self._lock:
+            subscribers = list(self._subscribers)
+        for q in subscribers:
+            try:
+                q.put_nowait(event)
+            except self._queue.Full:
+                self.unsubscribe(q)
 
 
 # --------------------------------------------------------------- BER / SNMP
@@ -164,6 +202,9 @@ class EventBus:
         self.runstore = runstore
         self._start = time.monotonic()
         self._request_id = 0
+        # Optional in-process sink for live UI streaming (SSE). The web UI
+        # attaches a Broadcaster here; None keeps the CLI path allocation-free.
+        self.broadcaster: Broadcaster | None = None
         from .tickets import TicketManager
         self.tickets = TicketManager(tickets)
 
@@ -181,6 +222,11 @@ class EventBus:
         )
         log.info("event %s: %s", event.type, event.message)
         self._to_audit(event)
+        if self.broadcaster is not None:
+            try:
+                self.broadcaster.publish(event)
+            except Exception as exc:
+                log.debug("broadcast sink failed: %s", exc)
         if self.cfg.get("syslog"):
             self._to_syslog(event)
         if self.cfg.get("snmp_trap"):

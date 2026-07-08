@@ -1,11 +1,6 @@
 import socket
-import threading
-import time
 
-import pytest
-
-from otitbup.events import (BACKUP_START, LOGIN, EventBus, build_snmpv2_trap,
-                            Event, _ber_oid)
+from otitbup.events import BACKUP_START, LOGIN, Event, EventBus, _ber_oid, build_snmpv2_trap
 from otitbup.runstore import RunStore
 
 

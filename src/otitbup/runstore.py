@@ -15,64 +15,55 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS runs (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    device      TEXT NOT NULL,
-    started_at  REAL NOT NULL,
-    finished_at REAL NOT NULL,
-    ok          INTEGER NOT NULL,
-    changed     INTEGER NOT NULL,
-    commit_hash TEXT,
-    message     TEXT,
-    expected    INTEGER            -- 1 expected, 0 unexpected, NULL n/a
-);
-CREATE INDEX IF NOT EXISTS ix_runs_device ON runs(device, started_at);
+# Ordered schema migrations. Each entry is applied once, in order, and
+# PRAGMA user_version tracks how far we've come — so upgrading the tool
+# never loses data and never re-applies a step. Append new migrations;
+# never edit an existing one.
+_MIGRATIONS: list[str] = [
+    # v1 — base schema.
+    """
+    CREATE TABLE IF NOT EXISTS runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, device TEXT NOT NULL,
+        started_at REAL NOT NULL, finished_at REAL NOT NULL,
+        ok INTEGER NOT NULL, changed INTEGER NOT NULL,
+        commit_hash TEXT, message TEXT, expected INTEGER);
+    CREATE INDEX IF NOT EXISTS ix_runs_device ON runs(device, started_at);
+    CREATE TABLE IF NOT EXISTS rehearsals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, device TEXT NOT NULL,
+        at REAL NOT NULL, commit_hash TEXT, result TEXT NOT NULL,
+        tested_by TEXT, notes TEXT);
+    CREATE INDEX IF NOT EXISTS ix_rehearsals_device ON rehearsals(device, at);
+    CREATE TABLE IF NOT EXISTS maintenance (
+        device TEXT PRIMARY KEY, until REAL, reason TEXT, set_by TEXT,
+        set_at REAL NOT NULL);
+    CREATE TABLE IF NOT EXISTS baselines (
+        device TEXT PRIMARY KEY, commit_hash TEXT NOT NULL,
+        set_at REAL NOT NULL, set_by TEXT, note TEXT);
+    CREATE TABLE IF NOT EXISTS audit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL, actor TEXT,
+        role TEXT, action TEXT NOT NULL, detail TEXT);
+    CREATE INDEX IF NOT EXISTS ix_audit_at ON audit(at);
+    CREATE TABLE IF NOT EXISTS users (
+        username TEXT PRIMARY KEY, password_hash TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'viewer', created_at REAL NOT NULL);
+    """,
+    # v2 — per-site/zone RBAC scoping (space-separated scope globs).
+    "ALTER TABLE users ADD COLUMN scopes TEXT DEFAULT '*';",
+    # v3 — tamper-evident audit hash chain.
+    """
+    ALTER TABLE audit ADD COLUMN prev_hash TEXT;
+    ALTER TABLE audit ADD COLUMN entry_hash TEXT;
+    """,
+    # v4 — scoped API tokens (write API).
+    """
+    CREATE TABLE IF NOT EXISTS api_tokens (
+        token_hash TEXT PRIMARY KEY, name TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'viewer', scopes TEXT DEFAULT '*',
+        created_at REAL NOT NULL, expires_at REAL, last_used REAL);
+    """,
+]
 
-CREATE TABLE IF NOT EXISTS rehearsals (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    device     TEXT NOT NULL,
-    at         REAL NOT NULL,
-    commit_hash TEXT,
-    result     TEXT NOT NULL,       -- pass | fail
-    tested_by  TEXT,
-    notes      TEXT
-);
-CREATE INDEX IF NOT EXISTS ix_rehearsals_device ON rehearsals(device, at);
-
-CREATE TABLE IF NOT EXISTS maintenance (
-    device    TEXT PRIMARY KEY,     -- device, or "site/*" / "site/zone/*"
-    until     REAL,                 -- expiry epoch, or NULL = indefinite
-    reason    TEXT,
-    set_by    TEXT,
-    set_at    REAL NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS baselines (
-    device      TEXT PRIMARY KEY,   -- approved "golden" config commit
-    commit_hash TEXT NOT NULL,
-    set_at      REAL NOT NULL,
-    set_by      TEXT,
-    note        TEXT
-);
-
-CREATE TABLE IF NOT EXISTS audit (
-    id     INTEGER PRIMARY KEY AUTOINCREMENT,
-    at     REAL NOT NULL,
-    actor  TEXT,
-    role   TEXT,
-    action TEXT NOT NULL,
-    detail TEXT
-);
-CREATE INDEX IF NOT EXISTS ix_audit_at ON audit(at);
-
-CREATE TABLE IF NOT EXISTS users (
-    username      TEXT PRIMARY KEY,
-    password_hash TEXT NOT NULL,
-    role          TEXT NOT NULL DEFAULT 'viewer',
-    created_at    REAL NOT NULL
-);
-"""
+SCHEMA_VERSION = len(_MIGRATIONS)
 
 
 @dataclass
@@ -103,8 +94,19 @@ class RunStore:
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Apply any pending migrations, tracked by PRAGMA user_version."""
         with self._conn() as conn:
-            conn.executescript(_SCHEMA)
+            current = conn.execute("PRAGMA user_version").fetchone()[0]
+            for version in range(current, len(_MIGRATIONS)):
+                conn.executescript(_MIGRATIONS[version])
+                conn.execute(f"PRAGMA user_version = {version + 1}")
+
+    def version(self) -> int:
+        with self._conn() as conn:
+            return conn.execute("PRAGMA user_version").fetchone()[0]
 
     @contextmanager
     def _conn(self):
@@ -282,12 +284,38 @@ class RunStore:
         self, at: float, action: str, actor: str | None = None,
         role: str | None = None, detail: str | None = None,
     ) -> None:
+        import hashlib
         with self._conn() as conn:
+            prev = conn.execute(
+                "SELECT entry_hash FROM audit ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            prev_hash = (prev["entry_hash"] if prev else "") or ""
+            # Chain each entry to the previous one's hash: any edit or
+            # deletion breaks the chain and is detected by verify_audit().
+            payload = f"{prev_hash}|{at}|{actor}|{role}|{action}|{detail}"
+            entry_hash = hashlib.sha256(payload.encode()).hexdigest()
             conn.execute(
-                "INSERT INTO audit (at, actor, role, action, detail) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (at, actor, role, action, detail),
+                "INSERT INTO audit (at, actor, role, action, detail, "
+                "prev_hash, entry_hash) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (at, actor, role, action, detail, prev_hash, entry_hash),
             )
+
+    def verify_audit(self) -> tuple[bool, int]:
+        """Recompute the audit hash chain. Returns (intact, first_bad_id).
+        first_bad_id is 0 when intact."""
+        import hashlib
+        with self._conn() as conn:
+            rows = list(conn.execute(
+                "SELECT * FROM audit ORDER BY id ASC"))
+        prev_hash = ""
+        for row in rows:
+            payload = (f"{prev_hash}|{row['at']}|{row['actor']}|{row['role']}"
+                       f"|{row['action']}|{row['detail']}")
+            expected = hashlib.sha256(payload.encode()).hexdigest()
+            if row["prev_hash"] != prev_hash or row["entry_hash"] != expected:
+                return False, row["id"]
+            prev_hash = row["entry_hash"]
+        return True, 0
 
     def recent_audit(self, limit: int = 200) -> list[dict]:
         with self._conn() as conn:
@@ -301,13 +329,14 @@ class RunStore:
     # --------------------------------------------------------- users
 
     def add_user(
-        self, username: str, password_hash: str, role: str, at: float
+        self, username: str, password_hash: str, role: str, at: float,
+        scopes: str = "*",
     ) -> None:
         with self._conn() as conn:
             conn.execute(
-                "INSERT INTO users (username, password_hash, role, created_at) "
-                "VALUES (?, ?, ?, ?)",
-                (username, password_hash, role, at),
+                "INSERT INTO users (username, password_hash, role, "
+                "created_at, scopes) VALUES (?, ?, ?, ?, ?)",
+                (username, password_hash, role, at, scopes),
             )
 
     def delete_user(self, username: str) -> int:
@@ -331,9 +360,49 @@ class RunStore:
                 row["username"]: {
                     "password_hash": row["password_hash"],
                     "role": row["role"],
+                    "scopes": (row["scopes"] if "scopes" in row.keys()
+                               else "*") or "*",
                 }
                 for row in conn.execute("SELECT * FROM users")
             }
+
+    # ----------------------------------------------------- api tokens
+
+    def add_api_token(
+        self, token_hash: str, name: str, role: str, scopes: str,
+        at: float, expires_at: float | None = None,
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO api_tokens (token_hash, name, role, scopes, "
+                "created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (token_hash, name, role, scopes, at, expires_at),
+            )
+
+    def get_api_token(self, token_hash: str, now: float) -> dict | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM api_tokens WHERE token_hash = ?", (token_hash,)
+            ).fetchone()
+            if row is None:
+                return None
+            if row["expires_at"] is not None and row["expires_at"] < now:
+                return None
+            conn.execute(
+                "UPDATE api_tokens SET last_used = ? WHERE token_hash = ?",
+                (now, token_hash))
+            return dict(row)
+
+    def list_api_tokens(self) -> list[dict]:
+        with self._conn() as conn:
+            return [dict(r) for r in conn.execute(
+                "SELECT token_hash, name, role, scopes, created_at, "
+                "expires_at, last_used FROM api_tokens ORDER BY created_at")]
+
+    def delete_api_token(self, name: str) -> int:
+        with self._conn() as conn:
+            return conn.execute(
+                "DELETE FROM api_tokens WHERE name = ?", (name,)).rowcount
 
 
 def default_runstore(config) -> RunStore:

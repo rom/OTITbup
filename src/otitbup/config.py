@@ -13,7 +13,7 @@ from typing import Any
 import yaml
 
 from .models import AppConfig, Device, Site, Zone
-from .windows import parse_interval, parse_window
+from .windows import parse_window, validate_schedule
 
 
 class ConfigError(Exception):
@@ -44,8 +44,9 @@ def _parse_retention(raw: Any, context: str) -> dict[str, int]:
     for key, value in raw.items():
         try:
             parsed[key] = int(value)
-        except (TypeError, ValueError):
-            raise ConfigError(f"{context}: retention.{key} must be an integer")
+        except (TypeError, ValueError) as exc:
+            raise ConfigError(
+                f"{context}: retention.{key} must be an integer") from exc
         if parsed[key] < 0:
             raise ConfigError(f"{context}: retention.{key} must be >= 0")
     return parsed
@@ -63,6 +64,12 @@ def load_config(path: str | Path) -> AppConfig:
     data_dir = raw.get("data_dir", "./data")
     # Resolve relative to the config file so runs are cwd-independent.
     data_dir = str((path.parent / os.path.expanduser(data_dir)).resolve())
+
+    # Same treatment for the config-as-code desired directory, if set.
+    desired = dict(raw.get("desired") or {})
+    if desired.get("dir"):
+        desired["dir"] = str(
+            (path.parent / os.path.expanduser(desired["dir"])).resolve())
 
     sites: list[Site] = []
     seen_devices: set[str] = set()
@@ -83,6 +90,7 @@ def load_config(path: str | Path) -> AppConfig:
                     zone_raw.get("retention"),
                     f"zone {site_name}/{zone_name}",
                 ),
+                timezone=zone_raw.get("timezone") or site_raw.get("timezone"),
             )
             if zone.maintenance_window:
                 # Validate early: a bad window should fail at load time,
@@ -108,8 +116,9 @@ def load_config(path: str | Path) -> AppConfig:
                     retention=_parse_retention(
                         dev_raw.get("retention"), f"device {dev_name}"
                     ),
+                    hooks=dev_raw.get("hooks") or {},
                 )
-                parse_interval(device.schedule)
+                validate_schedule(device.schedule)
                 if device.qualified_name in seen_devices:
                     raise ConfigError(
                         f"duplicate device: {device.qualified_name}"
@@ -135,4 +144,14 @@ def load_config(path: str | Path) -> AppConfig:
         tickets=raw.get("tickets") or {},
         netbox=raw.get("netbox") or {},
         strategy=raw.get("strategy") or {},
+        logging=raw.get("logging") or {},
+        hooks=raw.get("hooks") or {},
+        retry=raw.get("retry") or {},
+        api=raw.get("api") or {},
+        ldap=raw.get("ldap") or {},
+        federation=raw.get("federation") or {},
+        housekeeping=raw.get("housekeeping") or {},
+        encryption=raw.get("encryption") or {},
+        desired=desired,
+        anomaly=raw.get("anomaly") or {},
     )

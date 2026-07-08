@@ -12,7 +12,6 @@ from otitbup.drivers.base import Artifact
 from otitbup.gitstore import GitStore
 from otitbup.runstore import RunRecord, RunStore
 
-
 # ------------------------------------------------------ new drivers
 
 def test_new_device_drivers_resolve():
@@ -87,8 +86,9 @@ def test_strategy_321_and_32110(strat_env):
 
 
 def test_strategy_flags_stale_offline(strat_env):
-    from otitbup.strategy import evaluate
     import os
+
+    from otitbup.strategy import evaluate
     config, store, runstore, tmp_path = strat_env
     archive = tmp_path / "offline.tar.gz"
     archive.write_bytes(b"old")
@@ -165,9 +165,10 @@ def test_netbox_import_proposal(netbox_server):
     text = import_proposal(devices, "netbox", "imported")
     assert "driver: cisco_ios" in text        # ios platform -> cisco_ios
     assert "driver: juniper_junos" in text     # junos -> juniper_junos
-    from otitbup.config import load_config as lc
-    import tempfile
     import pathlib
+    import tempfile
+
+    from otitbup.config import load_config as lc
     with tempfile.TemporaryDirectory() as d:
         p = pathlib.Path(d) / "p.yml"
         p.write_text("data_dir: ./data\n" + text)

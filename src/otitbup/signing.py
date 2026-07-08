@@ -22,7 +22,9 @@ def _load_crypto():
     try:
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.primitives.asymmetric.ed25519 import (
-            Ed25519PrivateKey, Ed25519PublicKey)
+            Ed25519PrivateKey,
+            Ed25519PublicKey,
+        )
         return serialization, Ed25519PrivateKey, Ed25519PublicKey
     except ImportError as exc:
         raise SigningError(

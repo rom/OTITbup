@@ -86,7 +86,8 @@ def test_maintenance_window_skips_outside(config_file, monkeypatch):
     real_in_window = windows.in_window
     noon = datetime(2026, 7, 7, 12, 0)
     monkeypatch.setattr(
-        windows, "in_window", lambda spec, now=None: real_in_window(spec, noon)
+        windows, "in_window",
+        lambda spec, now=None, tz=None: real_in_window(spec, noon)
     )
 
     results = runner.backup_devices(config.all_devices())

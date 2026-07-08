@@ -46,8 +46,8 @@ def test_scan_silent_host_yields_nothing():
 
 
 def test_enrich_adds_identity_via_snmp(monkeypatch):
-    from otitbup.discovery import Finding, enrich
     import otitbup.snmp as snmp_mod
+    from otitbup.discovery import Finding, enrich
 
     def fake_get(host, oids, community="public", port=161, timeout=3.0):
         return {snmp_mod.SYS_DESCR: "Moxa EDS-408A switch"}
@@ -60,8 +60,8 @@ def test_enrich_adds_identity_via_snmp(monkeypatch):
 
 
 def test_enrich_survives_probe_failure(monkeypatch):
-    from otitbup.discovery import Finding, enrich
     import otitbup.snmp as snmp_mod
+    from otitbup.discovery import Finding, enrich
 
     def boom(*a, **k):
         raise snmp_mod.SNMPError("no agent")
@@ -98,8 +98,10 @@ def test_proposal_is_valid_inventory_yaml():
     assert devices[1]["options"]["device_type"] == "cisco_ios"
 
     # The proposal must load through the real config validator.
+    import pathlib
+    import tempfile
+
     from otitbup.config import load_config
-    import tempfile, pathlib
     with tempfile.TemporaryDirectory() as tmp:
         path = pathlib.Path(tmp) / "proposal.yml"
         path.write_text("data_dir: ./data\n" + text.split("sites:", 1)[0]

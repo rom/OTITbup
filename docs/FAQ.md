@@ -75,6 +75,16 @@ In a local git repository under `data_dir` on the appliance — one commit
 per device per change. Optionally mirrored to a remote git server
 (`git.push`). Large artifacts are offloaded to a deduplicated blob store.
 
+### Is the backup data encrypted at rest?
+The large-artifact **blob store** can be, with Fernet: set
+`encryption.blob_key` (or `blob_key_file` / `OTITBUP_BLOB_KEY`), needs
+`otitbup[crypto]`. Blobs stay content-addressed by the *plaintext* sha256,
+so dedup and manifest hashes are unchanged — only the on-disk bytes are
+ciphertext. This does **not** cover the git repo, `runstore.db` or the
+secrets file; use **full-disk encryption (LUKS)** for the appliance to
+protect those. You can also SSH-sign every commit (`git.sign.key_file`) for
+a tamper-evident history — verify with `git log --show-signature`.
+
 ### Won't the git repo grow forever with big PLC files?
 Text configs stay in git (cheap and worth keeping). Artifacts at or above
 `large_file_threshold` go to a content-addressed **blob store**, and
@@ -100,6 +110,15 @@ tagged *expected*.
 between the latest backup and that baseline — shown per device and on the
 `/drift` page. Change detection tells you it differs from *last time*;
 drift tells you it differs from *approved*.
+
+### How do I detect drift from a golden / intended config?
+Two complementary ways. A **baseline** approves an actual *past* backup
+(`otitbup baseline set`); **desired state** is config-as-code you author —
+put intended files under `desired.dir` as
+`<dir>/<site>/<zone>/<device>/<artifact>` and run `otitbup desired`
+(`--diff` for unified diffs; nonzero exit if anything drifted). Use a
+baseline to freeze "known good" from the field, and desired state to
+enforce a config you maintain in git.
 
 ### Can I record why a change happened?
 Yes — `otitbup annotate <device> "MOC-1234: reason"` attaches a note (git
@@ -157,7 +176,35 @@ sessions (for browsers) both work.
 ### Who can see what? Is there an audit trail?
 Roles gate write actions and the audit log. Every authenticated page view
 and every operational event (logins, backups, user changes, config
-reloads) is recorded and visible at `/audit` (admin only).
+reloads) is recorded and visible at `/audit` (admin only). The audit log is
+**hash-chained** (each row commits to the previous one), so any edit or
+deletion is detectable — verify it with `otitbup verify-audit` (exit 0 =
+intact, nonzero = tampered, with the first bad id).
+
+### How do I restrict a user to one site (or zone)?
+Give the user a `scopes` glob over the device's qualified name
+(`site/zone/name`). A `users:` entry (or DB user, session or API token)
+with `scopes: "plant-a/*"` may only run write actions (backup/verify) on
+plant-a devices; `"plant-a/cell-1/*"` narrows to one zone; `*` (the
+default) is everything. Read access is unaffected; out-of-scope writes are
+denied in the UI, the write API and via tokens.
+
+### How do I integrate SSO / OIDC / SAML?
+Put the web UI behind a reverse proxy that authenticates the user (OIDC or
+SAML) and sets a trusted header, then set `webui.trusted_header` (e.g.
+`X-Forwarded-User`), optionally `webui.trusted_role_header` and
+`webui.trusted_default_role`. **Only** enable this when the UI is reachable
+solely through that proxy — the header is spoofable otherwise. For direct
+directory login, configure `ldap` (LDAP/AD bind, needs `otitbup[ldap]`);
+login tries local users first, then LDAP, mapping groups to roles.
+
+### How do I trigger a backup from CI or another system?
+Mint a scoped token — `otitbup token create ci --role operator --scopes
+"plant-a/*" [--days N]` (shown once, stored sha256-hashed) — then
+`POST /api/device/<site/zone/name>/backup` (or `.../verify`) with an
+`Authorization: Bearer <token>` header. It needs operator+ and the device
+in scope, takes no CSRF (the token is a header, not a cookie), and returns
+`{"ok": ..., "message": ...}`. A live cookie session works too.
 
 ## Secrets
 

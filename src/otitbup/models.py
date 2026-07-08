@@ -29,6 +29,7 @@ class Device:
     credentials: str | None = None
     options: dict[str, Any] = field(default_factory=dict)
     retention: dict[str, int] = field(default_factory=dict)
+    hooks: dict[str, Any] = field(default_factory=dict)
 
     @property
     def path(self) -> str:
@@ -48,6 +49,7 @@ class Zone:
     maintenance_window: str | None = None
     max_concurrent: int = 1
     retention: dict[str, int] = field(default_factory=dict)
+    timezone: str | None = None
 
 
 @dataclass
@@ -72,6 +74,16 @@ class AppConfig:
     tickets: dict[str, Any] = field(default_factory=dict)
     netbox: dict[str, Any] = field(default_factory=dict)
     strategy: dict[str, Any] = field(default_factory=dict)
+    logging: dict[str, Any] = field(default_factory=dict)
+    hooks: dict[str, Any] = field(default_factory=dict)
+    retry: dict[str, Any] = field(default_factory=dict)
+    api: dict[str, Any] = field(default_factory=dict)
+    ldap: dict[str, Any] = field(default_factory=dict)
+    federation: dict[str, Any] = field(default_factory=dict)
+    housekeeping: dict[str, Any] = field(default_factory=dict)
+    encryption: dict[str, Any] = field(default_factory=dict)
+    desired: dict[str, Any] = field(default_factory=dict)
+    anomaly: dict[str, Any] = field(default_factory=dict)
 
     def all_devices(self) -> list[Device]:
         return [d for s in self.sites for z in s.zones for d in z.devices]

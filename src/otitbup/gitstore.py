@@ -30,9 +30,11 @@ class GitStoreError(Exception):
 
 
 class GitStore:
-    def __init__(self, data_dir: str | Path):
+    def __init__(self, data_dir: str | Path, sign_key: str | None = None):
         self.root = Path(data_dir)
         self._lock = threading.Lock()
+        # SSH signing key path for tamper-evident, attributable commits.
+        self.sign_key = sign_key
 
     def _git(self, *args: str, check: bool = True) -> str:
         proc = subprocess.run(
@@ -109,14 +111,26 @@ class GitStore:
             self._git("add", "-A", "--", device.path)
             if not self._git("status", "--porcelain", "--", device.path).strip():
                 return None
-            self._git(
-                "commit",
-                "-m",
+            commit_args = [
+                "commit", "-m",
                 f"backup({device.qualified_name}): {len(artifacts)} artifact(s)",
-                "--",
-                device.path,
-            )
+            ]
+            if self.sign_key:
+                # SSH-signed commit: attributable, tamper-evident history.
+                commit_args = [
+                    "-c", "gpg.format=ssh",
+                    "-c", f"user.signingkey={self.sign_key}",
+                ] + commit_args[:1] + ["-S"] + commit_args[1:]
+            commit_args += ["--", device.path]
+            self._git(*commit_args)
             return self._git("rev-parse", "HEAD").strip()
+
+    def verify_commit_signature(self, commit: str = "HEAD") -> bool:
+        """True if `commit` carries a valid signature."""
+        proc = subprocess.run(
+            ["git", "verify-commit", commit],
+            cwd=self.root, capture_output=True, text=True)
+        return proc.returncode == 0
 
     def last_diff(self, device: Device) -> str:
         """Diff of the most recent commit touching this device."""
@@ -271,6 +285,24 @@ class GitStore:
             if expected and hashlib.sha256(data).hexdigest() != expected:
                 problems.append(f"{name}: sha256 mismatch")
         return problems
+
+    def gc(self, aggressive: bool = False) -> str:
+        """Repack and prune the repository to keep it small. Safe to run
+        while the repo is idle; returns git's output."""
+        args = ["gc", "--prune=now"]
+        if aggressive:
+            args.append("--aggressive")
+        return self._git(*args, check=False)
+
+    def repo_size_bytes(self) -> int:
+        total = 0
+        for path in self.root.rglob("*"):
+            if path.is_file():
+                try:
+                    total += path.stat().st_size
+                except OSError:
+                    pass
+        return total
 
     def push(self, remote: str, branch: str = "main") -> None:
         if not [r for r in self._git("remote", check=False).split() if r == "origin"]:

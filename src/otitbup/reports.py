@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import html
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .gitstore import GitStore
 from .models import AppConfig
@@ -65,7 +65,7 @@ def compliance_report(
     now: float | None = None,
 ) -> str:
     now = now if now is not None else time.time()
-    generated = datetime.fromtimestamp(now, timezone.utc).strftime(
+    generated = datetime.fromtimestamp(now, UTC).strftime(
         "%Y-%m-%d %H:%M UTC"
     )
     period_start = now - period_days * 86400
@@ -169,7 +169,7 @@ def dr_runbook(
     now: float | None = None,
 ) -> str:
     now = now if now is not None else time.time()
-    generated = datetime.fromtimestamp(now, timezone.utc).strftime(
+    generated = datetime.fromtimestamp(now, UTC).strftime(
         "%Y-%m-%d %H:%M UTC"
     )
     site_obj = next((s for s in config.sites if s.name == site), None)

@@ -42,7 +42,7 @@ def generate_self_signed(
     san: list = [x509.DNSName(name) for name in hostnames]
     for ip in ips or []:
         san.append(x509.IPAddress(ipaddress.ip_address(ip)))
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     certificate = (
         x509.CertificateBuilder()
         .subject_name(subject)

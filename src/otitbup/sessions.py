@@ -21,6 +21,7 @@ class Session:
     role: str
     created_at: float
     expires_at: float
+    scopes: str = "*"
 
 
 class SessionStore:
@@ -29,11 +30,11 @@ class SessionStore:
         self._sessions: dict[str, Session] = {}
         self._lock = threading.Lock()
 
-    def create(self, username: str, role: str) -> Session:
+    def create(self, username: str, role: str, scopes: str = "*") -> Session:
         now = time.time()
         token = secrets.token_urlsafe(32)
         session = Session(
-            token=token, username=username, role=role,
+            token=token, username=username, role=role, scopes=scopes,
             created_at=now, expires_at=now + self.ttl,
         )
         with self._lock:

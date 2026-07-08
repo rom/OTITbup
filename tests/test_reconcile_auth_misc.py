@@ -1,17 +1,14 @@
 import base64
 import socket
 import textwrap
-import time
 
 import pytest
 
 from otitbup.alerts import AlertManager
-from otitbup.auth import (authenticate, build_users, hash_password,
-                          role_rank)
+from otitbup.auth import authenticate, build_users, hash_password, role_rank
 from otitbup.config import load_config
 from otitbup.reconcile import reconcile
 from otitbup.scaffold import init_project
-
 
 # ------------------------------------------------------- reconciliation
 
@@ -26,16 +23,16 @@ def listener():
 
 def test_reconcile_reports_unmanaged_and_unreachable(tmp_path, listener):
     cfg = tmp_path / "otitbup.yml"
-    cfg.write_text(textwrap.dedent(f"""
+    cfg.write_text(textwrap.dedent("""
         data_dir: ./data
         sites:
           - name: s
             zones:
               - name: net
                 devices:
-                  - {{name: known, driver: generic_ssh, address: 127.0.0.1,
-                     options: {{device_type: cisco_ios}}}}
-                  - {{name: gone, driver: generic_ssh, address: 10.255.255.254}}
+                  - {name: known, driver: generic_ssh, address: 127.0.0.1,
+                     options: {device_type: cisco_ios}}
+                  - {name: gone, driver: generic_ssh, address: 10.255.255.254}
     """))
     config = load_config(cfg)
     # Scan loopback/32 with the port our listener holds mapped to a driver.
@@ -71,7 +68,7 @@ def test_authenticate_returns_identity():
     )
     header = "Basic " + base64.b64encode(b"op:pw").decode()
     ident = authenticate(header, users)
-    assert ident == {"username": "op", "role": "operator"}
+    assert ident == {"username": "op", "role": "operator", "scopes": "*"}
     assert authenticate("Basic " + base64.b64encode(b"op:no").decode(),
                         users) is None
 
@@ -83,7 +80,6 @@ def test_role_rank_ordering():
 # ------------------------------------------------------ alert throttle
 
 def test_alert_rate_limiting(tmp_path):
-    sent = []
     mgr = AlertManager(
         {"min_interval": 100}, state_path=tmp_path / "alert-state.json"
     )

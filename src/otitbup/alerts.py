@@ -24,7 +24,7 @@ import logging
 import smtplib
 import time
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.message import EmailMessage
 from logging.handlers import SysLogHandler
 from pathlib import Path
@@ -91,7 +91,7 @@ class AlertManager:
         payload = json.dumps({
             "subject": subject,
             "body": body,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }).encode()
         request = urllib.request.Request(
             url, data=payload, headers={"Content-Type": "application/json"}
