@@ -9,6 +9,39 @@ branch; `0.1.0` is the current package version.
 
 ## Unreleased
 
+### Added — web config editor, HMI/IED/RTU drivers, more examples
+
+- **Configure the whole tool from the web UI.** A new admin-only **Config**
+  page edits the configuration without hand-editing YAML: global settings
+  (offsite targets/URIs, SSO/LDAP, events, logging, integrations,
+  encryption/signing/TLS keys & certs) and the full inventory per
+  **site / zone / device** — name, driver, address, schedule, credentials,
+  maintenance window, timezone, concurrency and retention, plus add/delete
+  of devices, zones and sites. Every save is validated through the real
+  config loader before writing (invalid edits are refused, the file left
+  untouched), the previous version is kept as `<config>.bak`, and the
+  process reloads immediately. CSRF-protected and audited. (`ruamel.yaml`,
+  if installed, preserves comments on save; otherwise the file is
+  normalised and the commented original stays in `.bak`.)
+- **More HMI/SCADA, substation IED and RTU drivers (124 total).** HMI/SCADA:
+  AVEVA Edge, zenon, Movicon, FactoryTalk View SE, VTScada, ClearSCADA/Geo
+  SCADA, WinCC Unified, Reliance. Protection relays / IEDs (IEC 61850 MMS
+  where supported, else web/CLI): SEL, Siemens SIPROTEC, ABB Relion, GE
+  Multilin, Schneider MiCOM, NR Electric, NARI. RTUs: Kingfisher, Motorola
+  ACE, SATEC (plus the earlier Emerson ROC/FloBoss, Survalent). Each reuses
+  an existing capture core and is honest about what an open protocol
+  exposes.
+- **More example configs.** `examples/` gains ready-to-adapt scenarios:
+  `minimal`, `network-only`, `substation`, `multi-site-federation`,
+  `cloud-offsite`, `high-security`, and a `hardening-checklist.md`.
+- **Extended FAQ** — roughly doubled, with longer, more detailed answers.
+
+### Fixed
+
+- The web server no longer dumps a traceback when a client drops its
+  connection (closed tab, dropped SSE stream, health probe); the benign
+  `ConnectionResetError`/`BrokenPipeError` is logged at debug instead.
+
 ### Added — offsite, drivers, in-app docs, more anomalies
 
 - **Encrypted offsite copies.** A new `offsite` command keeps an encrypted

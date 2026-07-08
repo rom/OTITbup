@@ -188,8 +188,14 @@ per device; see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 | AVEVA | Citect / Plant SCADA | `citect` | **project tree** via SFTP | `otitbup[sftp]` |
 | GE / Emerson | iFIX | `ifix` | **project tree** via SFTP | `otitbup[sftp]` |
 | PTC / Kepware | KEPServerEX | `kepware` | **project file** via SFTP | `otitbup[sftp]` |
+| Rockwell | FactoryTalk View SE | `factorytalk_se` | **project tree** via SFTP | `otitbup[sftp]` |
+| Siemens | WinCC Unified | `siemens_wincc_unified` | **project tree** via SFTP | `otitbup[sftp]` |
+| AVEVA / Schneider | ClearSCADA / Geo SCADA | `clearscada` / `geo_scada` | **project tree** via SFTP | `otitbup[sftp]` |
+| COPA-DATA / AVEVA / Progea / Trihedral / Reliance | zenon, AVEVA Edge, Movicon, VTScada, Reliance | `zenon` / `aveva_edge` / `movicon` / `vtscada` / `reliance_scada` | **project tree** via SFTP | `otitbup[sftp]` |
 | Any SCADA | project directory | `generic_scada` | **project tree** via SFTP | `otitbup[sftp]` |
 | Substation IEDs | SIPROTEC, ABB Relion, GE Multilin, ... | `iec61850_mms` | MMS Identify (vendor/model/rev) + fingerprint — *experimental* | — (stdlib) |
+| Protection relays | Siemens SIPROTEC, ABB Relion, Schneider MiCOM, NR Electric, NARI | `siemens_siprotec` / `abb_relion` / `schneider_micom` / `nr_electric` / `nari_relay` | IEC 61850 MMS identity + fingerprint | — (stdlib) |
+| SEL / GE | SEL relays, GE Multilin | `sel_relay` / `ge_multilin` | web-server config export | — (stdlib) |
 
 ### RTUs
 
@@ -205,6 +211,9 @@ per device; see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 | Survalent | SmartVU / RTU | `survalent_rtu` | CLI; also DNP3 | `otitbup[ssh]` |
 | Netcontrol | Netcon RTUs | `netcontrol_rtu` | SSH CLI; also DNP3/IEC-104/61850 | `otitbup[ssh]` |
 | Emerson | ROC800 / FloBoss (100/107) | `emerson_roc` | DNP3 device attributes (vendor/product/serial/versions) + fingerprint | — (stdlib) |
+| Schneider / Servelec | Kingfisher RTU | `kingfisher_rtu` | DNP3 device attributes + fingerprint | — (stdlib) |
+| Motorola | ACE3600 | `motorola_ace` | DNP3 device attributes + fingerprint | — (stdlib) |
+| SATEC | RTUs / meters | `satec_rtu` | web-server config export | — (stdlib) |
 
 ### Network equipment
 
@@ -282,7 +291,12 @@ events over SSE. The **Help** page links to the full manuals — Usage,
 Configuration, FAQ and Release notes — rendered in-app from the shipped
 Markdown (`/help/usage`, `/help/configuration`, `/help/faq`,
 `/help/releasenotes`; docs directory found relative to the package or via
-the `OTITBUP_DOCS_DIR` override).
+the `OTITBUP_DOCS_DIR` override). The **Config** page (admin-only) edits the
+whole configuration from the browser — global settings (offsite, SSO/LDAP,
+events, logging, integrations, encryption/signing/TLS keys & certs) and the
+inventory per **site / zone / device** (name, driver, schedule, credentials,
+maintenance window, timezone, concurrency, retention; add/delete) — with
+every save validated before write, a `.bak` kept, and an instant reload.
 
 ## Operations, compliance & recovery
 

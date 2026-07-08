@@ -81,7 +81,7 @@ sites:
 `otitbup list` shows the resulting inventory; `otitbup drivers` lists the
 drivers and which pip extra each needs.
 
-Coverage spans 105 drivers: OT controllers, RTUs and HMIs, plus enterprise
+Coverage spans 124 drivers: OT controllers, RTUs and HMIs, plus enterprise
 and OT **network gear** (Cisco, Juniper, Arista, Fortinet, Palo Alto,
 Aruba/HPE, Huawei, MikroTik, Nokia, Check Point, Stormshield, Phoenix
 Contact mGuard) and vendor **appliances** (Yokogawa, Honeywell, Fanuc,
@@ -390,11 +390,34 @@ Markdown at `/help/usage`, `/help/configuration`, `/help/faq` and
 |---|---|
 | viewer | view everything, search, diffs, API, metrics |
 | operator | + back up now, verify, add notes, set baseline, generate report |
-| admin | + re-read config, manage users, view audit log |
+| admin | + re-read config, manage users, edit config, view audit log |
 
 Users created in the UI persist in the run store; config-declared users
 are static. HTTP Basic is still accepted for the API, `/metrics` scraping
 and the CLI. `/healthz` is an unauthenticated liveness probe.
+
+**Configuration from the web UI (admin).** The **Config** page lets an admin
+change the whole configuration without hand-editing YAML:
+
+- *Global settings* — offsite copy (transport + URIs/paths/keys), SSO
+  (trusted-header and LDAP), events (syslog/SNMP), logging, integrations
+  (NetBox, ticketing), and encryption/signing/TLS key & certificate paths.
+- *Inventory* — per **site**, **zone** and **device**: name, driver
+  (dropdown of all installed drivers), address, schedule (interval or
+  cron), credentials, maintenance window, timezone, per-zone concurrency,
+  and retention lengths. Add or delete devices, zones and sites inline.
+- *Users* — the existing **Users** page (create/delete/reset, with roles
+  and scopes).
+
+Every save is **validated through the real config loader before it is
+written**: an edit that would produce an invalid config is refused and the
+file on disk is left untouched. The previous version is kept as
+`<config>.bak`, and the running process reloads immediately (the scheduler
+daemon picks the change up on its next tick via mtime). Editing requires the
+web process to have been started with `-c <config>`. Note that saving
+normalises the YAML file — **comments are not preserved** (install
+`ruamel.yaml` to round-trip them); the commented source is retained in the
+`.bak`. The whole page is admin-only, CSRF-protected and audited.
 
 Machine-readable: `/metrics` (Prometheus), `/api/status`, `/api/devices`,
 `/api/policy`, `/api/device/<name>` (JSON).
