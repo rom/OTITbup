@@ -228,6 +228,19 @@ def main(argv: list[str] | None = None) -> int:
         help="report statistical anomalies (slow backups, change storms)",
     )
 
+    p_desired = sub.add_parser(
+        "desired",
+        help="compare live backups against declared config-as-code",
+    )
+    p_desired.add_argument(
+        "--diff", action="store_true", help="show the unified diff for drift"
+    )
+
+    sub.add_parser(
+        "federation",
+        help="roll up health from federated site collectors",
+    )
+
     p_policy = sub.add_parser(
         "policy", help="run config policy checks over the latest backups"
     )
@@ -888,6 +901,57 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n{found} anomaly(ies) across {len(config.all_devices())} "
               "device(s)", file=sys.stderr)
         return 0 if not found else 1
+
+    if args.command == "desired":
+        from . import desired as desired_mod
+        from .runner import default_blobstore
+        store = GitStore(config.data_dir)
+        store.ensure_repo()
+        results = desired_mod.check_all(
+            config, store, blobstore=default_blobstore(config))
+        drifted = 0
+        for res in results:
+            state = "in-sync" if res.in_sync else "DRIFTED"
+            if not res.in_sync:
+                drifted += 1
+            print(f"{state:8s} {res.device:40s} "
+                  f"{res.drifted}/{res.checked} artifact(s) drifted")
+            if args.diff:
+                for art in res.artifacts:
+                    if art.status == "drift" and art.diff:
+                        print(art.diff)
+                    elif art.status == "missing":
+                        print(f"  {art.artifact}: not in any backup")
+        if not results:
+            print("no devices have a desired-config declaration "
+                  f"(set desired.dir; looked in "
+                  f"{config.desired.get('dir', 'desired')})",
+                  file=sys.stderr)
+        print(f"\n{drifted} device(s) drifted from desired config",
+              file=sys.stderr)
+        return 0 if not drifted else 1
+
+    if args.command == "federation":
+        from . import federation
+        healths = federation.poll_all(config.federation)
+        if not healths:
+            print("no collectors configured (set federation.collectors)",
+                  file=sys.stderr)
+            return 0
+        for h in healths:
+            if h.ok:
+                t = h.totals
+                print(f"OK   {h.name:20s} devices={t['devices']:4d} "
+                      f"covered={t['covered']:4d} stale={t['stale']:3d} "
+                      f"failing={t['failing']:3d}")
+            else:
+                print(f"DOWN {h.name:20s} {h.error}")
+        agg = federation.aggregate(healths)
+        t = agg["totals"]
+        print(f"\n{agg['reachable']}/{agg['collectors']} collectors reachable; "
+              f"total devices={t['devices']} covered={t['covered']} "
+              f"stale={t['stale']} failing={t['failing']}")
+        return 0 if agg["unreachable"] == 0 else 1
 
     if args.command == "policy":
         from .policy import check_all, severity_rank

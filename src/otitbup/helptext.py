@@ -223,6 +223,37 @@ The same checks run automatically after each backup and emit an
 
 See also: status, activity, verify.
 """),
+    _c("desired", "Health & compliance",
+       "compare live backups against config-as-code", """
+`otitbup desired [--diff]` compares each device's latest backup against a
+*declared* intended configuration (config-as-code / GitOps), reporting
+where the live device has drifted from intent. This is the inverse of
+`baseline`: baseline approves whatever was captured; `desired` asserts what
+*should* be there.
+
+Declare intended configs as files under `desired.dir`, mirroring the repo
+layout: `<desired.dir>/<site>/<zone>/<device>/<artifact-name>`. Only
+devices with a desired file are checked. `--diff` prints the unified diff
+for each drifted artifact. Exits non-zero if any device has drifted.
+
+See also: baseline, policy, verify.
+"""),
+    _c("federation", "Health & compliance",
+       "roll up health from federated site collectors", """
+`otitbup federation` gives a central appliance a single-pane-of-glass view
+over per-site *collector* appliances (the Purdue-model pattern: one
+OTITbup per plant/DMZ). Backup bytes federate over plain git (each
+collector pushes to a shared remote via `git.push`/`git.remote`); this
+command polls each collector's read-only `/api/status` over HTTPS with a
+scoped API token and aggregates device counts, coverage, staleness and
+failures.
+
+Configure collectors under `federation.collectors` (name, url, token or
+token_file, verify_tls). An unreachable collector shows as DOWN rather than
+failing the whole roll-up. Exits non-zero if any collector is unreachable.
+
+See also: status, token, serve.
+"""),
     _c("verify", "Health & compliance",
        "re-hash stored backups against their manifests", """
 `otitbup verify [--all-commits]` re-hashes every stored artifact against

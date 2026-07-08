@@ -64,6 +64,12 @@ def load_config(path: str | Path) -> AppConfig:
     # Resolve relative to the config file so runs are cwd-independent.
     data_dir = str((path.parent / os.path.expanduser(data_dir)).resolve())
 
+    # Same treatment for the config-as-code desired directory, if set.
+    desired = dict(raw.get("desired") or {})
+    if desired.get("dir"):
+        desired["dir"] = str(
+            (path.parent / os.path.expanduser(desired["dir"])).resolve())
+
     sites: list[Site] = []
     seen_devices: set[str] = set()
     for site_raw in raw.get("sites", []) or []:
@@ -145,6 +151,6 @@ def load_config(path: str | Path) -> AppConfig:
         federation=raw.get("federation") or {},
         housekeeping=raw.get("housekeeping") or {},
         encryption=raw.get("encryption") or {},
-        desired=raw.get("desired") or {},
+        desired=desired,
         anomaly=raw.get("anomaly") or {},
     )
