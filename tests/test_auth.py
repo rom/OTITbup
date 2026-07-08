@@ -59,8 +59,13 @@ def _opener():
 
 
 def test_no_credentials_is_401_with_challenge(auth_server):
+    # No credentials on an HTML page -> the login form (session-based UI).
+    with _opener().open(auth_server + "/", timeout=5) as response:
+        assert response.status == 200
+        assert "Sign in" in response.read().decode()
+    # But API/metrics still challenge with 401.
     with pytest.raises(urllib.error.HTTPError) as excinfo:
-        _opener().open(auth_server + "/", timeout=5)
+        _opener().open(auth_server + "/api/status", timeout=5)
     assert excinfo.value.code == 401
     assert "Basic" in excinfo.value.headers.get("WWW-Authenticate", "")
 

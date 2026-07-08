@@ -24,6 +24,7 @@ alerts:    { ... }      # change/failure/staleness alerts (section below)
 retention: { ... }      # global retention defaults (section below)
 policy:    { ... }      # config policy checks      (section below)
 reports:   { ... }      # scheduled compliance reports (section below)
+events:    { ... }      # syslog + SNMP trap event sinks (section below)
 sites:     [ ... ]      # the inventory             (section below)
 ```
 
@@ -234,9 +235,23 @@ webui:
 
 Generate each hash with `otitbup passwd --username <name>`. Every
 authenticated page view is recorded in the audit log (visible at `/audit`,
-**admin only**). A single `auth` user is treated as `admin`. Roles gate
-the audit log today and any future write actions; the read-only pages are
-visible to all roles.
+**admin only**). A single `auth` user is treated as `admin`.
+
+**Roles gate write actions.** The web UI is read/write when signed in:
+
+| Action | Minimum role |
+|---|---|
+| View pages, search, drift, diffs, API, metrics | viewer |
+| Back up a device, verify, add note, set baseline, generate report | operator |
+| Re-read config, create/delete users, change passwords, view audit log | admin |
+
+Users can be **managed at runtime** from the `/users` page (admin) —
+these are stored in the run store (`runstore.db`) and can be created,
+deleted and have passwords changed via the GUI, which is what emits the
+`user.create`/`user.delete`/`user.passwd` events. Config-declared users
+(in `auth`/`users`) are static and cannot be edited from the UI. Sessions
+are cookie-based (real login/logout); HTTP Basic is still accepted for the
+API, metrics scraping and the CLI.
 
 ## alerts
 
@@ -310,6 +325,34 @@ reports:
   period_days: 30        # window the report summarises
   out: /var/otitbup/compliance-report.html   # optional file output
 ```
+
+## events
+
+Structured operational events are always written to the audit log and
+Python logging; configure `events` to also fan them out to syslog and
+SNMPv2c traps (both stdlib, no extra dependencies):
+
+```yaml
+events:
+  syslog:
+    address: 10.0.0.1
+    port: 514
+    facility: local0     # kern/user/daemon/local0..local7
+  snmp_trap:
+    address: 10.0.0.2
+    port: 162
+    community: public
+    enterprise_oid: 1.3.6.1.4.1.99999   # YOUR private enterprise OID base
+```
+
+Event types emitted: `process.start`/`process.stop`,
+`webui.start`/`webui.stop`, `backup.start`/`backup.stop`/`backup.error`,
+`config.read`/`config.reload`, `auth.login`/`auth.logout`,
+`user.create`/`user.delete`/`user.passwd`. The SNMP trap OID is
+`<enterprise_oid>.0.<event-number>`; the trap carries the event type,
+message and severity as string varbinds under `<enterprise_oid>.1.{1,2,3}`.
+Replace the placeholder `enterprise_oid` with your organisation's IANA
+enterprise number. Sink failures are logged, never fatal.
 
 ## Files next to the config
 

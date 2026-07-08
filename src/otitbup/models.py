@@ -68,6 +68,7 @@ class AppConfig:
     retention: dict[str, int] = field(default_factory=dict)
     policy: dict[str, Any] = field(default_factory=dict)
     reports: dict[str, Any] = field(default_factory=dict)
+    events: dict[str, Any] = field(default_factory=dict)
 
     def all_devices(self) -> list[Device]:
         return [d for s in self.sites for z in s.zones for d in z.devices]

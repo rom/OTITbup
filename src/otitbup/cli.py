@@ -27,7 +27,13 @@ from .runner import Runner
 from .secrets import load_backend
 
 
-def _build_runner(config, force: bool = False) -> Runner:
+def _build_events(config):
+    from .events import EventBus
+    from .runstore import default_runstore
+    return EventBus(config.events, runstore=default_runstore(config))
+
+
+def _build_runner(config, force: bool = False, events=None) -> Runner:
     store = GitStore(config.data_dir)
     secrets = load_backend(
         config.secrets, base_dir=Path(config.data_dir).parent
@@ -36,8 +42,12 @@ def _build_runner(config, force: bool = False) -> Runner:
         config,
         store,
         secrets=secrets,
-        alerts=AlertManager(config.alerts),
+        alerts=AlertManager(
+            config.alerts,
+            state_path=Path(config.data_dir).parent / "alert-state.json",
+        ),
         force=force,
+        events=events or _build_events(config),
     )
 
 
@@ -356,6 +366,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"config error: {exc}", file=sys.stderr)
         return 2
 
+    # Emit config.read + process.start once the config is available (skip
+    # for read-only introspection commands that don't act on devices).
+    from .events import CONFIG_READ, PROCESS_START, PROCESS_STOP
+    events = _build_events(config)
+    if args.command in ("backup", "daemon", "serve"):
+        events.emit(CONFIG_READ, f"config read: {args.config}",
+                    detail=args.config)
+        events.emit(PROCESS_START, f"otitbup {args.command} starting",
+                    detail=args.command)
+
     if args.command == "validate":
         devices = config.all_devices()
         print(f"OK: {len(config.sites)} site(s), {len(devices)} device(s)")
@@ -380,11 +400,12 @@ def main(argv: list[str] | None = None) -> int:
         if not devices:
             print("no devices matched the selection", file=sys.stderr)
             return 1
-        runner = _build_runner(config, force=args.force)
+        runner = _build_runner(config, force=args.force, events=events)
         results = runner.backup_devices(devices)
         for result in results:
             status = "OK " if result.ok else "FAIL"
             print(f"{status} {result.device:40s} {result.message}")
+        events.emit(PROCESS_STOP, "otitbup backup finished", detail="backup")
         return 0 if all(r.ok for r in results) else 1
 
     if args.command == "diff":
@@ -491,8 +512,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "daemon":
-        runner = _build_runner(config)
-        daemon = Daemon(config, runner, config_path=args.config)
+        runner = _build_runner(config, events=events)
+        daemon = Daemon(config, runner, config_path=args.config, events=events)
         if args.once:
             count = daemon.run_once()
             print(f"backed up {count} device(s)")
@@ -500,6 +521,8 @@ def main(argv: list[str] | None = None) -> int:
         try:
             daemon.run_forever()
         except KeyboardInterrupt:
+            events.emit(PROCESS_STOP, "otitbup daemon stopping",
+                        detail="daemon")
             return 0
 
     if args.command == "serve":
@@ -517,17 +540,24 @@ def main(argv: list[str] | None = None) -> int:
                 else value
                 for key, value in tls.items()
             }
+        from .events import WEBUI_START, WEBUI_STOP
+        host = args.host or config.webui.get("host", "127.0.0.1")
+        port = args.port or int(config.webui.get("port", 8080))
+        events.emit(WEBUI_START, f"web UI starting on {host}:{port}",
+                    detail=f"{host}:{port}")
         try:
             serve(
                 config, store,
-                host=args.host or config.webui.get("host", "127.0.0.1"),
-                port=args.port or int(config.webui.get("port", 8080)),
+                host=host, port=port,
                 auth=config.webui.get("auth"),
                 tls=tls,
                 blobstore=default_blobstore(config),
                 runstore=default_runstore(config),
+                events=events,
+                config_path=args.config,
             )
         except KeyboardInterrupt:
+            events.emit(WEBUI_STOP, "web UI stopping", detail=f"{host}:{port}")
             return 0
 
     if args.command == "discover":

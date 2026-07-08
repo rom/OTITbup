@@ -22,11 +22,13 @@ _POLL_SECONDS = 30
 
 class Daemon:
     def __init__(
-        self, config: AppConfig, runner: Runner, config_path: str | None = None
+        self, config: AppConfig, runner: Runner,
+        config_path: str | None = None, events=None,
     ):
         self.config = config
         self.runner = runner
         self.config_path = config_path
+        self.events = events
         self._config_mtime = self._mtime()
         self.state_path = Path(config.data_dir).parent / "state.json"
         self.state: dict[str, str] = self._load_state()
@@ -61,6 +63,13 @@ class Daemon:
         log.info(
             "config reloaded: %d device(s)", len(new_config.all_devices())
         )
+        if self.events is not None:
+            from .events import CONFIG_RELOAD
+            self.events.emit(
+                CONFIG_RELOAD,
+                f"config reloaded: {len(new_config.all_devices())} device(s)",
+                detail=self.config_path,
+            )
         return True
 
     def _load_state(self) -> dict[str, str]:

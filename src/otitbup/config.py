@@ -131,4 +131,5 @@ def load_config(path: str | Path) -> AppConfig:
         retention=_parse_retention(raw.get("retention"), "retention"),
         policy=raw.get("policy") or {},
         reports=raw.get("reports") or {},
+        events=raw.get("events") or {},
     )
