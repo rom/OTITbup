@@ -192,6 +192,7 @@ _SETTINGS_FORMS = [
     {"section": "offsite", "title": "Offsite copy (external server / cloud)",
      "fields": [
          ("transport", "Transport (file | sftp | s3)", "str"),
+         ("interval_days", "Auto-push every N days (0=off)", "float"),
          ("key_file", "Encryption key file", "str"),
          ("dir", "file: directory / mount", "str"),
          ("host", "sftp: host", "str"), ("port", "sftp: port", "int"),
@@ -246,7 +247,24 @@ _SETTINGS_FORMS = [
          ("password", "Password / API token", "str"),
      ]},
     {"section": "encryption", "title": "Encryption at rest",
-     "fields": [("blob_key_file", "Blob-store key file", "str")]},
+     "fields": [
+         ("blob_key_file", "Blob-store key file", "str"),
+         ("compress", "Compress blobs before encrypting", "bool"),
+     ]},
+    {"section": "capture", "title": "Capture-quality guards",
+     "fields": [
+         ("min_bytes", "Reject captures smaller than (bytes)", "int"),
+         ("expect_match", "Required content (regex)", "str"),
+     ]},
+    {"section": "integrity", "title": "Integrity scrubbing",
+     "fields": [
+         ("interval_days", "Scrub every N days (0=off)", "float"),
+         ("all_commits", "Verify whole history", "bool"),
+         ("fsck", "Run git fsck", "bool"),
+         ("signatures", "Verify commit signatures", "bool"),
+     ]},
+    {"section": "rehearsal", "title": "Scheduled restore rehearsals",
+     "fields": [("interval_days", "Rehearse every N days (0=off)", "float")]},
     {"section": "git", "title": "Git remote & signed history",
      "fields": [
          ("remote", "Push remote", "str"),
@@ -268,6 +286,7 @@ _SETTINGS_FORMS = [
          ("keep_versions", "Keep newest N backups", "int"),
          ("keep_days", "Keep backups newer than N days", "int"),
          ("large_file_threshold", "Blob offload threshold (bytes)", "int"),
+         ("lock_days", "Retention lock: keep last N days (WORM)", "int"),
      ]},
     {"section": "alerts", "title": "Alerts",
      "fields": [

@@ -9,6 +9,43 @@ branch; `0.1.0` is the current package version.
 
 ## Unreleased
 
+### Added — data integrity, preservation & chain of custody
+
+A hardening batch focused on proving backups are correct, complete and
+preserved over time.
+
+- **Continuous integrity scrubbing.** New `integrity` command runs a
+  one-pass scrub — content (`verify`), repository (`git fsck`), and
+  optionally signed-commit signatures — and the daemon runs it on a
+  schedule (`integrity.interval_days`), persisting the result, emitting
+  `integrity.ok`/`integrity.error` events, and alerting on failure. Exposed
+  on `/api/status` and `/metrics` (`otitbup_integrity_ok`).
+- **Git-repository corruption detection** via `git fsck` (in the scrub and
+  standalone).
+- **Capture-quality guards.** A capture that produced no artifacts, is below
+  `capture.min_bytes` (global or per-device `options.min_bytes`), or is
+  missing required content (`capture.expect_match` / `options.expect_match`)
+  is rejected before it enters the archive. New **size_drop** anomaly flags
+  a capture far below the device's trailing median (captured size is now
+  recorded per run).
+- **Per-device GUID + provenance.** Every device has a GUID (config `guid:`
+  or a stable UUIDv5); new `guids [--assign]` command pins persistent ones.
+  Each backup records provenance in the manifest (`provenance: {device_guid,
+  driver}` alongside `artifacts:`) and the commit trailers (`Device-GUID`,
+  `Driver`, `Tool-Version`, `Appliance`, `Captured-At`).
+- **Schedulable from the daemon:** offsite push (`offsite.interval_days`),
+  integrity scrub, and restore rehearsals across all devices
+  (`rehearsal.interval_days`).
+- **Blob key rotation** (`blobkey rotate|genkey`) — re-encrypt every blob to
+  a new key (or enable/disable encryption), names unchanged, plaintext hash
+  re-verified. Optional **compression at rest** (`encryption.compress`).
+- **Immutability & retention protection:** legal holds (`hold set|clear|
+  list`) exempt a scope from pruning; a retention lock (`retention.lock_days`)
+  keeps everything within a minimum-retention/WORM window; guidance for an
+  append-only/object-locked off-appliance copy.
+- The web Config editor gains all the new settings (capture, integrity,
+  rehearsal, retention lock, compression, offsite interval).
+
 ### Added — config editor expansion, generic FTP/HTTPS, site-collector guide
 
 - **Config editor covers more settings.** The web Config page now also edits
