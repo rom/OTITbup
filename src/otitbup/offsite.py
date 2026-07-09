@@ -409,14 +409,26 @@ def pull(config, name: str | None, out_dir: Path) -> tuple[str, Path]:
 
 
 def _safe_extractall(tar: tarfile.TarFile, dest: Path) -> None:
-    """Extract, refusing any member that would escape `dest` (path
-    traversal / absolute paths) — the tarball came off an external store."""
+    """Extract, refusing any member that would escape `dest` — the tarball
+    came off an external store. Guards against three escapes: path traversal
+    / absolute paths, a sibling-prefix trick (`snap` vs `snap-evil`, which a
+    bare startswith check let through), and symlink/hardlink/device members
+    that could redirect a later write outside `dest`."""
     dest = dest.resolve()
     for member in tar.getmembers():
         target = (dest / member.name).resolve()
-        if not str(target).startswith(str(dest)):
+        if target != dest and not target.is_relative_to(dest):
             raise OffsiteError(f"unsafe path in snapshot: {member.name}")
-    tar.extractall(dest)  # noqa: S202 - members validated above
+        if member.issym() or member.islnk() or member.isdev():
+            raise OffsiteError(
+                f"unsafe member type in snapshot: {member.name}")
+    # Prefer the hardened 'data' filter (Python 3.11.4+) where available; it
+    # independently sanitises members. Fall back to the validated extract on
+    # older interpreters.
+    try:
+        tar.extractall(dest, filter="data")  # noqa: S202 - validated above
+    except TypeError:
+        tar.extractall(dest)  # noqa: S202 - validated above
 
 
 def stores_from_snapshot(extracted: Path, blob_key: str | bytes | None = None):

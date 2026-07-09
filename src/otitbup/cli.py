@@ -898,15 +898,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "retention":
+        from .retention import RetentionError, describe_policy, plan
         from .retention import apply as retention_apply
-        from .retention import describe_policy, plan
         from .runner import default_blobstore
         from .runstore import default_runstore
         store = GitStore(config.data_dir)
         store.ensure_repo()
         blobstore = default_blobstore(config)
-        prune_plan = plan(config, store, blobstore,
-                          runstore=default_runstore(config))
+        try:
+            prune_plan = plan(config, store, blobstore,
+                              runstore=default_runstore(config))
+        except RetentionError as exc:
+            print(f"retention aborted (nothing pruned): {exc}",
+                  file=sys.stderr)
+            return 1
         for dplan in prune_plan.devices:
             sources = ", ".join(
                 f"{key}={dplan.sources[key]}"

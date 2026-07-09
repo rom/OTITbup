@@ -53,6 +53,52 @@ def _get(url, headers=None):
         return response.status, response.headers, response.read().decode()
 
 
+def _post(url, data=b"", headers=None):
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    req = urllib.request.Request(url, data=data, method="POST",
+                                 headers=headers or {})
+    try:
+        with opener.open(req, timeout=5) as response:
+            return response.status, response.read().decode()
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read().decode()
+
+
+# -------------------------------------------------------- CSRF / redirect
+
+def test_cross_origin_post_rejected(server):
+    base, _ = server
+    # A cross-site form POST (browser attaches ambient credentials) is
+    # refused by the same-origin check even without a session token.
+    code, body = _post(base + "/config/site-add",
+                       headers={"Origin": "http://evil.example"})
+    assert code == 403 and "cross-origin" in body
+
+
+def test_same_origin_post_allowed(server):
+    base, _ = server
+    host = base.split("//", 1)[1]
+    code, _ = _post(base + "/config/site-add",
+                    data=b"site=", headers={"Origin": base})
+    # Same-origin passes the CSRF gate (site name empty -> a normal failure
+    # result page, not a 403).
+    assert code != 403
+    # A request with no Origin/Referer (non-browser client) is also allowed.
+    code2, _ = _post(base + "/config/site-add", data=b"site=")
+    assert code2 != 403
+    assert host  # sanity
+
+
+def test_safe_next_rejects_offsite_and_crlf():
+    from otitbup.webui import _Handler
+    assert _Handler._safe_next("/health") == "/health"
+    assert _Handler._safe_next("//evil.example") == "/"
+    assert _Handler._safe_next("/\\evil.example") == "/"
+    assert _Handler._safe_next("https://evil.example") == "/"
+    assert _Handler._safe_next("/ok%0d%0aSet-Cookie:x") == "/ok%0d%0aSet-Cookie:x"
+    assert _Handler._safe_next("/x\r\nSet-Cookie: y") == "/"
+
+
 # ------------------------------------------------------------------ menus
 
 def test_nav_has_renamed_menus(server):

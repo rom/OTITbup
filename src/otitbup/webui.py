@@ -3381,6 +3381,41 @@ class _Handler(BaseHTTPRequestHandler):
                 return value
         return None
 
+    def _is_tls(self) -> bool:
+        import ssl
+        return isinstance(self.connection, ssl.SSLSocket)
+
+    def _session_cookie(self, value: str, *, expire: bool = False) -> str:
+        """Build the session Set-Cookie, adding Secure under HTTPS so the
+        token (which doubles as the CSRF token) never leaks over plaintext."""
+        attrs = "HttpOnly; SameSite=Strict; Path=/"
+        if self._is_tls():
+            attrs += "; Secure"
+        if expire:
+            attrs += "; Max-Age=0"
+        return f"otitbup_session={value}; {attrs}"
+
+    @staticmethod
+    def _safe_next(url: str) -> str:
+        """Sanitise the post-login redirect target: only a local absolute
+        path is allowed. Rejects scheme-relative (`//host`, `/\\host`) URLs
+        that would redirect off-site and CR/LF that would inject headers."""
+        if ("\r" in url or "\n" in url or not url.startswith("/")
+                or url.startswith(("//", "/\\"))):
+            return "/"
+        return url
+
+    def _same_origin(self) -> bool:
+        """True if the request's Origin/Referer matches its Host (or is
+        absent — a non-browser client with no ambient credentials to abuse).
+        Blocks cross-site form POSTs riding Basic/SSO/session credentials."""
+        origin = self.headers.get("Origin") or self.headers.get("Referer")
+        if not origin:
+            return True
+        from urllib.parse import urlparse
+        host = self.headers.get("Host", "")
+        return urlparse(origin).netloc == host
+
     def _resolve_theme(self, identity: dict | None) -> str | None:
         """The effective colour theme: the signed-in user's saved preference
         (per-account, on disk), else this browser's cookie, else the
@@ -3688,10 +3723,20 @@ class _Handler(BaseHTTPRequestHandler):
         role = identity["role"] if identity else "admin"
         scopes = identity.get("scopes", "*") if identity else "*"
 
-        # CSRF: cookie-session POSTs must echo the session token.
+        # CSRF defence for browser-delivered credentials:
+        #  * cookie-session POSTs must echo the session token;
+        #  * HTTP Basic and trusted-SSO-header identities carry no token, but
+        #    the browser attaches those credentials automatically, so a
+        #    cross-site form could drive them. Enforce a same-origin check
+        #    (Origin/Referer must match Host) for every HTML form POST. A
+        #    non-browser client (no Origin/Referer) can't ride ambient
+        #    browser credentials, so its absence is allowed.
         if identity and identity["via"] == "session":
             if form.get("csrf") != identity["token"]:
                 return self._send(403, _page("forbidden", "<p>bad CSRF token</p>"))
+        if not self._same_origin():
+            return self._send(403, _page("forbidden",
+                                         "<p>cross-origin POST rejected</p>"))
 
         from .auth import role_rank
         ok, message, back = self._dispatch_post(
@@ -3725,10 +3770,8 @@ class _Handler(BaseHTTPRequestHandler):
             LOGIN, f"login: {ident['username']} ({ident['role']})",
             actor=ident["username"], detail=ident["username"],
         )
-        self._redirect(next_url if next_url.startswith("/") else "/", headers={
-            "Set-Cookie":
-                f"otitbup_session={session.token}; HttpOnly; SameSite=Strict; "
-                "Path=/",
+        self._redirect(self._safe_next(next_url), headers={
+            "Set-Cookie": self._session_cookie(session.token),
         })
 
     def _handle_logout(self) -> None:
@@ -3741,8 +3784,7 @@ class _Handler(BaseHTTPRequestHandler):
                 actor=session.username, detail=session.username,
             )
         self._redirect("/login", headers={
-            "Set-Cookie":
-                "otitbup_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
+            "Set-Cookie": self._session_cookie("", expire=True),
         })
 
     def _api_post(self, path: str, identity: dict | None) -> None:

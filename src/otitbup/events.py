@@ -438,9 +438,13 @@ class EventBus:
         if self.cfg.get("snmp_trap"):
             self._to_snmp(event)
         if self.tickets.wants(event.type):
-            self.tickets.open_ticket(
-                event.type, event.message, event.detail or event.message
-            )
+            # Defence in depth: no sink may make emit() fatal.
+            try:
+                self.tickets.open_ticket(
+                    event.type, event.message, event.detail or event.message
+                )
+            except Exception as exc:
+                log.debug("ticket sink failed: %s", exc)
 
     def _to_audit(self, event: Event) -> None:
         if self.runstore is None:
@@ -485,9 +489,20 @@ class EventBus:
                         else socket.SOCK_DGRAM)
             handler = SysLogHandler(
                 address=(address, port), facility=facility, socktype=socktype)
+            # SysLogHandler derives the wire PRI from record.LEVELNAME via
+            # mapPriority (setting record.levelno alone did nothing, so every
+            # event shipped as 'info'). Teach the handler our full syslog
+            # vocabulary and label the record with the event's severity so
+            # the severity actually reaches the collector.
+            handler.priority_map = {
+                **SysLogHandler.priority_map,
+                "EMERGENCY": "emerg", "ALERT": "alert", "CRITICAL": "crit",
+                "ERROR": "err", "WARNING": "warning", "NOTICE": "notice",
+                "INFO": "info", "DEBUG": "debug",
+            }
             record = logging.LogRecord(
                 "otitbup", logging.INFO, "", 0, message, None, None)
-            record.levelno = level  # map to syslog severity
+            record.levelname = event.severity.upper()
             handler.emit(record)
             handler.close()
         except Exception as exc:

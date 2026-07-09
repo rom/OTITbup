@@ -93,7 +93,12 @@ def in_window(spec: str | None, now: datetime | None = None,
     if not spec:
         return True
     start, end = parse_window(spec)
-    current_dt = now or datetime.now()
+    # Default to an aware UTC "now" (as the daemon passes) rather than
+    # datetime.now(), whose naive LOCAL time was previously mislabelled as
+    # UTC below and shifted maintenance windows by the host's UTC offset —
+    # making a manual `otitbup backup` disagree with the daemon on any
+    # non-UTC appliance.
+    current_dt = now or datetime.now(UTC)
     if tz:
         try:
             from zoneinfo import ZoneInfo

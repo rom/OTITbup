@@ -19,6 +19,7 @@ only expired blob content is deleted. A blob shared by several devices
 """
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 
@@ -27,6 +28,12 @@ import yaml
 from .blobstore import BlobStore
 from .gitstore import GitStore
 from .models import AppConfig, Device
+
+log = logging.getLogger("otitbup.retention")
+
+
+class RetentionError(Exception):
+    """A retention plan could not be computed safely, so nothing is pruned."""
 
 
 @dataclass
@@ -72,13 +79,18 @@ def describe_policy(policy: dict[str, int]) -> str:
 
 
 def _offloaded_shas(store: GitStore, device: Device, commit: str) -> set[str]:
-    """Blob hashes referenced by one backup, via its manifest."""
+    """Blob hashes referenced by one backup, via its manifest. Raises
+    RetentionError if the manifest cannot be read/parsed — the caller must
+    NOT treat that as 'no blobs', or it would prune content still referenced
+    by a retained backup."""
     try:
         manifest = yaml.safe_load(
             store.read_file_at(commit, f"{device.path}/manifest.yml")
         )
-    except Exception:
-        return set()
+    except Exception as exc:
+        raise RetentionError(
+            f"cannot read manifest for {device.qualified_name}@{commit[:10]}: "
+            f"{exc}") from exc
     if not isinstance(manifest, dict):
         return set()
     from .gitstore import manifest_artifacts
@@ -121,8 +133,6 @@ def plan(
         commits = store.device_commits(device)
         dplan.backups = len(commits)
         for index, (commit, timestamp) in enumerate(commits):
-            shas = _offloaded_shas(store, device, commit)
-            dplan.referenced |= shas
             unlimited = not keep_versions and not keep_days
             keep = (
                 dplan.held
@@ -131,6 +141,20 @@ def plan(
                 or (cutoff is not None and timestamp >= cutoff)
                 or (lock_cutoff is not None and timestamp >= lock_cutoff)
             )
+            try:
+                shas = _offloaded_shas(store, device, commit)
+            except RetentionError:
+                # A deletable backup's unreadable manifest is harmless (its
+                # blobs are not in the keep set anyway). But if a RETAINED
+                # backup's manifest is unreadable we cannot enumerate the
+                # blobs it references, and blobs are content-addressed and
+                # shared across devices — so there is no safe subset to
+                # prune. Refuse the whole plan rather than risk deleting
+                # referenced content.
+                if keep:
+                    raise
+                continue
+            dplan.referenced |= shas
             if keep:
                 dplan.kept_backups += 1
                 dplan.kept |= shas

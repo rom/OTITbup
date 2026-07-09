@@ -52,7 +52,11 @@ class TicketManager:
                 self._rt(event_type, summary, detail)
             else:
                 self._generic(event_type, summary, detail)
-        except (urllib.error.URLError, OSError, ValueError) as exc:
+        # A ticket sink must never be fatal (contract). Besides network
+        # errors, a misconfiguration (e.g. `backend` set but `url` missing,
+        # which raises KeyError from self.cfg['url']) must be logged, not
+        # allowed to abort the backup run that emitted the event.
+        except Exception as exc:
             log.warning("ticket creation failed (%s): %s", self.backend, exc)
 
     def _request(self, url: str, payload: dict, headers: dict) -> None:
