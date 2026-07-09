@@ -49,6 +49,11 @@ branch; `0.1.0` is the current package version.
   severity, with an errors-&-warnings-only filter. Backed by a new `events`
   table in the run store (the audit chain only kept a short detail, so the
   full message a user saw was previously not retained anywhere queryable).
+- **Graceful web-UI startup failures.** `otitbup serve` no longer dumps a
+  socket traceback when the address is unavailable. A port already in use
+  (another `otitbup serve` already running), a privileged port, or an
+  unavailable host address now produce a clear one-line message with a fix
+  and a non-zero exit, and the failure is recorded in the Event log.
 - **Copy-pasteable install hints.** Optional-dependency error messages and
   the docs now quote the pip extras (`pip install 'otitbup[siemens]'`) so
   they work as-is in zsh, where the unquoted `otitbup[siemens]` is treated
