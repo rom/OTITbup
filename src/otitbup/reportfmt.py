@@ -68,10 +68,6 @@ def to_csv(config, store, runstore, now=None) -> bytes:
 
 # ------------------------------------------------------------------- PDF
 
-def _pdf_escape(text: str) -> str:
-    return text.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
-
-
 # Report palette (0-1 RGB) matching the web UI charts.
 _DARK = (0.08, 0.09, 0.11)
 _OK = (0.106, 0.478, 0.184)
@@ -205,7 +201,6 @@ def to_pdf(config, store, runstore, now=None) -> bytes:
     # Footer page numbers.
     total_pages = len(c._pages)
     for i in range(total_pages):
-        c._pages_index = i
         # draw footer directly on each page's op list
         ops = c._pages[i]
         ops.append("0.6 0.66 0.72 rg")

@@ -198,9 +198,6 @@ class RunStore:
                 status.consecutive_failures += 1
         return status
 
-    def all_status(self, devices: list[str]) -> dict[str, DeviceStatus]:
-        return {name: self.status(name) for name in devices}
-
     # ---------------------------------------------------- rehearsals
 
     def record_rehearsal(

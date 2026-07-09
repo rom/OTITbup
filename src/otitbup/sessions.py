@@ -31,6 +31,10 @@ class SessionStore:
         self._lock = threading.Lock()
 
     def create(self, username: str, role: str, scopes: str = "*") -> Session:
+        # Opportunistically purge expired sessions on each new login, so the
+        # store doesn't grow unbounded with the sessions of users who never
+        # return to trigger get()'s lazy delete.
+        self.sweep()
         now = time.time()
         token = secrets.token_urlsafe(32)
         session = Session(

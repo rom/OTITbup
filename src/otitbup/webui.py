@@ -1232,7 +1232,7 @@ class WebUI:
         )
         return _login_shell("otitbup — login", body)
 
-    def users_page(self, identity: dict, csrf: str) -> bytes:
+    def users_page(self, csrf: str) -> bytes:
         users = self.all_users()
         rows = ""
         for name, rec in sorted(users.items()):
@@ -1676,7 +1676,7 @@ class WebUI:
                        f"{html.escape(sname)}</b></summary>")
             out.append(self._retention_form(
                 "/config/site", {"site": sname}, site.get("retention") or {},
-                csrf, extra=[]))
+                csrf))
             for zone in site.get("zones", []) or []:
                 zname = zone.get("name", "")
                 out.append(f"<details><summary>zone: "
@@ -1763,7 +1763,7 @@ class WebUI:
             + "<button type='submit'>Add site</button></form>"
         )
 
-    def _retention_form(self, action, hidden, r, csrf, extra) -> str:
+    def _retention_form(self, action, hidden, r, csrf) -> str:
         h = "".join(
             f"<input type='hidden' name='{k}' value='{html.escape(str(v))}'>"
             for k, v in hidden.items())
@@ -3559,7 +3559,6 @@ class _Handler(BaseHTTPRequestHandler):
                     headers={"WWW-Authenticate": 'Basic realm="otitbup"'},
                 )
             return self._send(200, self.ui.login_page(next_url=path))
-        self._identity = identity
         self._set_ctx(identity)
         role = identity["role"] if identity else "admin"
         csrf = identity["token"] if identity and identity["via"] == "session" else ""
@@ -3615,7 +3614,7 @@ class _Handler(BaseHTTPRequestHandler):
             elif path == "/config":
                 page = self.ui.config_page(csrf)
             else:
-                page = self.ui.users_page(identity or {}, csrf)
+                page = self.ui.users_page(csrf)
             return self._send(200, page)
 
         content: bytes | None = None
