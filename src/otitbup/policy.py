@@ -66,6 +66,32 @@ BUILTIN_RULES = [
                             r"(0\s+)?cisco\b"),
     Rule("no-plaintext-enable", "Enable password stored unencrypted",
          "high", match=r"(?im)^\s*enable password\s+(?!5\b|8\b|9\b)"),
+    Rule("no-ftp-server", "FTP server (cleartext file transfer) enabled",
+         "high", match=r"(?im)^\s*(ftp-server enable|feature ftp-server|"
+                       r"ftp server enable)"),
+    Rule("no-tftp-server", "TFTP server (unauthenticated) enabled", "high",
+         match=r"(?im)^\s*tftp-server\s+\S+"),
+    Rule("no-ssh-v1", "SSH protocol version 1 enabled", "high",
+         match=r"(?im)^\s*ip ssh version 1\b"),
+    Rule("no-snmpv3-des", "SNMPv3 user with weak DES privacy", "medium",
+         match=r"(?im)^\s*snmp-server user\s+\S+.*\bpriv\s+des\b"),
+    Rule("no-weak-user-password",
+         "User password stored plaintext or reversibly (type 0/7)", "high",
+         match=r"(?im)^\s*username\s+\S+\s+password\s+"
+               r"(?!5\s|8\s|9\s)(?:(?:0|7)\s+)?\S+"),
+    Rule("no-default-admin-password",
+         "Default admin/root account with a well-known password", "critical",
+         match=r"(?im)^\s*username\s+(admin|root)\s+(password|secret)\s+"
+               r"(0\s+)?(admin|root|password|default|1234?5?6?)\s*$"),
+    Rule("no-permit-any-any", "ACL permits ip any any (wide open)", "medium",
+         match=r"(?im)^\s*(access-list\s+\d+\s+)?permit\s+ip\s+any\s+any\b"),
+    Rule("no-vty-transport-all",
+         "VTY lines accept all transports (incl. telnet)", "high",
+         match=r"(?im)^\s*transport input\s+all\b"),
+    Rule("weak-enable-md5", "Enable secret uses weak MD5 hashing (type 5)",
+         "low", match=r"(?im)^\s*enable secret 5\s"),
+    Rule("no-ip-source-route", "IP source routing enabled", "low",
+         match=r"(?im)^\s*ip source-route\b"),
 ]
 
 

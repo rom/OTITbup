@@ -69,6 +69,11 @@ def main(argv: list[str] | None = None) -> int:
         "-c", "--config", default="otitbup.yml", help="config file path"
     )
     parser.add_argument("-v", "--verbose", action="store_true")
+    parser.add_argument(
+        "--accept-config-changes", action="store_true",
+        help="accept detected configuration changes without the interactive "
+             "dialogue (for unattended runs)",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("validate", help="check the config file and exit")
@@ -567,6 +572,15 @@ def main(argv: list[str] | None = None) -> int:
                     detail=args.config)
         events.emit(PROCESS_START, f"otitbup {args.command} starting",
                     detail=args.command)
+        # Detect config edits since the last accepted run: minor changes
+        # warn, major changes need interactive acceptance (or the
+        # --accept-config-changes flag in unattended runs).
+        from . import configwatch
+        if not configwatch.review(
+            args.config, configwatch.state_path(config),
+            assume_yes=args.accept_config_changes, events=events,
+        ):
+            return 2
 
     if args.command == "validate":
         devices = config.all_devices()

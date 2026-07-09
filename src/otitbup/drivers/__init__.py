@@ -187,6 +187,65 @@ def driver_descriptions() -> dict[str, str]:
     return {name: described.get(name, "") for name in available_drivers()}
 
 
+# Module (basename) -> the pip extra that provides its runtime dependency.
+# Drivers not listed here are stdlib-only.
+_MODULE_EXTRAS = {
+    "generic_ssh": ("ssh", "netmiko"),
+    "network_profiles": ("ssh", "netmiko"),
+    "generic_sftp": ("sftp", "paramiko"),
+    "hmi": ("sftp", "paramiko (SFTP-based project fetch)"),
+    "hmi_ied_rtu": ("sftp", "paramiko (SFTP-based drivers only)"),
+    "siemens_s7": ("siemens", "python-snap7"),
+    "rockwell_enip": ("rockwell", "pycomm3"),
+    "generic_opcua": ("opcua", "asyncua"),
+    "beckhoff_ads": ("beckhoff", "pyads"),
+}
+
+
+def driver_info(name: str) -> dict | None:
+    """Detailed, human-readable info about one registered driver, for the
+    CLI and the web UI's driver catalog: description, how it is set up and
+    works (module/class docstrings), the vendor profile preset if it is an
+    SSH profile, and the pip extra it needs. Returns None for unknown
+    names. Never raises on missing optional dependencies."""
+    target = _REGISTRY.get(name)
+    if target is None:
+        return None
+    info: dict = {
+        "name": name,
+        "description": driver_descriptions().get(name, ""),
+        "module": None, "class_name": None,
+        "module_doc": "", "class_doc": "",
+        "profile": None, "extra": None, "requires": None,
+    }
+    from .network_profiles import PROFILES
+    if name in PROFILES:
+        info["profile"] = PROFILES[name]
+    if isinstance(target, str):
+        module_name, _, class_name = target.partition(":")
+        info["module"] = module_name
+        info["class_name"] = class_name
+        basename = module_name.rsplit(".", 1)[-1]
+        extra = _MODULE_EXTRAS.get(basename)
+        if extra:
+            info["extra"], info["requires"] = extra
+        try:
+            module = importlib.import_module(module_name)
+            info["module_doc"] = (module.__doc__ or "").strip()
+            cls = getattr(module, class_name, None)
+            if cls is not None:
+                doc = cls.__doc__ or ""
+                # Skip docstrings inherited from the abstract base.
+                if doc and doc is not Driver.__doc__:
+                    info["class_doc"] = doc.strip()
+        except ImportError:
+            pass
+    else:  # a class registered directly via register()
+        info["class_name"] = getattr(target, "__name__", str(target))
+        info["class_doc"] = (target.__doc__ or "").strip()
+    return info
+
+
 def get_driver(name: str) -> Driver:
     target = _REGISTRY.get(name, name if ":" in name else None)
     if target is None:
@@ -208,6 +267,7 @@ __all__ = [
     "Driver",
     "DriverError",
     "available_drivers",
+    "driver_info",
     "get_driver",
     "register",
 ]
