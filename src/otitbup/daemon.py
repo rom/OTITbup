@@ -167,22 +167,24 @@ class Daemon:
             if now < due_at:
                 return
         try:
+            from . import reportstore
             from .reports import compliance_report
             from .runstore import default_runstore
             html = compliance_report(
                 self.config, self.runner.store, default_runstore(self.config),
                 period_days=int(self.config.reports.get("period_days", 30)),
             )
+            path = reportstore.store_report(self.config, "html", html.encode())
             out = self.config.reports.get("out")
             if out:
-                Path(out).write_text(html)
+                Path(out).write_text(html)   # also mirror to a fixed path
             self.runner.alerts.notify(
                 "otitbup: scheduled compliance report",
-                "Compliance report generated"
-                + (f" at {out}" if out else "")
-                + f" ({len(self.config.all_devices())} devices).",
+                f"Compliance report generated: {path.name} "
+                f"({len(self.config.all_devices())} devices)."
+                + (f" Mirrored to {out}." if out else ""),
             )
-            log.info("scheduled compliance report generated")
+            log.info("scheduled compliance report archived: %s", path.name)
         except Exception as exc:
             log.warning("scheduled report failed: %s", exc)
         self.state["__report__"] = now.isoformat()

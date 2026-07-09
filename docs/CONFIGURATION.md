@@ -956,6 +956,8 @@ each collector a scoped, read-only token with `otitbup token create`.
 | `blobs/` | `otitbup backup` | content-addressed store for offloaded large artifacts; pruned by `otitbup retention --apply` |
 | `runstore.db` | `otitbup backup` | SQLite: run results, rehearsals, maintenance state, legal holds, last integrity result (feeds status/metrics/reports); safe to delete (loses history) |
 | `state.json` | `otitbup daemon` | per-device last-run times; safe to delete (forces a run) |
+| `reports/` | `otitbup report`, web UI, daemon | archived compliance reports, timestamped (`compliance-YYYYMMDD-HHMMSS.<ext>`) and versioned; served by the web UI's Reports page; safe to delete (loses report history) |
+| `user-prefs.json` | web UI | per-account UI preferences (e.g. colour theme) for every signed-in identity, incl. config/SSO users; safe to delete (resets to defaults) |
 | `otitbup.key` | `otitbup secrets genkey` | Fernet key, mode 0600 |
 | `webui-cert.pem`, `webui-key.pem` | `otitbup certgen` | TLS pair, key mode 0600 |
 | `discovered.yml` | `otitbup discover` | inventory proposal for human review |

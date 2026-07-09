@@ -1244,20 +1244,25 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "report":
+        from . import reportstore
         from .runstore import default_runstore
         store = GitStore(config.data_dir)
         store.ensure_repo()
         runstore = default_runstore(config)
-        out = args.out or f"compliance-report.{args.format}"
         if args.format == "html":
             from .reports import compliance_report
-            Path(out).write_text(compliance_report(
-                config, store, runstore, period_days=args.days))
+            data = compliance_report(
+                config, store, runstore, period_days=args.days).encode()
         else:
             from .reportfmt import render
             data, _ct, _ext = render(args.format, config, store, runstore)
-            Path(out).write_bytes(data)
-        print(f"compliance report written to {out}")
+        # Always archive into the versioned reports/ directory; --out is an
+        # optional extra copy at a fixed path.
+        out = reportstore.store_report(config, args.format, data)
+        print(f"compliance report archived: {out}")
+        if args.out:
+            Path(args.out).write_bytes(data)
+            print(f"copied to {args.out}")
         if args.sign:
             from .signing import SigningError, sign_file
             try:

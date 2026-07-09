@@ -13,9 +13,24 @@ branch; `0.1.0` is the current package version.
 
 - **Per-user colour themes.** Each user picks a theme from the menu-bar
   dropdown — `auto` (follows the OS), `light`, `dark`, `sky`, `desert`,
-  `autumn`, or `spring`. The choice is saved to their account (and a browser
-  cookie), so it is per-user, not global. `webui.theme` sets the default for
-  users who haven't chosen one.
+  `autumn`, or `spring`. The theme **applies instantly** (no reload or tab
+  switch); the choice then persists in the background. Preferences are kept
+  in an on-disk store (`user-prefs.json`, next to the data directory) keyed
+  by account, so they follow *every* signed-in identity — including
+  config-declared and SSO/LDAP users, not just UI-created accounts — across
+  browsers and devices. A browser cookie is set as a fallback. `webui.theme`
+  sets the default for users who haven't chosen one.
+- **Login page** is now a dedicated, centred sign-in card with a **Login**
+  heading and button, shown *without* the app menu bar — no navigation is
+  exposed until you are authenticated.
+- **Archived, versioned reports.** Generated compliance reports are written
+  to a dedicated `reports/` subdirectory (next to the data directory) under
+  timestamped names (`compliance-YYYYMMDD-HHMMSS.<ext>`), so every run is
+  retained rather than overwriting the last. A new **Reports** page in the
+  web UI lists them newest-first (format, size, signed badge), links each for
+  inline viewing/download, and offers a generate control for operators. The
+  CLI `report` command and the scheduled daemon report both archive here;
+  `--out`/`reports.out` still writes an extra copy to a fixed path.
 - **Syslog transport is selectable** for the events sink: `events.syslog.
   protocol` = `udp` (default), `tcp`, or `tls` (RFC 5425/6587; honours
   `cafile`/`verify`).

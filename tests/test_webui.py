@@ -506,9 +506,10 @@ def test_per_user_theme_preference(tmp_path):
         body = req("GET", "/dashboard", ca)[2]
         assert "class='theme-pick'" in body and "data-theme='light'" in body
 
-        # admin picks autumn -> persists per account (survives without cookie).
-        st, h, _ = req("GET", "/theme?set=autumn&next=/dashboard", ca)
-        assert st in (302, 303) and "otitbup_theme=autumn" in h["Set-Cookie"]
+        # admin picks autumn -> 204 (client already applied it, we just
+        # persist) and it survives without the cookie (per-account, on disk).
+        st, h, _ = req("GET", "/theme?set=autumn", ca)
+        assert st == 204 and "otitbup_theme=autumn" in h["Set-Cookie"]
         assert "data-theme='autumn'" in req("GET", "/dashboard", ca)[2]
 
         # bob is unaffected (isolation); his cookie choice still works.
@@ -518,6 +519,119 @@ def test_per_user_theme_preference(tmp_path):
 
         # auto clears the cookie.
         assert "otitbup_theme=; " in req(
-            "GET", "/theme?set=auto&next=/", cb)[1]["Set-Cookie"]
+            "GET", "/theme?set=auto", cb)[1]["Set-Cookie"]
+    finally:
+        httpd.shutdown()
+
+
+def test_login_page_is_a_bare_shell(tmp_path):
+    # An unauthenticated request renders the login card with no app nav.
+    import http.client
+    httpd, _ = _rw_server(tmp_path)
+    try:
+        addr = httpd.server_address
+        c = http.client.HTTPConnection(*addr, timeout=5)
+        c.request("GET", "/")
+        page = c.getresponse().read().decode()
+        assert "class='login-wrap'" in page and "class='login-card'" in page
+        assert "<h2>Login</h2>" in page
+        assert "type='submit'>Login</button>" in page
+        # The app chrome (top menu / nav) must not appear on the login page.
+        assert "<nav" not in page
+        assert ">Dashboard<" not in page and ">Devices<" not in page
+    finally:
+        httpd.shutdown()
+
+
+def test_live_theme_picker_applies_client_side(tmp_path):
+    # The picker flips data-theme in the DOM and persists via a background
+    # fetch — no reload, no server redirect.
+    import http.client
+    httpd, _ = _rw_server(tmp_path, theme="light")
+    try:
+        addr = httpd.server_address
+        cookie = _login(addr)
+        c = http.client.HTTPConnection(*addr, timeout=5)
+        c.request("GET", "/dashboard", headers={"Cookie": cookie})
+        body = c.getresponse().read().decode()
+        assert "setAttribute('data-theme'" in body
+        assert "window.fetch" in body and "/theme?set=" in body
+    finally:
+        httpd.shutdown()
+
+
+def test_reports_generate_archive_list_and_view(tmp_path):
+    import http.client
+    httpd, ui = _rw_server(tmp_path)
+    try:
+        addr = httpd.server_address
+
+        def req(method, path, cookie=None, body=None):
+            c = http.client.HTTPConnection(*addr, timeout=5)
+            h = {"Cookie": cookie} if cookie else {}
+            if body is not None:
+                h["Content-Type"] = "application/x-www-form-urlencoded"
+            c.request(method, path, body, h)
+            r = c.getresponse()
+            return r.status, dict(r.getheaders()), r.read()
+
+        raw = req("POST", "/login", body="username=admin&password=pw")[1][
+            "Set-Cookie"]
+        cookie = raw.split(";")[0]
+        token = cookie.split("=", 1)[1]         # session token doubles as CSRF
+
+        # Empty archive to start.
+        page = req("GET", "/reports", cookie)[2].decode()
+        assert "<h2>Reports</h2>" in page
+        assert "no reports generated yet" in page
+
+        # Generate one (needs the CSRF token, as the browser form supplies).
+        st, _, data = req("POST", "/report", cookie,
+                          f"format=html&csrf={token}")
+        assert st == 200
+        result = data.decode()
+        assert "archived" in result
+        assert 'href="/reports"' in result or "href='/reports'" in result
+
+        # It now shows up in the archive with a view link.
+        from otitbup import reportstore
+        files = reportstore.list_reports(ui.config)
+        assert len(files) == 1
+        name = files[0].name
+        page = req("GET", "/reports", cookie)[2].decode()
+        assert f"/reports/view/{name}" in page
+        assert "no reports generated yet" not in page
+
+        # The archived report is served inline.
+        st, h, data = req("GET", f"/reports/view/{name}", cookie)
+        assert st == 200
+        assert h["Content-Type"].startswith("text/html")
+        assert "inline" in h.get("Content-Disposition", "")
+        assert b"<" in data
+
+        # Path traversal is rejected (404, not the config file).
+        st, _, _ = req("GET", "/reports/view/..%2f..%2fotitbup.yml", cookie)
+        assert st == 404
+    finally:
+        httpd.shutdown()
+
+
+def test_report_post_requires_csrf(tmp_path):
+    # A session POST without the CSRF token is rejected (defence in depth).
+    import http.client
+    httpd, _ = _rw_server(tmp_path)
+    try:
+        addr = httpd.server_address
+        c = http.client.HTTPConnection(*addr, timeout=5)
+        c.request("POST", "/login", "username=admin&password=pw",
+                  {"Content-Type": "application/x-www-form-urlencoded"})
+        cookie = c.getresponse().getheader("Set-Cookie").split(";")[0]
+        c = http.client.HTTPConnection(*addr, timeout=5)
+        c.request("POST", "/report", "format=html",
+                  {"Cookie": cookie,
+                   "Content-Type": "application/x-www-form-urlencoded"})
+        r = c.getresponse()
+        r.read()
+        assert r.status == 403
     finally:
         httpd.shutdown()

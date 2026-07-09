@@ -309,6 +309,14 @@ status; it renders to HTML, CSV, PDF and DOCX, and `--sign` adds an
 Ed25519 signature (with a companion `.pubkey`) so auditors can confirm it
 wasn't altered.
 
+Every generated report is **archived** to a dedicated `reports/`
+subdirectory next to the data directory, under a timestamped name
+(`compliance-YYYYMMDD-HHMMSS.<ext>`), so runs accumulate as a versioned
+history rather than overwriting each other. `--out <path>` writes an extra
+copy to a fixed location. The web UI's **Reports** page lists the archive
+newest-first and lets operators view, download and generate reports in the
+browser.
+
 ### Integrity & at-rest protection
 
 ```bash
