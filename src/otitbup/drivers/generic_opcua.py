@@ -53,7 +53,7 @@ class GenericOPCUADriver(Driver):
         except ImportError as exc:
             raise DriverError(
                 "generic_opcua requires asyncua "
-                "(pip install otitbup[opcua])"
+                "(pip install 'otitbup[opcua]')"
             ) from exc
 
         if not device.address:

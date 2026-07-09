@@ -46,7 +46,7 @@ class BeckhoffADSDriver(Driver):
             import pyads
         except ImportError as exc:
             raise DriverError(
-                "beckhoff_ads requires pyads (pip install otitbup[beckhoff])"
+                "beckhoff_ads requires pyads (pip install 'otitbup[beckhoff]')"
             ) from exc
 
         if not device.address:

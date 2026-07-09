@@ -31,7 +31,7 @@ def generate_self_signed(
     except ImportError as exc:
         raise TLSCertError(
             "certificate generation requires the 'cryptography' package "
-            "(pip install otitbup[crypto])"
+            "(pip install 'otitbup[crypto]')"
         ) from exc
 
     hostnames = hostnames or ["localhost"]

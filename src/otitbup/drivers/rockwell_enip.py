@@ -74,7 +74,7 @@ class RockwellENIPDriver(Driver):
         except ImportError as exc:
             raise DriverError(
                 "rockwell_enip requires pycomm3 "
-                "(pip install otitbup[rockwell])"
+                "(pip install 'otitbup[rockwell]')"
             ) from exc
 
         if not device.address:

@@ -57,7 +57,7 @@ def collect_ssh(
         from netmiko import ConnectHandler
     except ImportError as exc:
         raise DriverError(
-            f"{device.driver} requires netmiko (pip install otitbup[ssh])"
+            f"{device.driver} requires netmiko (pip install 'otitbup[ssh]')"
         ) from exc
 
     if not device.address:

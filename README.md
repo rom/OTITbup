@@ -61,8 +61,8 @@ not.
 ## Quick start
 
 ```bash
-pip install -e .[dev]          # core + tests
-pip install -e .[ssh]          # + netmiko for network equipment
+pip install -e '.[dev]'          # core + tests
+pip install -e '.[ssh]'          # + netmiko for network equipment
 
 cp examples/otitbup.yml examples/secrets.yml .
 $EDITOR otitbup.yml secrets.yml
@@ -127,7 +127,7 @@ of every command and the web UI.
 ### Encrypted secrets
 
 ```bash
-pip install -e .[crypto]
+pip install -e '.[crypto]'
 otitbup secrets genkey --out otitbup.key
 otitbup secrets encrypt secrets.yml secrets.enc --key-file otitbup.key
 otitbup secrets decrypt secrets.enc --key-file otitbup.key   # to view/edit

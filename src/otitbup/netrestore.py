@@ -86,7 +86,7 @@ def restore_network_config(
         from netmiko import ConnectHandler
     except ImportError as exc:
         raise NetRestoreError(
-            "automated restore requires netmiko (pip install otitbup[ssh])"
+            "automated restore requires netmiko (pip install 'otitbup[ssh]')"
         ) from exc
     if not device.address or not secret:
         raise NetRestoreError(

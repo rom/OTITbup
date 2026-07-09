@@ -77,7 +77,7 @@ class SiemensS7Driver(Driver):
         except ImportError as exc:
             raise DriverError(
                 "siemens_s7 requires python-snap7 "
-                "(pip install otitbup[siemens])"
+                "(pip install 'otitbup[siemens]')"
             ) from exc
 
         if not device.address:

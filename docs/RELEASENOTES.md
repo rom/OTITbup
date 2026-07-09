@@ -39,8 +39,20 @@ branch; `0.1.0` is the current package version.
   theme, syslog protocol, roles, log level/format, …), and splits the former
   "Web UI & SSO" panel into separate **Web UI** and **SSO** sections.
 - The menu bar shows **who is signed in** (username + role).
-- **Menu order:** Dashboard now comes before Devices; the two log views are
-  labelled **Backup log** and **Audit log**.
+- **Menu order:** Dashboard now comes before Devices.
+- **Logs menu.** The log views are grouped under a single **Logs** dropdown
+  with three entries: **Audit logs** (access/change trail), **Backup logs**
+  (commit history) and a new **Event logs** page.
+- **Event logs.** A persistent operational log of the messages surfaced to
+  operators — backup failures *with the full driver error text*, anomalies,
+  integrity results, config reloads, logins — newest-first, colour-coded by
+  severity, with an errors-&-warnings-only filter. Backed by a new `events`
+  table in the run store (the audit chain only kept a short detail, so the
+  full message a user saw was previously not retained anywhere queryable).
+- **Copy-pasteable install hints.** Optional-dependency error messages and
+  the docs now quote the pip extras (`pip install 'otitbup[siemens]'`) so
+  they work as-is in zsh, where the unquoted `otitbup[siemens]` is treated
+  as a glob and fails with `no matches found`.
 - **Fixed:** clicking **Logout** in the menu (a GET link) rendered a
   "not found" page — logout is now handled over GET and redirects to the
   sign-in page.

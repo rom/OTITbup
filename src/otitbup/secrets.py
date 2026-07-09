@@ -79,7 +79,7 @@ def _fernet_cls():
     except ImportError as exc:
         raise SecretsError(
             "this operation requires the 'cryptography' package "
-            "(pip install otitbup[crypto])"
+            "(pip install 'otitbup[crypto]')"
         ) from exc
     return Fernet
 

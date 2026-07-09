@@ -226,6 +226,7 @@ class EventBus:
         )
         log.info("event %s: %s", event.type, event.message)
         self._to_audit(event)
+        self._to_event_log(event)
         if self.broadcaster is not None:
             try:
                 self.broadcaster.publish(event)
@@ -250,6 +251,21 @@ class EventBus:
             )
         except Exception as exc:
             log.debug("audit sink failed: %s", exc)
+
+    def _to_event_log(self, event: Event) -> None:
+        """Persist the full event message so the web UI can show a durable
+        operational log (errors shown to the user, backups, config reloads,
+        …), independent of the short-detail audit chain."""
+        if self.runstore is None:
+            return
+        try:
+            self.runstore.record_event(
+                time.time(), event.type, event.message,
+                severity=event.severity, actor=event.actor,
+                detail=event.detail,
+            )
+        except Exception as exc:
+            log.debug("event-log sink failed: %s", exc)
 
     def _to_syslog(self, event: Event) -> None:
         cfg = self.cfg["syslog"]

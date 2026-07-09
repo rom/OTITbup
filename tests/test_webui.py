@@ -459,7 +459,10 @@ def test_theme_and_who_chip(tmp_path):
         assert "data-theme='desert'" in body
         assert "signed in as <b>admin</b>" in body
         assert body.index(">Dashboard<") < body.index(">Devices<")
-        assert ">Backup log<" in body and ">Audit log<" in body
+        # The three log views live under a "Logs" dropdown menu.
+        assert "class='nav-group'" in body and "Logs" in body
+        assert (">Audit logs<" in body and ">Backup logs<" in body
+                and ">Event logs<" in body)
     finally:
         httpd.shutdown()
 
@@ -556,6 +559,43 @@ def test_live_theme_picker_applies_client_side(tmp_path):
         body = c.getresponse().read().decode()
         assert "setAttribute('data-theme'" in body
         assert "window.fetch" in body and "/theme?set=" in body
+    finally:
+        httpd.shutdown()
+
+
+def test_event_log_page_shows_error_messages(tmp_path):
+    import http.client
+    httpd, ui = _rw_server(tmp_path)
+    try:
+        # Record a couple of events straight into the shared runstore, as the
+        # event bus would when a backup fails / finishes.
+        from otitbup.events import BACKUP_ERROR, BACKUP_STOP
+        err = ("backup failed: plant-a/cell-1/plc-01: siemens_s7 requires "
+               "python-snap7 (pip install 'otitbup[siemens]')")
+        ui.runstore.record_event(100.0, BACKUP_STOP, "backup finished: sw-01",
+                                 severity="info", detail="sw-01")
+        ui.runstore.record_event(200.0, BACKUP_ERROR, err, severity="error",
+                                 detail="plant-a/cell-1/plc-01")
+
+        addr = httpd.server_address
+        cookie = _login(addr)
+
+        def get(path):
+            c = http.client.HTTPConnection(*addr, timeout=5)
+            c.request("GET", path, headers={"Cookie": cookie})
+            return c.getresponse().read().decode()
+
+        page = get("/events")
+        assert "<h2>Event log</h2>" in page
+        assert "siemens_s7 requires python-snap7" in page
+        assert "otitbup[siemens]" in page       # full command shown
+        assert "class='evt-error'" in page       # error row highlighted
+        assert "backup finished: sw-01" in page
+
+        # errors-only view drops the info-level event.
+        page = get("/events?errors=1")
+        assert "siemens_s7 requires python-snap7" in page
+        assert "backup finished: sw-01" not in page
     finally:
         httpd.shutdown()
 

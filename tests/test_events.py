@@ -19,6 +19,22 @@ def test_event_recorded_in_audit(tmp_path):
     assert any(r["action"] == BACKUP_START for r in rows)
 
 
+def test_event_log_keeps_full_message(tmp_path):
+    # The audit chain elides the message to a short detail, but the event log
+    # must keep the full text an operator saw (e.g. a driver's failure).
+    from otitbup.events import BACKUP_ERROR
+    rs = RunStore(tmp_path / "r.db")
+    bus = EventBus({}, runstore=rs)
+    msg = ("backup failed: plant-a/cell-1/plc-01: siemens_s7 requires "
+           "python-snap7 (pip install 'otitbup[siemens]')")
+    bus.emit(BACKUP_ERROR, msg, severity="error", detail="plant-a/cell-1/plc-01")
+    events = rs.recent_events()
+    assert len(events) == 1
+    assert events[0]["message"] == msg          # full message preserved
+    assert events[0]["severity"] == "error"
+    assert events[0]["type"] == BACKUP_ERROR
+
+
 def test_syslog_sink_sends_datagram(tmp_path):
     sock = _udp_receiver()
     port = sock.getsockname()[1]

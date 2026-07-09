@@ -60,7 +60,7 @@ def ldap_authenticate(cfg: dict, username: str, password: str) -> dict | None:
     """Bind to LDAP/AD with the user's credentials. Returns
     {"username", "role"} on success. Role comes from group membership
     (cfg.role_map: {group_dn_or_cn: role}) or cfg.default_role. Requires
-    the optional 'ldap3' package (pip install otitbup[ldap])."""
+    the optional 'ldap3' package (pip install 'otitbup[ldap]')."""
     if not username or not password:
         return None
     try:

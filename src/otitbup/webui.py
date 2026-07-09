@@ -149,6 +149,24 @@ nav a:hover { background: var(--hover); color: var(--text);
               text-decoration: none; }
 nav a.active { background: var(--accent-soft); color: var(--accent-ink);
                font-weight: 600; }
+/* Dropdown menu group (Logs) — CSS-only, opens on hover or keyboard focus */
+.nav-group { position: relative; }
+.nav-top { display: inline-block; padding: .34rem .6rem; border-radius: 8px;
+       color: var(--muted); font-size: .855rem; font-weight: 500;
+       white-space: nowrap; cursor: default; user-select: none; }
+.nav-top::after { content: ''; }
+.nav-group:hover .nav-top, .nav-group:focus-within .nav-top {
+       background: var(--hover); color: var(--text); }
+.nav-top.active { background: var(--accent-soft); color: var(--accent-ink);
+       font-weight: 600; }
+.nav-drop { position: absolute; top: 100%; left: 0; min-width: 11rem;
+       margin-top: .2rem; padding: .3rem; background: var(--surface);
+       border: 1px solid var(--border); border-radius: 10px;
+       box-shadow: var(--shadow); z-index: 40; display: none;
+       flex-direction: column; gap: .08rem; }
+.nav-group:hover .nav-drop, .nav-group:focus-within .nav-drop {
+       display: flex; }
+.nav-drop a { display: block; }
 .who { display: inline-flex; align-items: center; gap: .35rem;
        color: var(--muted); font-size: .8rem; padding-left: .7rem;
        margin-left: .2rem; border-left: 1px solid var(--border);
@@ -217,6 +235,15 @@ input:focus, select:focus, textarea:focus { outline: none;
 .muted { color: var(--muted); font-size: .85rem; }
 .sev-critical, .sev-high { color: var(--danger); font-weight: 600; }
 .sev-medium { color: var(--warn); } .sev-low { color: var(--muted); }
+/* Event-log (syslog-style) severities */
+.sev-emergency, .sev-alert, .sev-error { color: var(--danger);
+       font-weight: 600; }
+.sev-warning { color: var(--warn); font-weight: 600; }
+.sev-notice { color: var(--accent-ink); }
+.sev-info, .sev-debug { color: var(--muted); }
+tr.evt-error > td, tr.evt-critical > td, tr.evt-alert > td,
+tr.evt-emergency > td { background: var(--danger-soft); }
+tr.evt-warning > td { background: var(--warn-soft, var(--accent-soft)); }
 .ok { color: var(--ok); } .miss { color: var(--danger); }
 .strat { font-size: 1.02rem; padding: .3rem 0; }
 
@@ -415,7 +442,11 @@ def _page(title: str, body: str) -> bytes:
         f"<a href='/policy'>Policy</a>"
         f"<a href='/retention'>Retention</a><a href='/strategy'>Strategy</a>"
         f"<a href='/reports'>Reports</a><a href='/drivers'>Drivers</a>"
-        f"<a href='/activity'>Backup log</a><a href='/audit'>Audit log</a>"
+        "<div class='nav-group'><span class='nav-top' tabindex='0'>"
+        "Logs ▾</span><div class='nav-drop'>"
+        "<a href='/audit'>Audit logs</a>"
+        "<a href='/activity'>Backup logs</a>"
+        "<a href='/events'>Event logs</a></div></div>"
         f"<a href='/users'>Users</a><a href='/config'>Config</a>"
         f"<a href='/help'>Help</a>"
         f"<a href='/logout'>Logout</a>{_theme_picker()}"
@@ -424,7 +455,10 @@ def _page(title: str, body: str) -> bytes:
         "<script>(function(){var p=location.pathname;"
         "document.querySelectorAll('nav a').forEach(function(a){"
         "var h=a.getAttribute('href');if(h!=='/logout'&&"
-        "(h==='/'?p==='/':p.indexOf(h)===0))a.classList.add('active');});})();"
+        "(h==='/'?p==='/':p.indexOf(h)===0))a.classList.add('active');});"
+        "document.querySelectorAll('.nav-group').forEach(function(g){"
+        "if(g.querySelector('.nav-drop a.active'))"
+        "g.querySelector('.nav-top').classList.add('active');});})();"
         "</script>"
         f"</body></html>"
     ).encode()
@@ -1969,6 +2003,53 @@ class WebUI:
         )
         return _page("otitbup — audit", body)
 
+    def event_log(self, errors_only: bool = False) -> bytes:
+        """Operational event log: the messages surfaced to operators —
+        backup failures (with the full driver error), config reloads,
+        anomalies, integrity results, logins, and so on — newest first."""
+        if self.runstore is None:
+            return _page("otitbup — events",
+                         "<p class='muted'>unavailable</p>")
+        import datetime as _dt
+        severities = ["emergency", "alert", "critical", "error", "warning"] \
+            if errors_only else None
+        events = self.runstore.recent_events(limit=300, severities=severities)
+        rows = []
+        for r in events:
+            when = _dt.datetime.fromtimestamp(
+                r["at"], _dt.UTC).strftime("%Y-%m-%d %H:%M:%S")
+            sev = (r.get("severity") or "info").lower()
+            actor = r.get("actor")
+            actor_cell = f" <span class='muted'>({html.escape(actor)})</span>" \
+                if actor else ""
+            rows.append(
+                f"<tr data-row class='evt-{html.escape(sev)}'>"
+                f"<td>{when}</td>"
+                f"<td class='sev-{html.escape(sev)}'>{html.escape(sev)}</td>"
+                f"<td><code>{html.escape(r.get('type') or '')}</code></td>"
+                f"<td>{html.escape(r.get('message') or '')}{actor_cell}</td>"
+                "</tr>")
+        table = (
+            "<input id='filter' type='search' placeholder='Filter…' "
+            "autocomplete='off'>"
+            "<table><tr><th>When (UTC)</th><th>Severity</th><th>Type</th>"
+            "<th>Message</th></tr>"
+            + ("".join(rows) or
+               "<tr><td colspan='4'>no events recorded yet</td></tr>")
+            + "</table>" + _FILTER_SCRIPT)
+        toggle = (
+            "<a href='/events'>all</a> · <b>errors &amp; warnings</b>"
+            if errors_only else
+            "<b>all</b> · <a href='/events?errors=1'>errors &amp; warnings</a>")
+        body = (
+            "<h2>Event log</h2>"
+            "<p class='muted'>Operational events and messages surfaced to "
+            "operators — including backup failures and their full error text. "
+            f"Show: {toggle}.</p>"
+            + table
+            + "<p class='muted'>last 300 events</p>")
+        return _page("otitbup — events", body)
+
     def policy(self) -> bytes:
         from .policy import check_all, load_rules, severity_rank
         findings = check_all(self.config, self.store)
@@ -2860,6 +2941,9 @@ class _Handler(BaseHTTPRequestHandler):
             content = self.ui.policy()
         elif path == "/activity":
             content = self.ui.activity()
+        elif path == "/events":
+            content = self.ui.event_log(
+                errors_only=query.get("errors", ["0"])[0] == "1")
         elif path == "/reports":
             content = self.ui.reports(ctx={"role": role, "csrf": csrf})
         elif path.startswith("/reports/view/"):
