@@ -31,7 +31,9 @@ SNMPv2-Trap for v2c, USM per RFC 3414/3826 for v3 — authPriv needs the
 from __future__ import annotations
 
 import logging
+import os
 import socket
+import threading
 import time
 from dataclasses import dataclass
 from logging.handlers import SysLogHandler
@@ -314,7 +316,12 @@ def build_snmpv3_trap(
                 "SNMPv3 authPriv needs the cryptography package "
                 "(pip install \"otitbup[crypto]\")") from exc
         priv_key = usm_localized_key(priv_pass, engine_id, hash_name)[:16]
-        priv_params = struct.pack(">Q", request_id & 0xFFFFFFFFFFFFFFFF)
+        # RFC 3826 §3.1.2.1: the AES-CFB IV is boots||time||salt, and the
+        # 8-byte salt MUST NOT repeat for a given key. Deriving it from the
+        # per-process request_id counter reused the keystream after any
+        # restart (boots/time reset); a random salt per trap is unique
+        # regardless of restarts or a racing counter.
+        priv_params = os.urandom(8)
         iv = struct.pack(">II", boots, etime) + priv_params
         cipher = Cipher(algorithms.AES(priv_key), CFB(iv))
         enc = cipher.encryptor()
@@ -397,6 +404,9 @@ class EventBus:
         self.runstore = runstore
         self._start = time.monotonic()
         self._request_id = 0
+        # emit() runs concurrently from the backup thread pool and the web
+        # server's handler threads; guard the trap request-id counter.
+        self._id_lock = threading.Lock()
         # Optional in-process sink for live UI streaming (SSE). The web UI
         # attaches a Broadcaster here; None keeps the CLI path allocation-free.
         self.broadcaster: Broadcaster | None = None
@@ -507,11 +517,15 @@ class EventBus:
 
     def _to_snmp(self, event: Event) -> None:
         cfg = self.cfg["snmp_trap"]
-        self._request_id = (self._request_id + 1) & 0x7FFFFFFF
-        uptime = int((time.monotonic() - self._start) * 100)
+        with self._id_lock:
+            self._request_id = (self._request_id + 1) & 0x7FFFFFFF
+            request_id = self._request_id or 1
+        # sysUpTime is a 32-bit TimeTicks; wrap so a long-lived daemon
+        # (>497 days) never emits a 5-byte value strict receivers reject.
+        uptime = int((time.monotonic() - self._start) * 100) & 0xFFFFFFFF
         try:
             datagram = build_trap(
-                cfg, event, request_id=self._request_id or 1,
+                cfg, event, request_id=request_id,
                 uptime_ticks=uptime,
             )
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

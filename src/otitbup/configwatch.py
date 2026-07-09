@@ -113,19 +113,41 @@ def _flatten(data, prefix: str = "") -> dict[str, object]:
     return out
 
 
-def _is_major(path: str, kind: str) -> bool:
-    """kind: 'added' | 'removed' | 'changed'."""
+def _device_prefix(path: str) -> str | None:
+    """The `sites.<site>.zones.<zone>.devices.<device>` prefix of a flattened
+    inventory path, or None if the path is not inside a device."""
+    parts = path.split(".")
+    if (len(parts) >= 6 and parts[0] == "sites" and parts[2] == "zones"
+            and parts[4] == "devices"):
+        return ".".join(parts[:6])
+    return None
+
+
+def _is_major(path: str, kind: str, old_device_prefixes: set[str]) -> bool:
+    """kind: 'added' | 'removed' | 'changed'. `old_device_prefixes` is the set
+    of device prefixes that existed in the previous config, so a field *added*
+    to an existing device (e.g. a new address/credentials) is distinguished
+    from a brand-new device (whose every field reads as 'added')."""
     if path == "sites" or path.startswith("sites."):
         parts = path.split(".")
         # sites.<site>.zones.<zone>.devices.<device>[.field]
         if kind == "removed":
             return True                      # inventory removal/rename
-        if kind == "added":
-            return False                     # new site/zone/device: routine
         if "devices" in parts:
             di = parts.index("devices")
             fields = parts[di + 2:]
-            return bool(fields) and fields[0] in _MAJOR_DEVICE_FIELDS
+            if not fields:
+                return False
+            if kind == "added":
+                # A new device is routine; a new field on a device that
+                # already existed (re-pointing address/driver/credentials)
+                # is a major change and must not slip through as 'added'.
+                dev_prefix = ".".join(parts[:di + 2])
+                if dev_prefix not in old_device_prefixes:
+                    return False
+            return fields[0] in _MAJOR_DEVICE_FIELDS
+        # New/removed site or zone (handled above); a zone/site attribute
+        # merely added is routine.
         return False
     for prefix in MAJOR_PREFIXES:
         if path == prefix or path.startswith(prefix + "."):
@@ -137,6 +159,9 @@ def diff_raw(old: dict, new: dict) -> ConfigChange:
     """Diff two raw config dicts into classified, human-readable changes."""
     flat_old = _flatten(_index_inventory(old))
     flat_new = _flatten(_index_inventory(new))
+    old_device_prefixes = {
+        p for p in (_device_prefix(k) for k in flat_old) if p
+    }
     change = ConfigChange()
     for path in sorted(set(flat_old) | set(flat_new)):
         if path in flat_old and path not in flat_new:
@@ -149,7 +174,8 @@ def diff_raw(old: dict, new: dict) -> ConfigChange:
                     f"{flat_new[path]!r}")
         else:
             continue
-        (change.major if _is_major(path, kind) else change.minor).append(desc)
+        major = _is_major(path, kind, old_device_prefixes)
+        (change.major if major else change.minor).append(desc)
     return change
 
 

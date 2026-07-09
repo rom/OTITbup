@@ -22,13 +22,26 @@ vendors. Additional rules can be declared in config:
 """
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 
 from .gitstore import GitStore
 from .models import AppConfig, Device
 
+log = logging.getLogger("otitbup.policy")
+
 _SEVERITIES = ("low", "medium", "high", "critical")
+
+
+@lru_cache(maxsize=512)
+def _compiled(pattern: str) -> re.Pattern:
+    """Compile a rule regex once, in MULTILINE mode so that ^/$ anchor to
+    each config line (matching how operators write rules, e.g.
+    `^ip http server$`). Built-in rules carry their own inline flags; the
+    extra re.M is harmless for them."""
+    return re.compile(pattern, re.MULTILINE)
 
 
 @dataclass
@@ -56,7 +69,7 @@ BUILTIN_RULES = [
          match=r"(?im)^\s*(transport input.*telnet|feature telnet|"
                r"ip telnet server enable)"),
     Rule("no-snmp-public", "SNMP community 'public' or 'private'", "high",
-         match=r"(?im)snmp-server community\s+(public|private)\b"),
+         match=r"(?im)^\s*snmp-server community\s+(public|private)\b"),
     Rule("no-snmpv1v2", "SNMP v1/v2c community configured (prefer v3)",
          "medium", match=r"(?im)^\s*snmp-server community\s+\S+"),
     Rule("no-http-server", "Unencrypted HTTP admin server enabled", "medium",
@@ -73,8 +86,8 @@ BUILTIN_RULES = [
          match=r"(?im)^\s*tftp-server\s+\S+"),
     Rule("no-ssh-v1", "SSH protocol version 1 enabled", "high",
          match=r"(?im)^\s*ip ssh version 1\b"),
-    Rule("no-snmpv3-des", "SNMPv3 user with weak DES privacy", "medium",
-         match=r"(?im)^\s*snmp-server user\s+\S+.*\bpriv\s+des\b"),
+    Rule("no-snmpv3-des", "SNMPv3 user with weak DES/3DES privacy", "medium",
+         match=r"(?im)^\s*snmp-server user\s+\S+.*\bpriv\s+(3des|des\d*)\b"),
     Rule("no-weak-user-password",
          "User password stored plaintext or reversibly (type 0/7)", "high",
          match=r"(?im)^\s*username\s+\S+\s+password\s+"
@@ -84,7 +97,8 @@ BUILTIN_RULES = [
          match=r"(?im)^\s*username\s+(admin|root)\s+(password|secret)\s+"
                r"(0\s+)?(admin|root|password|default|1234?5?6?)\s*$"),
     Rule("no-permit-any-any", "ACL permits ip any any (wide open)", "medium",
-         match=r"(?im)^\s*(access-list\s+\d+\s+)?permit\s+ip\s+any\s+any\b"),
+         match=r"(?im)^\s*(\d+\s+)?(access-list\s+\d+\s+)?"
+               r"permit\s+ip\s+any\s+any\b"),
     Rule("no-vty-transport-all",
          "VTY lines accept all transports (incl. telnet)", "high",
          match=r"(?im)^\s*transport input\s+all\b"),
@@ -99,6 +113,20 @@ def load_rules(config: AppConfig) -> list[Rule]:
     rules = list(BUILTIN_RULES)
     for raw in (config.policy.get("rules") or []):
         if "id" not in raw or not (raw.get("match") or raw.get("absent")):
+            continue
+        # Validate the user regex up front and skip a broken one with a
+        # warning, rather than letting re.error escape from check_device and
+        # 500 the policy report / web page.
+        bad = False
+        for pattern in (raw.get("match"), raw.get("absent")):
+            if pattern:
+                try:
+                    _compiled(str(pattern))
+                except re.error as exc:
+                    log.warning("ignoring policy rule %s: invalid regex %r: %s",
+                                raw["id"], pattern, exc)
+                    bad = True
+        if bad:
             continue
         rules.append(Rule(
             id=str(raw["id"]),
@@ -148,13 +176,13 @@ def check_device(
             continue
         if rule.match:
             for name, text in artifacts.items():
-                if re.search(rule.match, text):
+                if _compiled(rule.match).search(text):
                     findings.append(Finding(
                         device.qualified_name, rule.id, rule.severity,
                         rule.description, name,
                     ))
                     break
-        elif rule.absent and not re.search(rule.absent, combined):
+        elif rule.absent and not _compiled(rule.absent).search(combined):
             findings.append(Finding(
                 device.qualified_name, rule.id, rule.severity,
                 rule.description, "(config)",
