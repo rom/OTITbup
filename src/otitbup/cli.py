@@ -818,7 +818,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "serve":
         from .runner import default_blobstore
         from .runstore import default_runstore
-        from .webui import serve
+        from .webui import ServeError, serve
         store = GitStore(config.data_dir)
         store.ensure_repo()
         tls = config.webui.get("tls")
@@ -849,6 +849,13 @@ def main(argv: list[str] | None = None) -> int:
         except KeyboardInterrupt:
             events.emit(WEBUI_STOP, "web UI stopping", detail=f"{host}:{port}")
             return 0
+        except ServeError as exc:
+            # A clean, expected startup failure (e.g. port already in use):
+            # report it and exit non-zero without a traceback.
+            events.emit(WEBUI_STOP, f"web UI failed to start: {exc}",
+                        severity="error", detail=f"{host}:{port}")
+            print(f"serve error: {exc}", file=sys.stderr)
+            return 1
 
     if args.command == "discover":
         from .discovery import proposal_yaml, scan

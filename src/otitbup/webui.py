@@ -3197,6 +3197,38 @@ class _Handler(BaseHTTPRequestHandler):
         return None, "", "/"
 
 
+class ServeError(Exception):
+    """The web UI could not start (e.g. the address/port is unavailable).
+    Carries a human-readable, traceback-free explanation for the CLI."""
+
+
+def _bind_error(host: str, port: int, exc: OSError) -> ServeError:
+    """Translate a socket bind failure into a clear, actionable message
+    instead of leaking a raw traceback."""
+    import errno
+    where = f"{host}:{port}"
+    if exc.errno == errno.EADDRINUSE:
+        return ServeError(
+            f"address {where} is already in use — another process is "
+            "listening there (is otitbup already running?). Stop the other "
+            "process, or start on a different port with `otitbup serve "
+            "--port <N>` (or set webui.port in the config)."
+        )
+    if exc.errno == errno.EACCES:
+        return ServeError(
+            f"permission denied binding to {where} — ports below 1024 are "
+            "privileged. Use a port ≥ 1024 (e.g. `otitbup serve --port "
+            "8080`) or grant the capability to bind low ports."
+        )
+    if exc.errno in (errno.EADDRNOTAVAIL, getattr(errno, "ENXIO", -1)):
+        return ServeError(
+            f"cannot bind to {where} — the host address is not available on "
+            "this machine. Check webui.host / --host (use 127.0.0.1 for "
+            "local-only, or 0.0.0.0 to listen on all interfaces)."
+        )
+    return ServeError(f"could not start the web UI on {where}: {exc}")
+
+
 def serve(
     config: AppConfig, store: GitStore,
     host: str = "127.0.0.1", port: int = 8080,
@@ -3227,7 +3259,10 @@ def serve(
             "web UI on %s has NO authentication configured — set "
             "webui.auth/users in the config (see `otitbup passwd`)", host,
         )
-    server = ThreadingHTTPServer((host, port), partial(_Handler, ui))
+    try:
+        server = ThreadingHTTPServer((host, port), partial(_Handler, ui))
+    except OSError as exc:
+        raise _bind_error(host, port, exc) from exc
     scheme = "http"
     if tls:
         import ssl

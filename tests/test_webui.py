@@ -527,6 +527,39 @@ def test_per_user_theme_preference(tmp_path):
         httpd.shutdown()
 
 
+def test_serve_reports_address_in_use_cleanly(tmp_path):
+    # Binding to a port that's already taken must raise a clear ServeError
+    # (which the CLI turns into a message + exit 1), not a raw OSError.
+    import socket
+
+    from otitbup.config import load_config
+    from otitbup.gitstore import GitStore
+    from otitbup.webui import ServeError, serve
+
+    cfg = tmp_path / "otitbup.yml"
+    cfg.write_text(
+        "data_dir: ./data\nsites: [{name: s, zones: [{name: z, devices: "
+        "[{name: d1, driver: cisco_ios}]}]}]\n")
+    config = load_config(cfg)
+    store = GitStore(config.data_dir)
+    store.ensure_repo()
+
+    busy = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    busy.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    busy.bind(("127.0.0.1", 0))
+    busy.listen(1)
+    port = busy.getsockname()[1]
+    try:
+        with pytest.raises(ServeError) as excinfo:
+            serve(config, store, host="127.0.0.1", port=port)
+        msg = str(excinfo.value)
+        assert "already in use" in msg
+        assert str(port) in msg
+        assert "--port" in msg          # actionable hint
+    finally:
+        busy.close()
+
+
 def test_login_page_is_a_bare_shell(tmp_path):
     # An unauthenticated request renders the login card with no app nav.
     import http.client
