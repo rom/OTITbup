@@ -11,9 +11,11 @@ branch; `0.1.0` is the current package version.
 
 ### Added / changed — web UI polish & configurability
 
-- **Colour themes.** `webui.theme` selects `auto` (default, follows the OS),
-  `light`, `dark`, `sky`, `desert`, `autumn`, or `spring`; editable from the
-  Config page.
+- **Per-user colour themes.** Each user picks a theme from the menu-bar
+  dropdown — `auto` (follows the OS), `light`, `dark`, `sky`, `desert`,
+  `autumn`, or `spring`. The choice is saved to their account (and a browser
+  cookie), so it is per-user, not global. `webui.theme` sets the default for
+  users who haven't chosen one.
 - **Syslog transport is selectable** for the events sink: `events.syslog.
   protocol` = `udp` (default), `tcp`, or `tls` (RFC 5425/6587; honours
   `cafile`/`verify`).

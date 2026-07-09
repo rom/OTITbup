@@ -475,3 +475,49 @@ def test_config_examples_and_choices(tmp_path):
         assert ">Web UI<" in page and "Single sign-on (SSO)" in page
     finally:
         httpd.shutdown()
+
+
+def test_per_user_theme_preference(tmp_path):
+    import http.client
+    httpd, ui = _rw_server(tmp_path, theme="light")
+    # a second user to prove isolation
+    from otitbup.auth import hash_password
+    ui.runstore.add_user("bob", hash_password("pw", 1000), "viewer", 1.0)
+    try:
+        addr = httpd.server_address
+
+        def req(method, path, cookie=None, body=None):
+            c = http.client.HTTPConnection(*addr, timeout=5)
+            h = {}
+            if cookie:
+                h["Cookie"] = cookie
+            if body is not None:
+                h["Content-Type"] = "application/x-www-form-urlencoded"
+            c.request(method, path, body, h)
+            r = c.getresponse()
+            return r.status, dict(r.getheaders()), r.read().decode()
+
+        ca = req("POST", "/login",
+                 body="username=admin&password=pw")[1]["Set-Cookie"].split(";")[0]
+        cb = req("POST", "/login",
+                 body="username=bob&password=pw")[1]["Set-Cookie"].split(";")[0]
+
+        # Menu picker present; global default applied.
+        body = req("GET", "/dashboard", ca)[2]
+        assert "class='theme-pick'" in body and "data-theme='light'" in body
+
+        # admin picks autumn -> persists per account (survives without cookie).
+        st, h, _ = req("GET", "/theme?set=autumn&next=/dashboard", ca)
+        assert st in (302, 303) and "otitbup_theme=autumn" in h["Set-Cookie"]
+        assert "data-theme='autumn'" in req("GET", "/dashboard", ca)[2]
+
+        # bob is unaffected (isolation); his cookie choice still works.
+        assert "data-theme='light'" in req("GET", "/dashboard", cb)[2]
+        assert "data-theme='sky'" in req(
+            "GET", "/dashboard", cb + "; otitbup_theme=sky")[2]
+
+        # auto clears the cookie.
+        assert "otitbup_theme=; " in req(
+            "GET", "/theme?set=auto&next=/", cb)[1]["Set-Cookie"]
+    finally:
+        httpd.shutdown()

@@ -428,7 +428,9 @@ offsite snapshots) unrecoverable.
 webui:
   host: 127.0.0.1        # bind address (default loopback)
   port: 8080
-  theme: auto            # auto | light | dark | sky | desert | autumn | spring
+  theme: auto            # DEFAULT theme; each user overrides it from the
+                         # menu-bar picker (saved per account + browser cookie).
+                         # auto | light | dark | sky | desert | autumn | spring
   auth:                  # HTTP Basic; generate with `otitbup passwd`
     username: admin
     password_hash: pbkdf2_sha256$600000$<salt>$<hash>

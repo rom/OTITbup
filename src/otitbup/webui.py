@@ -154,6 +154,11 @@ nav a.active { background: var(--accent-soft); color: var(--accent-ink);
        margin-left: .2rem; border-left: 1px solid var(--border);
        white-space: nowrap; }
 .who b { color: var(--text); font-weight: 600; }
+.theme-pick { margin-left: .4rem; padding: .22rem 1.3rem .22rem .5rem;
+       font-size: .78rem; border: 1px solid var(--border); border-radius: 999px;
+       background: var(--surface); color: var(--muted); cursor: pointer;
+       text-transform: capitalize; }
+.theme-pick:hover { color: var(--text); }
 .who .role { font-size: .68rem; text-transform: uppercase; letter-spacing: .04em;
        background: var(--accent-soft); color: var(--accent-ink);
        padding: .05rem .4rem; border-radius: 999px; font-weight: 600; }
@@ -342,6 +347,22 @@ def _who_chip() -> str:
             f"<span class='role'>{role}</span></span>")
 
 
+def _theme_picker() -> str:
+    """A menu-bar dropdown that sets the current user's theme preference."""
+    cur = getattr(_CTX, "theme", None) or "auto"
+    if cur not in _THEMES:
+        cur = "auto"
+    options = "".join(
+        f"<option value='{t}'{' selected' if t == cur else ''}>{t}</option>"
+        for t in _THEMES)
+    return (
+        "<select class='theme-pick' title='Colour theme' aria-label='theme' "
+        "onchange=\"location.href='/theme?set='+this.value+'&next='+"
+        "encodeURIComponent(location.pathname+location.search)\">"
+        f"{options}</select>"
+    )
+
+
 def _page(title: str, body: str) -> bytes:
     theme = getattr(_CTX, "theme", None) or ""
     theme_attr = (f" data-theme='{html.escape(theme)}'"
@@ -361,7 +382,8 @@ def _page(title: str, body: str) -> bytes:
         f"<a href='/activity'>Backup log</a><a href='/audit'>Audit log</a>"
         f"<a href='/users'>Users</a><a href='/config'>Config</a>"
         f"<a href='/help'>Help</a>"
-        f"<a href='/logout'>Logout</a>{_who_chip()}</nav></div></header>"
+        f"<a href='/logout'>Logout</a>{_theme_picker()}"
+        f"{_who_chip()}</nav></div></header>"
         f"<main>{body}</main>"
         "<script>(function(){var p=location.pathname;"
         "document.querySelectorAll('nav a').forEach(function(a){"
@@ -453,7 +475,8 @@ _SETTINGS_FORMS = [
      "fields": [
          ("host", "Bind host", "str", "127.0.0.1"),
          ("port", "Bind port", "int", "8080"),
-         ("theme", "Colour theme", "choice:" + "|".join(_THEMES), "auto"),
+         ("theme", "Default colour theme (per-user overrides)",
+          "choice:" + "|".join(_THEMES), "auto"),
          ("tls.cert_file", "TLS certificate file", "str", "webui-cert.pem"),
          ("tls.key_file", "TLS key file", "str", "webui-key.pem"),
      ]},
@@ -2532,12 +2555,55 @@ class _Handler(BaseHTTPRequestHandler):
             broadcaster.unsubscribe(queue)
 
     def _cookie_token(self) -> str | None:
+        return self._cookie("otitbup_session")
+
+    def _cookie(self, name: str) -> str | None:
         cookie = self.headers.get("Cookie", "")
         for part in cookie.split(";"):
             key, _, value = part.strip().partition("=")
-            if key == "otitbup_session":
+            if key == name:
                 return value
         return None
+
+    def _resolve_theme(self, identity: dict | None) -> str | None:
+        """The effective colour theme: the signed-in user's saved preference
+        (per-account), else this browser's cookie (per-browser), else the
+        configured global default. Only known themes are honoured."""
+        if identity and self.ui.runstore is not None:
+            try:
+                pref = self.ui.runstore.get_meta(
+                    f"theme:{identity['username']}")
+            except Exception:
+                pref = None
+            if pref and pref.get("value") in _THEMES:
+                return pref["value"]
+        ck = self._cookie("otitbup_theme")
+        if ck in _THEMES:
+            return ck
+        return self.ui.config.webui.get("theme")
+
+    def _handle_theme(self, query: dict) -> None:
+        """Set the current user's theme preference (menu-bar picker)."""
+        import time
+        theme = (query.get("set", [""])[0] or "").strip()
+        if theme not in _THEMES:
+            theme = "auto"
+        nxt = query.get("next", ["/"])[0]
+        if not nxt.startswith("/") or nxt.startswith("//"):
+            nxt = "/"
+        identity = self._identify()
+        if identity and self.ui.runstore is not None:
+            try:
+                self.ui.runstore.set_meta(
+                    f"theme:{identity['username']}", theme, time.time())
+            except Exception:
+                pass
+        if theme == "auto":
+            cookie = "otitbup_theme=; Path=/; Max-Age=0; SameSite=Lax"
+        else:
+            cookie = (f"otitbup_theme={theme}; Path=/; Max-Age=31536000; "
+                      "SameSite=Lax")
+        return self._redirect(nxt, headers={"Set-Cookie": cookie})
 
     def _identify(self) -> dict | None:
         """Resolve the request identity, in order: cookie session (browser),
@@ -2590,9 +2656,11 @@ class _Handler(BaseHTTPRequestHandler):
         raw = self.path.split("?", 1)
         path = unquote(raw[0])
         query = parse_qs(raw[1]) if len(raw) > 1 else {}
-        # Per-request render context (theme + who is signed in).
-        _CTX.theme = self.ui.config.webui.get("theme")
+        # Per-request render context (theme + who is signed in). Theme is
+        # re-resolved after identify() so a signed-in user's saved preference
+        # can override the cookie/global default.
         _CTX.identity = None
+        _CTX.theme = self._resolve_theme(None)
         if path == "/healthz":
             return self._send(200, b'{"status":"ok"}\n', "application/json")
         if path in ("/favicon.svg", "/favicon.ico"):
@@ -2604,6 +2672,10 @@ class _Handler(BaseHTTPRequestHandler):
             # Logout is idempotent and safe over GET (a menu link) — clears
             # the session cookie and returns to the login page.
             return self._handle_logout()
+        if path == "/theme":
+            # Cosmetic per-user preference; allowed pre-auth so the picker
+            # works on the login page too.
+            return self._handle_theme(query)
         if path == "/login":
             return self._send(200, self.ui.login_page(
                 next_url=query.get("next", ["/"])[0]))
@@ -2622,6 +2694,7 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, self.ui.login_page(next_url=path))
         self._identity = identity
         _CTX.identity = identity
+        _CTX.theme = self._resolve_theme(identity)
         role = identity["role"] if identity else "admin"
         csrf = identity["token"] if identity and identity["via"] == "session" else ""
 
@@ -2739,8 +2812,8 @@ class _Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length).decode("utf-8", "replace") if length else ""
         form = {k: v[0] for k, v in parse_qs(raw).items()}
         path = unquote(self.path.split("?", 1)[0])
-        _CTX.theme = self.ui.config.webui.get("theme")
         _CTX.identity = None
+        _CTX.theme = self._resolve_theme(None)
 
         # Login/logout are their own auth flow.
         if path == "/login":
@@ -2750,6 +2823,7 @@ class _Handler(BaseHTTPRequestHandler):
 
         identity = self._identify()
         _CTX.identity = identity
+        _CTX.theme = self._resolve_theme(identity)
 
         # Write API (JSON): Bearer token or session; no CSRF for token auth.
         if path.startswith("/api/"):
