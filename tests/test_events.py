@@ -70,3 +70,42 @@ def test_ber_oid_encoding():
 def test_null_bus_is_noop(tmp_path):
     from otitbup.events import NullEventBus
     NullEventBus().emit("x", "y")        # must not raise
+
+
+def test_syslog_tcp_transport():
+    # Events with syslog protocol=tcp deliver a message to a TCP listener.
+    import socket
+    import threading
+
+    from otitbup.events import EventBus
+
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    host, port = srv.getsockname()
+    received = []
+
+    def accept():
+        conn, _ = srv.accept()
+        received.append(conn.recv(4096))
+        conn.close()
+
+    t = threading.Thread(target=accept, daemon=True)
+    t.start()
+
+    bus = EventBus({"syslog": {"address": host, "port": port,
+                              "protocol": "tcp", "facility": "local0"}})
+    bus.emit("backup.error", "device x failed", severity="error")
+    t.join(timeout=3)
+    srv.close()
+    assert received, "TCP syslog listener received nothing"
+    assert b"backup.error" in received[0]
+
+
+def test_syslog_protocol_defaults_udp(monkeypatch):
+    # Unknown/missing protocol falls back to UDP via SysLogHandler and must
+    # not raise even if nothing is listening.
+    from otitbup.events import EventBus
+    bus = EventBus({"syslog": {"address": "127.0.0.1", "port": 55514}})
+    bus.emit("backup.stop", "ok")   # no listener; best-effort, no exception

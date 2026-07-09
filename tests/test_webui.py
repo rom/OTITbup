@@ -393,3 +393,85 @@ def test_device_page_on_empty_repo(tmp_path):
     page = WebUI(config, store).device(
         "s/z/sw1", ctx={"role": "admin", "csrf": "t"})
     assert b"sw1" in page
+
+
+def _rw_server(tmp_path, theme=None):
+    import threading
+    from functools import partial
+    from http.server import ThreadingHTTPServer
+
+    from otitbup.auth import hash_password
+    from otitbup.config import load_config
+    from otitbup.gitstore import GitStore
+    from otitbup.runstore import RunStore
+    from otitbup.webui import WebUI, _Handler
+
+    cfg = tmp_path / "otitbup.yml"
+    tline = f"webui: {{theme: {theme}}}\n" if theme else ""
+    cfg.write_text(
+        "data_dir: ./data\n" + tline +
+        "sites: [{name: s, zones: [{name: z, devices: "
+        "[{name: d1, driver: cisco_ios}]}]}]\n")
+    config = load_config(cfg)
+    store = GitStore(config.data_dir)
+    store.ensure_repo()
+    rs = RunStore(tmp_path / "r.db")
+    rs.add_user("admin", hash_password("pw", 1000), "admin", 1.0)
+    ui = WebUI(config, store, runstore=rs, config_path=str(cfg))
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), partial(_Handler, ui))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd, ui
+
+
+def _login(addr):
+    import http.client
+    c = http.client.HTTPConnection(*addr, timeout=5)
+    c.request("POST", "/login", "username=admin&password=pw",
+              {"Content-Type": "application/x-www-form-urlencoded"})
+    return c.getresponse().getheader("Set-Cookie").split(";")[0]
+
+
+def test_get_logout_redirects_not_404(tmp_path):
+    import http.client
+    httpd, _ = _rw_server(tmp_path)
+    try:
+        addr = httpd.server_address
+        cookie = _login(addr)
+        c = http.client.HTTPConnection(*addr, timeout=5)
+        c.request("GET", "/logout", headers={"Cookie": cookie})
+        r = c.getresponse()
+        r.read()
+        assert r.status in (302, 303)
+        assert r.getheader("Location") == "/login"
+    finally:
+        httpd.shutdown()
+
+
+def test_theme_and_who_chip(tmp_path):
+    import http.client
+    httpd, _ = _rw_server(tmp_path, theme="desert")
+    try:
+        addr = httpd.server_address
+        cookie = _login(addr)
+        c = http.client.HTTPConnection(*addr, timeout=5)
+        c.request("GET", "/dashboard", headers={"Cookie": cookie})
+        body = c.getresponse().read().decode()
+        assert "data-theme='desert'" in body
+        assert "signed in as <b>admin</b>" in body
+        assert body.index(">Dashboard<") < body.index(">Devices<")
+        assert ">Backup log<" in body and ">Audit log<" in body
+    finally:
+        httpd.shutdown()
+
+
+def test_config_examples_and_choices(tmp_path):
+    httpd, ui = _rw_server(tmp_path)
+    try:
+        page = ui.config_page("tok").decode()
+        assert "placeholder='514'" in page      # syslog port default
+        assert "placeholder='162'" in page      # snmp trap port default
+        assert "<select name='syslog.protocol'>" in page
+        assert "<select name='theme'>" in page
+        assert ">Web UI<" in page and "Single sign-on (SSO)" in page
+    finally:
+        httpd.shutdown()

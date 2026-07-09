@@ -428,6 +428,7 @@ offsite snapshots) unrecoverable.
 webui:
   host: 127.0.0.1        # bind address (default loopback)
   port: 8080
+  theme: auto            # auto | light | dark | sky | desert | autumn | spring
   auth:                  # HTTP Basic; generate with `otitbup passwd`
     username: admin
     password_hash: pbkdf2_sha256$600000$<salt>$<hash>
@@ -628,13 +629,21 @@ events:
   syslog:
     address: 10.0.0.1
     port: 514
+    protocol: udp        # udp (default) | tcp | tls
     facility: local0     # kern/user/daemon/local0..local7
+    # cafile: /etc/ssl/certs/ca-bundle.crt   # for protocol: tls (RFC 5425)
+    # verify: true                            # tls certificate verification
   snmp_trap:
     address: 10.0.0.2
     port: 162
     community: public
     enterprise_oid: 1.3.6.1.4.1.99999   # YOUR private enterprise OID base
 ```
+
+`syslog.protocol` picks the transport: `udp` (classic RFC 3164), `tcp`
+(reliable stream), or `tls` (RFC 5425 syslog-over-TLS with RFC 6587 octet
+framing — set `cafile` for a private CA, or `verify: false` to skip
+verification).
 
 Event types emitted: `process.start`/`process.stop`,
 `webui.start`/`webui.stop`, `backup.start`/`backup.stop`/`backup.error`,
