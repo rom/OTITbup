@@ -638,14 +638,33 @@ events:
   snmp_trap:
     address: 10.0.0.2
     port: 162
-    community: public
+    version: v2c         # v1 | v2c (default) | v3
+    community: public    # v1/v2c community
     enterprise_oid: 1.3.6.1.4.1.99999   # YOUR private enterprise OID base
+    # v3:                               # only for version: v3 (USM)
+    #   engine_id: 8000270b0102030405   # hex; must match the receiver's
+    #   username: otitbup               # USM security name
+    #   auth_protocol: sha256           # none | md5 | sha1 | sha256
+    #   auth_key_file: /etc/otitbup/snmpv3.auth
+    #   priv_protocol: none             # none | aes128 (needs [crypto])
+    #   priv_key_file: /etc/otitbup/snmpv3.priv
 ```
 
 `syslog.protocol` picks the transport: `udp` (classic RFC 3164), `tcp`
 (reliable stream), or `tls` (RFC 5425 syslog-over-TLS with RFC 6587 octet
 framing — set `cafile` for a private CA, or `verify: false` to skip
 verification).
+
+`snmp_trap.version` picks the trap format: `v1` sends an RFC 1157
+Trap-PDU (generic-trap 6/enterpriseSpecific, the event number as
+specific-trap), `v2c` an SNMPv2-Trap, and `v3` a USM-secured SNMPv2-Trap
+(RFC 3414). For v3 the *sender* is the authoritative engine, so configure
+the receiver with the same `engine_id` and user. Security levels follow
+from the protocols: `auth_protocol: none` → noAuthNoPriv;
+auth without priv → authNoPriv (HMAC-MD5-96/SHA-96, or HMAC-192-SHA-256
+per RFC 7860); `priv_protocol: aes128` → authPriv (AES-128-CFB per
+RFC 3826, requires the `crypto` extra). Passphrases live in root-only
+key files, not in the YAML.
 
 Event types emitted: `process.start`/`process.stop`,
 `webui.start`/`webui.stop`, `backup.start`/`backup.stop`/`backup.error`,

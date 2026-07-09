@@ -120,6 +120,82 @@ _STYLE = """
   --shadow:0 1px 2px rgba(16,90,40,.08),0 14px 32px -18px rgba(16,90,40,.26);
   --shadow-sm:0 1px 2px rgba(16,90,40,.1);
 }
+/* High contrast: black/white/yellow, maximal separation, no soft shadows. */
+:root[data-theme="high-contrast"] {
+  --bg:#000; --surface:#000; --text:#fff; --muted:#e6e6e6;
+  --border:#fff; --line:#767676; --hover:#1f1f1f; --th-bg:#0a0a0a;
+  --field:#000; --accent:#ffd500; --accent-ink:#ffd500;
+  --accent-soft:#3d3300; --teal:#00e5e5; --ok:#00e676; --ok-soft:#003317;
+  --warn:#ffb000; --warn-soft:#332200; --danger:#ff5252;
+  --danger-soft:#330a0a; --danger-border:#ff5252;
+  --shadow:none; --shadow-sm:none;
+}
+:root[data-theme="high-contrast"] a { text-decoration: underline; }
+:root[data-theme="solarized"] {
+  --bg:#fdf6e3; --surface:#fefbf0; --text:#073642; --muted:#657b83;
+  --border:#e6dfc8; --line:#eee8d5; --hover:#f5efdc; --th-bg:#eee8d5;
+  --field:#fefbf0; --accent:#268bd2; --accent-ink:#1a6ba3;
+  --accent-soft:#dcebf5; --teal:#2aa198; --ok:#617900; --ok-soft:#eef0d5;
+  --warn:#8f6c00; --warn-soft:#f3ead0; --danger:#dc322f;
+  --danger-soft:#f9e0dd; --danger-border:#efc0ba;
+  --shadow:0 1px 2px rgba(101,123,131,.1),0 14px 32px -18px rgba(101,123,131,.3);
+  --shadow-sm:0 1px 2px rgba(101,123,131,.12);
+}
+:root[data-theme="nord"] {
+  --bg:#2e3440; --surface:#3b4252; --text:#eceff4; --muted:#aeb6c5;
+  --border:#4c566a; --line:#434c5e; --hover:#434c5e; --th-bg:#3f4759;
+  --field:#333947; --accent:#88c0d0; --accent-ink:#9fd2e0;
+  --accent-soft:#39505b; --teal:#8fbcbb; --ok:#a3be8c; --ok-soft:#384233;
+  --warn:#ebcb8b; --warn-soft:#464030; --danger:#e08790;
+  --danger-soft:#46333a; --danger-border:#7a4a52;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 14px 34px -20px rgba(0,0,0,.7);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.35);
+}
+:root[data-theme="dracula"] {
+  --bg:#22232e; --surface:#282a36; --text:#f8f8f2; --muted:#a8b1d1;
+  --border:#44475a; --line:#3a3d4d; --hover:#343747; --th-bg:#2f3140;
+  --field:#22232e; --accent:#bd93f9; --accent-ink:#cfaefc;
+  --accent-soft:#3b3355; --teal:#8be9fd; --ok:#69e788; --ok-soft:#24382b;
+  --warn:#f5c169; --warn-soft:#3d3423; --danger:#ff7b7b;
+  --danger-soft:#3d2626; --danger-border:#6d3a3a;
+  --shadow:0 1px 2px rgba(0,0,0,.35),0 14px 34px -20px rgba(0,0,0,.75);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.4);
+}
+:root[data-theme="gruvbox"] {
+  --bg:#282828; --surface:#32302f; --text:#ebdbb2; --muted:#b3a488;
+  --border:#504945; --line:#3c3836; --hover:#3c3836; --th-bg:#373432;
+  --field:#2b2928; --accent:#83a598; --accent-ink:#9dbaad;
+  --accent-soft:#37413d; --teal:#8ec07c; --ok:#b8bb26; --ok-soft:#37391a;
+  --warn:#fabd2f; --warn-soft:#403513; --danger:#fb6a5a;
+  --danger-soft:#402420; --danger-border:#6d3a32;
+  --shadow:0 1px 2px rgba(0,0,0,.35),0 14px 34px -20px rgba(0,0,0,.7);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.4);
+}
+/* WCAG: light theme with every text/background pair at or above the
+   WCAG 2.1 AA 4.5:1 contrast ratio, always-underlined links, and strong
+   visible focus (see the focus-visible rule below). */
+:root[data-theme="wcag"] {
+  --bg:#ffffff; --surface:#ffffff; --text:#1a1a1a; --muted:#595959;
+  --border:#767676; --line:#c8c8c8; --hover:#eef2f7; --th-bg:#f2f2f2;
+  --field:#ffffff; --accent:#005a9c; --accent-ink:#00457a;
+  --accent-soft:#d9e8f5; --teal:#00615e; --ok:#1e6f30; --ok-soft:#e2f2e6;
+  --warn:#8a5300; --warn-soft:#f7ecd9; --danger:#a11326;
+  --danger-soft:#f9e2e5; --danger-border:#a11326;
+  --shadow:none; --shadow-sm:none;
+}
+:root[data-theme="wcag"] a { text-decoration: underline; }
+/* Text-size preference (web UI settings): scales every rem-based size. */
+:root[data-size="small"] { font-size: 87.5%; }
+:root[data-size="large"] { font-size: 115%; }
+:root[data-size="x-large"] { font-size: 132%; }
+/* WCAG support mode (web UI settings): visible focus, underlined links,
+   independent of the chosen colour theme. */
+:root[data-wcag] a { text-decoration: underline; }
+:root[data-wcag] *:focus-visible,
+:root[data-theme="wcag"] *:focus-visible,
+:root[data-theme="high-contrast"] *:focus-visible {
+  outline: 3px solid var(--accent); outline-offset: 2px;
+}
 * { box-sizing: border-box; }
 body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
        margin: 0; color: var(--text); background: var(--bg);
@@ -276,6 +352,15 @@ tr.evt-warning > td { background: var(--warn-soft, var(--accent-soft)); }
         line-height: 1.45; text-align: left; transition: opacity .1s;
         box-shadow: 0 6px 20px rgba(0,0,0,.35); }
 .help:hover .pop, .help:focus .pop { visibility: visible; opacity: 1; }
+/* Expandable per-setting help in the config editor */
+button.help-btn { width: 18px; height: 18px; padding: 0; border: none;
+        border-radius: 50%; background: var(--border); color: var(--muted);
+        font-size: 11px; font-weight: 700; line-height: 1; cursor: pointer;
+        margin-left: .35rem; vertical-align: middle; }
+button.help-btn:hover, button.help-btn[aria-expanded="true"] {
+        background: var(--accent-soft); color: var(--accent-ink); }
+tr.cfg-help td { color: var(--muted); font-size: .8rem;
+        padding: 0 .5rem .5rem; }
 
 /* Config editor */
 details { margin: .4rem 0; border: 1px solid var(--border); border-radius: 10px;
@@ -415,6 +500,11 @@ def _head(title: str) -> str:
     theme = getattr(_CTX, "theme", None) or ""
     theme_attr = (f" data-theme='{html.escape(theme)}'"
                   if theme and theme != "auto" else "")
+    size = getattr(_CTX, "size", None) or ""
+    if size and size != "medium":
+        theme_attr += f" data-size='{html.escape(size)}'"
+    if getattr(_CTX, "wcag", False):
+        theme_attr += " data-wcag='1'"
     return (
         f"<!doctype html><html{theme_attr}><head><meta charset='utf-8'>"
         f"<meta name='viewport' content='width=device-width, initial-scale=1'>"
@@ -439,7 +529,7 @@ def _page(title: str, body: str) -> bytes:
         f"<nav><a href='/dashboard'>Dashboard</a><a href='/'>Devices</a>"
         f"<a href='/health'>Health</a>"
         f"<a href='/search'>Search</a><a href='/drift'>Drift</a>"
-        f"<a href='/policy'>Policy</a>"
+        f"<a href='/anomaly'>Anomaly</a>"
         f"<a href='/retention'>Retention</a><a href='/strategy'>Strategy</a>"
         f"<a href='/reports'>Reports</a><a href='/drivers'>Drivers</a>"
         "<div class='nav-group'><span class='nav-top' tabindex='0'>"
@@ -447,8 +537,18 @@ def _page(title: str, body: str) -> bytes:
         "<a href='/audit'>Audit logs</a>"
         "<a href='/activity'>Backup logs</a>"
         "<a href='/events'>Event logs</a></div></div>"
-        f"<a href='/users'>Users</a><a href='/config'>Config</a>"
-        f"<a href='/help'>Help</a>"
+        "<div class='nav-group'><span class='nav-top' tabindex='0'>"
+        "Administration ▾</span><div class='nav-drop'>"
+        "<a href='/webui-settings'>Web UI settings</a>"
+        "<a href='/config'>Config</a>"
+        "<a href='/users'>Users</a></div></div>"
+        "<div class='nav-group'><span class='nav-top' tabindex='0'>"
+        "Documentation ▾</span><div class='nav-drop'>"
+        "<a href='/help'>Help</a>"
+        "<a href='/help/releasenotes'>Release notes</a>"
+        "<a href='/help/faq'>FAQ</a>"
+        "<a href='/help/usage'>Usage guide</a>"
+        "<a href='/help/sitecollector'>Site collectors</a></div></div>"
         f"<a href='/logout'>Logout</a>{_theme_picker()}"
         f"{_who_chip()}</nav></div></header>"
         f"<main>{body}</main>"
@@ -512,7 +612,11 @@ def _csrf(token: str) -> str:
 # Admin-editable global config sections. Each field is
 # (dotted-path-within-section, label, type). type: str | int | bool.
 # Selectable colour themes for the web UI (applied via <html data-theme>).
-_THEMES = ("auto", "light", "dark", "sky", "desert", "autumn", "spring")
+_THEMES = ("auto", "light", "dark", "high-contrast", "solarized", "nord",
+           "dracula", "gruvbox", "wcag", "sky", "desert", "autumn", "spring")
+
+# Text-size preference (applied via <html data-size>).
+_SIZES = ("small", "medium", "large", "x-large")
 
 # Admin-editable global config. Each field is
 # (dotted-path, label, type, example) where type is
@@ -579,9 +683,22 @@ _SETTINGS_FORMS = [
           "/etc/ssl/certs/ca-bundle.crt"),
          ("snmp_trap.address", "SNMP trap address", "str", "10.0.0.2"),
          ("snmp_trap.port", "SNMP trap port", "int", "162"),
-         ("snmp_trap.community", "SNMP community", "str", "public"),
+         ("snmp_trap.version", "SNMP trap version", "choice:v1|v2c|v3",
+          "v2c"),
+         ("snmp_trap.community", "SNMP community (v1/v2c)", "str", "public"),
          ("snmp_trap.enterprise_oid", "enterprise OID", "str",
           "1.3.6.1.4.1.99999"),
+         ("snmp_trap.v3.engine_id", "v3: engine id (hex)", "str",
+          "8000270b0102030405"),
+         ("snmp_trap.v3.username", "v3: username", "str", "otitbup"),
+         ("snmp_trap.v3.auth_protocol", "v3: auth protocol",
+          "choice:none|md5|sha1|sha256", "sha256"),
+         ("snmp_trap.v3.auth_key_file", "v3: auth passphrase file", "str",
+          "/etc/otitbup/snmpv3.auth"),
+         ("snmp_trap.v3.priv_protocol", "v3: privacy protocol",
+          "choice:none|aes128", "none"),
+         ("snmp_trap.v3.priv_key_file", "v3: privacy passphrase file", "str",
+          "/etc/otitbup/snmpv3.priv"),
      ]},
     {"section": "logging", "title": "Logging",
      "fields": [
@@ -687,6 +804,11 @@ _SETTINGS_FORMS = [
          ("trend_ratio", "Slow-trend multiplier", "float", "2.0"),
          ("size_drop", "Size-drop fraction of median", "float", "0.5"),
      ]},
+    {"section": "policy", "title": "Policy (config compliance rules)",
+     "fields": [
+         ("disable", "Disabled rule ids (comma-separated)", "csv",
+          "no-snmpv1v2, no-http-server"),
+     ]},
     {"section": "housekeeping", "title": "Git housekeeping",
      "fields": [
          ("gc_interval_days", "git gc every N days (0=off)", "int", "7"),
@@ -713,6 +835,219 @@ _SETTINGS_FORMS = [
     {"section": "federation", "title": "Federation (central roll-up)",
      "fields": [("role", "Role", "str", "central")]},
 ]
+
+
+# Context help for the config editor: (form id, dotted field) -> what the
+# setting does, expanded by the per-setting "?" button. Fields without an
+# entry get a generated pointer to the Configuration reference.
+_FIELD_HELP = {
+    ("offsite", "transport"): "How the encrypted offsite snapshot leaves the "
+        "appliance: a local/mounted directory (file), SFTP to a remote "
+        "server, or an S3-compatible object store.",
+    ("offsite", "interval_days"): "The daemon pushes a fresh encrypted "
+        "snapshot every N days. 0 disables automatic pushes; `otitbup "
+        "offsite push` still works manually.",
+    ("offsite", "key_file"): "Fernet key used to encrypt snapshots before "
+        "they leave the appliance. Generate with `otitbup offsite genkey`. "
+        "Keep a copy off-appliance — without it snapshots are unreadable.",
+    ("offsite", "dir"): "Target directory for the `file` transport, e.g. a "
+        "mounted NAS/USB path.",
+    ("offsite", "host"): "SFTP server hostname or IP (sftp transport).",
+    ("offsite", "port"): "SFTP server TCP port, usually 22.",
+    ("offsite", "username"): "SFTP login user on the remote server.",
+    ("offsite", "ssh_key_file"): "Private SSH key used for the SFTP login "
+        "(password auth is deliberately unsupported for unattended pushes).",
+    ("offsite", "path"): "Remote directory on the SFTP server where "
+        "snapshots are stored.",
+    ("offsite", "bucket"): "S3 bucket name (s3 transport).",
+    ("offsite", "prefix"): "Key prefix inside the bucket, so several "
+        "appliances can share one bucket.",
+    ("offsite", "region"): "AWS/S3 region of the bucket.",
+    ("offsite", "endpoint"): "S3 endpoint URL — set for MinIO/Ceph or "
+        "region-specific endpoints.",
+    ("offsite", "access_key"): "S3 access key id. The paired secret key "
+        "lives in a file (next field), never in this config.",
+    ("offsite", "secret_key_file"): "File containing the S3 secret key "
+        "(mode 0600). Kept out of the YAML so the config can live in git.",
+    ("webui", "host"): "Interface the web UI binds to. Keep 127.0.0.1 "
+        "behind a reverse proxy; 0.0.0.0 exposes it on every interface.",
+    ("webui", "port"): "TCP port for the web UI.",
+    ("webui", "theme"): "Default colour theme for everyone. Each user can "
+        "override it for themselves under Administration → Web UI settings.",
+    ("webui", "tls.cert_file"): "PEM certificate chain for HTTPS. Create a "
+        "self-signed pair with `otitbup certgen`.",
+    ("webui", "tls.key_file"): "PEM private key matching the certificate.",
+    ("sso", "trusted_header"): "Header carrying the already-authenticated "
+        "username from your OIDC/SAML reverse proxy. Only enable when the "
+        "proxy strips this header from client requests.",
+    ("sso", "trusted_role_header"): "Optional header carrying the user's "
+        "role from the auth proxy.",
+    ("sso", "trusted_default_role"): "Role given to SSO users when no role "
+        "header is present.",
+    ("ldap", "url"): "LDAP/AD server URL; ldaps:// for TLS.",
+    ("ldap", "user_dn_template"): "Template used to build the bind DN from "
+        "the login name; {username} is substituted.",
+    ("ldap", "group_base"): "Search base for group lookups used in role "
+        "mapping.",
+    ("ldap", "default_role"): "Role for LDAP users that match no group "
+        "mapping.",
+    ("events", "syslog.address"): "Syslog collector (SIEM) address; every "
+        "operational event is forwarded there.",
+    ("events", "syslog.port"): "Syslog port — 514 for UDP/TCP, commonly "
+        "6514 for TLS.",
+    ("events", "syslog.protocol"): "udp (fire-and-forget), tcp, or tls "
+        "(RFC 5425, verified against the CA bundle below).",
+    ("events", "syslog.facility"): "Syslog facility events are tagged "
+        "with, e.g. local0.",
+    ("events", "syslog.cafile"): "CA bundle used to verify the syslog "
+        "server certificate (tls protocol only).",
+    ("events", "snmp_trap.address"): "SNMP trap receiver (NMS) address.",
+    ("events", "snmp_trap.port"): "Trap receiver port, normally 162.",
+    ("events", "snmp_trap.version"): "SNMP trap format: v1 (Trap-PDU), "
+        "v2c (SNMPv2-Trap, community-based) or v3 (USM: authenticated and "
+        "optionally encrypted — fill in the v3 fields below).",
+    ("events", "snmp_trap.community"): "Community string for v1/v2c traps.",
+    ("events", "snmp_trap.enterprise_oid"): "OID base for the trap "
+        "identity; use your own enterprise arc.",
+    ("events", "snmp_trap.v3.engine_id"): "Authoritative engine id (hex) "
+        "for v3 traps — must match the user config on the receiver.",
+    ("events", "snmp_trap.v3.username"): "USM security name for v3 traps.",
+    ("events", "snmp_trap.v3.auth_protocol"): "Authentication hash for v3: "
+        "sha1/sha256 (md5 exists for legacy receivers). 'none' sends "
+        "noAuthNoPriv.",
+    ("events", "snmp_trap.v3.auth_key_file"): "File with the v3 "
+        "authentication passphrase (mode 0600, kept out of the YAML).",
+    ("events", "snmp_trap.v3.priv_protocol"): "Privacy (encryption) for "
+        "v3: aes128 requires the `crypto` extra; 'none' sends authNoPriv.",
+    ("events", "snmp_trap.v3.priv_key_file"): "File with the v3 privacy "
+        "passphrase.",
+    ("logging", "level"): "Verbosity of the process log (not the audit "
+        "trail): debug is very chatty, info is the sensible default.",
+    ("logging", "format"): "text for humans/journald, json for log "
+        "shippers.",
+    ("logging", "file"): "Log file path; rotated at max_bytes keeping "
+        "`backups` old files. Empty logs to stderr only.",
+    ("logging", "max_bytes"): "Rotate the log file when it reaches this "
+        "size.",
+    ("logging", "backups"): "How many rotated log files to keep.",
+    ("netbox", "url"): "NetBox instance used by `otitbup reconcile` to "
+        "compare the inventory against your DCIM source of truth.",
+    ("netbox", "token"): "NetBox API token (read access to dcim.devices).",
+    ("tickets", "backend"): "Ticket system that receives incidents for "
+        "backup failures and unexpected changes.",
+    ("tickets", "url"): "Base URL of the ticket system.",
+    ("tickets", "username"): "Service account used to open tickets.",
+    ("tickets", "password"): "Password or API token for the service "
+        "account.",
+    ("encryption", "blob_key_file"): "Fernet key encrypting the blob store "
+        "at rest (large artifacts). Without it blobs are stored plain.",
+    ("encryption", "compress"): "Compress blobs before encrypting — saves "
+        "space, costs a little CPU.",
+    ("capture", "min_bytes"): "Reject captures smaller than this: a "
+        "too-small file usually means a login page or error instead of a "
+        "real config.",
+    ("capture", "expect_match"): "Regex that must appear somewhere in the "
+        "captured text; rejects error pages that pass the size check.",
+    ("integrity", "interval_days"): "How often the daemon re-hashes stored "
+        "artifacts against their manifests (bit-rot scrubbing). 0 = off.",
+    ("integrity", "all_commits"): "Scrub the whole history, not just each "
+        "device's latest backup — slower, most thorough.",
+    ("integrity", "fsck"): "Also run `git fsck` on the repository during "
+        "scrubs.",
+    ("integrity", "signatures"): "Verify commit signatures during scrubs "
+        "(needs git.sign configured).",
+    ("rehearsal", "interval_days"): "Reminder cadence for restore "
+        "rehearsals — devices with no rehearsal in N days are flagged. "
+        "0 = off.",
+    ("git", "remote"): "Git remote the backup repo mirrors to after each "
+        "backup — your second copy (3-2-1).",
+    ("git", "push"): "Push to the remote automatically after every "
+        "backup.",
+    ("git", "sign.key_file"): "SSH private key used to sign backup "
+        "commits, giving cryptographic provenance to the history.",
+    ("secrets", "backend"): "Where device credentials live: an encrypted "
+        "YAML file (default), plain YAML (labs only), HashiCorp Vault, or "
+        "CyberArk.",
+    ("secrets", "path"): "Path of the secrets YAML (plainfile/"
+        "encryptedfile backends).",
+    ("secrets", "key_file"): "Fernet key that decrypts the encrypted "
+        "secrets file. Generate with `otitbup secrets genkey`.",
+    ("secrets", "url"): "Vault or CyberArk API URL.",
+    ("secrets", "mount"): "Vault KV mount containing the secrets.",
+    ("secrets", "token_file"): "File containing the Vault token.",
+    ("retention", "keep_versions"): "Keep the newest N backups per device; "
+        "older ones become prunable. 0 = unlimited.",
+    ("retention", "keep_days"): "Keep backups newer than N days. 0 = "
+        "unlimited.",
+    ("retention", "large_file_threshold"): "Artifacts bigger than this are "
+        "offloaded to the deduplicated blob store instead of the git repo.",
+    ("retention", "lock_days"): "WORM window: the last N days of backups "
+        "can never be pruned, whatever the other rules say.",
+    ("alerts", "stale_days"): "Alert when a device has had no successful "
+        "backup for N days. 0 = off.",
+    ("alerts", "min_interval"): "Rate limit: identical alerts are "
+        "suppressed within this window (seconds).",
+    ("alerts", "webhooks"): "Chat/incident webhook URLs (Slack/Teams/"
+        "generic JSON), comma-separated.",
+    ("alerts", "email.smtp_host"): "SMTP relay used for alert email.",
+    ("alerts", "email.from"): "From address on alert email.",
+    ("alerts", "email.to"): "Alert recipients, comma-separated.",
+    ("retry", "attempts"): "Total attempts per device per run; transient "
+        "network errors are retried, permanent ones are not. 1 = no retry.",
+    ("retry", "backoff"): "Seconds before the first retry; doubles each "
+        "further retry.",
+    ("hooks", "pre"): "Shell command before each device backup; "
+        "$OTITBUP_DEVICE holds the qualified name. Non-zero exit skips "
+        "the device.",
+    ("hooks", "post"): "Shell command after each backup; $OTITBUP_OK is "
+        "1/0 for success/failure.",
+    ("anomaly", "enabled"): "Master switch for behavioural anomaly "
+        "detection over run history (see the Anomaly page).",
+    ("anomaly", "sigma"): "A run is 'slow' when its duration is this many "
+        "standard deviations above the device's own mean.",
+    ("anomaly", "duration_floor"): "Ignore runs faster than this — "
+        "millisecond jitter on quick devices never counts as a spike.",
+    ("anomaly", "change_window"): "How many recent runs the change-storm "
+        "detector looks at.",
+    ("anomaly", "change_recent"): "Change-storm fires when at least this "
+        "fraction of the recent window changed…",
+    ("anomaly", "change_baseline"): "…and the device's long-run change "
+        "rate is at or below this fraction (a normally-quiet device).",
+    ("anomaly", "flap_window"): "How many recent runs the flapping "
+        "detector looks at.",
+    ("anomaly", "flap_transitions"): "Ok/fail transitions inside the "
+        "window that count as flapping (an intermittent device/link).",
+    ("anomaly", "trend_window"): "Recent-run window for the gradual "
+        "slowdown detector.",
+    ("anomaly", "trend_ratio"): "Slow-trend fires when the recent mean "
+        "duration is this multiple of the older baseline.",
+    ("anomaly", "size_drop"): "Size-drop fires when a capture is smaller "
+        "than this fraction of the device's median size (likely "
+        "truncated).",
+    ("policy", "disable"): "Built-in rule ids to skip (see the Anomaly "
+        "page for the active rules). Custom rules are managed below.",
+    ("housekeeping", "gc_interval_days"): "Run `git gc` on the backup repo "
+        "every N days to repack and prune. 0 = never.",
+    ("housekeeping", "gc_aggressive"): "Use --aggressive gc: much slower, "
+        "slightly smaller repository.",
+    ("desired", "dir"): "Directory of intended 'golden' configs; drift "
+        "between desired and captured configs is reported.",
+    ("desired", "strip_trailing_ws"): "Ignore trailing whitespace when "
+        "comparing desired vs captured.",
+    ("reports", "interval"): "Generate a compliance report on this "
+        "schedule (e.g. 7d). Empty disables scheduled reports.",
+    ("reports", "period_days"): "How many days each report covers.",
+    ("reports", "out"): "Where the scheduled report is written.",
+    ("strategy", "offsite"): "Declare that the git remote is genuinely "
+        "off-site (different building/failure domain) — counts toward "
+        "3-2-1.",
+    ("strategy", "offline.path"): "Path of the offline/air-gapped export "
+        "archive (from `otitbup export`).",
+    ("strategy", "offline.max_age_days"): "The offline copy counts only "
+        "while younger than this.",
+    ("federation", "role"): "Set to 'central' on the roll-up appliance "
+        "that polls the site collectors listed below.",
+}
 
 
 def _form_id(spec: dict) -> str:
@@ -1175,35 +1510,91 @@ class WebUI:
         # Global settings sections.
         sections = []
         for spec in _SETTINGS_FORMS:
+            form_id = _form_id(spec)
             current = raw.get(spec["section"]) or {}
             inputs = []
             for field in spec["fields"]:
                 dotted, label, ftype = field[0], field[1], field[2]
                 example = field[3] if len(field) > 3 else ""
                 value = _dig(current, dotted)
+                help_text = _FIELD_HELP.get(
+                    (form_id, dotted),
+                    f"{spec['section']}.{dotted} — see the Configuration "
+                    "reference under Documentation.")
                 inputs.append(self._config_input(
-                    dotted, label, ftype, value, example))
+                    dotted, label, ftype, value, example, help_text))
+            extra = ""
+            if form_id == "policy":
+                extra = self._policy_rules_editor(raw, csrf)
             sections.append(
-                f"<details><summary>{html.escape(spec['title'])}</summary>"
+                f"<details id='cfg-{form_id}'>"
+                f"<summary>{html.escape(spec['title'])}</summary>"
                 f"<form method='post' action='/config/global'>{_csrf(csrf)}"
                 f"<input type='hidden' name='section' "
-                f"value='{_form_id(spec)}'>"
+                f"value='{form_id}'>"
                 "<table class='cfg'>" + "".join(inputs) + "</table>"
-                "<button type='submit'>Save</button></form></details>"
+                "<button type='submit'>Save</button></form>"
+                + extra + "</details>"
             )
 
         body = [
             "<h2>Configuration</h2>",
             "<p class='muted'>Admin-only. Changes are validated, written to "
             "the config file (comments preserved; previous kept as "
-            "<code>.bak</code>) and reloaded. "
+            "<code>.bak</code>) and reloaded. Expand the <b>?</b> next to a "
+            "setting for what it does. "
             "<a href='/users'>User management &rarr;</a></p>",
-            "<h3>Global settings</h3>",
+            self._inventory_editor(raw, csrf),
+            "<h3 id='global-settings'>Global settings</h3>",
             *sections,
             self._federation_editor(raw, csrf),
-            self._inventory_editor(raw, csrf),
+            # Deep links (/config#cfg-<section>) open the section they name.
+            "<script>(function(){var h=location.hash.slice(1);if(!h)return;"
+            "var el=document.getElementById(h);"
+            "if(el&&el.tagName==='DETAILS'){el.open=true;"
+            "el.scrollIntoView();}})();</script>",
         ]
         return _page("otitbup — configuration", "".join(body))
+
+    def _policy_rules_editor(self, raw: dict, csrf: str) -> str:
+        """Add/remove custom policy rules (policy.rules); built-in rules are
+        code and can only be disabled via the field above."""
+        rules = (raw.get("policy") or {}).get("rules") or []
+        rows = []
+        for r in rules:
+            rid = str(r.get("id", ""))
+            pattern = r.get("match") or r.get("absent") or ""
+            mode = "match" if r.get("match") else "absent"
+            rows.append(
+                "<form method='post' action='/config/policy-rule-delete' "
+                f"class='cfg-inline'>{_csrf(csrf)}"
+                f"<input type='hidden' name='id' value='{html.escape(rid)}'>"
+                f"<b>{html.escape(rid)}</b> "
+                f"<span class='muted'>{html.escape(str(r.get('severity', 'medium')))}"
+                f" · {mode}: <code>{html.escape(str(pattern))}</code></span>"
+                "<button type='submit' class='danger' "
+                "onclick=\"return confirm('Remove rule?')\">Remove"
+                "</button></form>")
+        add = (
+            "<form method='post' action='/config/policy-rule-add' "
+            f"class='cfg-inline'>{_csrf(csrf)}add rule: "
+            + _labeled("id", "", "require-ntp")
+            + _labeled("description", "", "no NTP server configured")
+            + "<label class='inl'>severity<select name='severity'>"
+              "<option>low</option><option selected>medium</option>"
+              "<option>high</option><option>critical</option></select>"
+              "</label>"
+            + _labeled("match", "", "regex; presence = finding")
+            + _labeled("absent", "", "regex; absence = finding")
+            + "<button type='submit'>Add rule</button></form>"
+        )
+        return ("<h3>Custom policy rules</h3>"
+                "<p class='muted'>Rules lint every device's captured "
+                "config: <code>match</code> flags a line that must not "
+                "appear, <code>absent</code> flags a missing hardening "
+                "line. Findings show on the "
+                "<a href='/anomaly'>Anomaly</a> page.</p>"
+                + "".join(rows) + add)
 
     def _federation_editor(self, raw: dict, csrf: str) -> str:
         """Add/remove federation collectors (the central roll-up list)."""
@@ -1237,7 +1628,7 @@ class WebUI:
                 + "".join(rows) + add)
 
     def _config_input(self, name: str, label: str, ftype: str, value,
-                      example: str = "") -> str:
+                      example: str = "", help_text: str = "") -> str:
         if ftype == "csv" and isinstance(value, (list, tuple)):
             value = ", ".join(str(v) for v in value)
         safe = html.escape(str(value)) if value not in (None, "") else ""
@@ -1259,8 +1650,21 @@ class WebUI:
                      "inputmode='numeric'>")
         else:
             field = f"<input name='{name}' value='{safe}'{ph}>"
-        return (f"<tr><td><label>{html.escape(label)}</label></td>"
-                f"<td>{field}</td></tr>")
+        # Expandable context help: a ? button that reveals the row below.
+        help_btn = help_row = ""
+        if help_text:
+            toggle = ("var r=this.closest('tr').nextElementSibling;"
+                      "r.hidden=!r.hidden;"
+                      "this.setAttribute('aria-expanded',String(!r.hidden));")
+            help_btn = (
+                f"<button type='button' class='help-btn' title='What is "
+                f"this setting?' aria-expanded='false' "
+                f"aria-label='help for {html.escape(label)}' "
+                f"onclick=\"{toggle}\">?</button>")
+            help_row = (f"<tr class='cfg-help' hidden><td colspan='2'>"
+                        f"{html.escape(help_text)}</td></tr>")
+        return (f"<tr><td><label>{html.escape(label)}</label>{help_btn}</td>"
+                f"<td>{field}</td></tr>{help_row}")
 
     def _inventory_editor(self, raw: dict, csrf: str) -> str:
         from .drivers import available_drivers
@@ -1516,6 +1920,27 @@ class WebUI:
         return self._do_config(
             lambda: (configedit.delete_collector(self.config_path, name)
                      or f"removed collector {name}"), actor)
+
+    def action_config_policy_rule_add(self, form: dict, actor: str):
+        from . import configedit
+        rule: dict = {"id": form.get("id", "").strip()}
+        if form.get("description"):
+            rule["description"] = form["description"]
+        if form.get("severity"):
+            rule["severity"] = form["severity"]
+        for key in ("match", "absent"):
+            if form.get(key, "").strip():
+                rule[key] = form[key].strip()
+        return self._do_config(
+            lambda: "added policy rule " + configedit.add_policy_rule(
+                self.config_path, rule), actor)
+
+    def action_config_policy_rule_delete(self, form: dict, actor: str):
+        from . import configedit
+        rule_id = form.get("id", "")
+        return self._do_config(
+            lambda: (configedit.delete_policy_rule(self.config_path, rule_id)
+                     or f"removed policy rule {rule_id}"), actor)
 
     # ------------------------------------------------------------ pages
 
@@ -2050,8 +2475,40 @@ class WebUI:
             + "<p class='muted'>last 300 events</p>")
         return _page("otitbup — events", body)
 
-    def policy(self) -> bytes:
+    def anomaly_page(self) -> bytes:
+        """Anomalies (behavioural, from run history) and policy deviations
+        (content, from the captured configs) on one page, with shortcuts to
+        their settings sections in the config editor."""
         from .policy import check_all, load_rules, severity_rank
+
+        # Behavioural anomalies over each device's run history.
+        anomaly_rows = ""
+        anomaly_count = 0
+        if self.runstore is not None:
+            from .anomaly import analyze
+            for device in self.config.all_devices():
+                runs = self.runstore.recent_runs(
+                    device.qualified_name, limit=100)
+                for a in analyze(device.qualified_name, runs,
+                                 self.config.anomaly):
+                    anomaly_count += 1
+                    anomaly_rows += (
+                        f"<tr data-row><td>"
+                        f"<a href='{_device_link_name(a.device)}'>"
+                        f"{html.escape(a.device)}</a></td>"
+                        f"<td><code>{html.escape(a.kind)}</code></td>"
+                        f"<td>{html.escape(a.message)}</td></tr>"
+                    )
+        anomaly_table = (
+            "<table><tr><th>Device</th><th>Kind</th><th>Detail</th></tr>"
+            + anomaly_rows + "</table>"
+            if anomaly_rows else
+            "<p class='badge'>No anomalies detected.</p>"
+            if self.runstore is not None else
+            "<p class='muted'>run history unavailable (no run store)</p>"
+        )
+
+        # Policy deviations from the captured configurations.
         findings = check_all(self.config, self.store)
         rules = load_rules(self.config)
         flat = [f for group in findings.values() for f in group]
@@ -2066,20 +2523,36 @@ class WebUI:
             f"<td>{html.escape(f.artifact)}</td></tr>"
             for f in flat
         )
-        body = (
-            "<h2>Config policy findings</h2>"
-            f"<p class='muted'>{len(flat)} finding(s) across "
-            f"{len(findings)} device(s) · {len(rules)} rule(s) active</p>"
-            + (
-                "<input id='filter' type='search' placeholder='Filter…' "
-                "autocomplete='off'>"
-                "<table><tr><th>Device</th><th>Severity</th><th>Rule</th>"
-                "<th>Description</th><th>Artifact</th></tr>" + rows
-                + "</table>" + _FILTER_SCRIPT
-                if flat else "<p class='badge'>No policy findings.</p>"
-            )
+        policy_table = (
+            "<table><tr><th>Device</th><th>Severity</th><th>Rule</th>"
+            "<th>Description</th><th>Artifact</th></tr>" + rows + "</table>"
+            if flat else "<p class='badge'>No policy findings.</p>"
         )
-        return _page("otitbup — policy", body)
+        body = (
+            "<h2>Anomalies &amp; policy deviations</h2>"
+            "<p class='muted'>"
+            "<a href='/config#cfg-anomaly'>Anomaly settings &rarr;</a> · "
+            "<a href='/config#cfg-policy'>Policy settings &rarr;</a></p>"
+            "<input id='filter' type='search' placeholder='Filter…' "
+            "autocomplete='off'>"
+            "<h3>Anomalies "
+            + _help("Behavioural anomalies over run history: duration "
+                    "spikes, change storms, ok/fail flapping, slow trends "
+                    "and suspicious size drops — devices misbehaving while "
+                    "still succeeding.")
+            + f" <span class='muted'>({anomaly_count})</span></h3>"
+            + anomaly_table
+            + "<h3>Policy deviations "
+            + _help("Content policy: captured configurations linted against "
+                    "hardening rules (telnet, default communities, weak "
+                    "passwords, …). Add custom rules under policy.rules.")
+            + f" <span class='muted'>({len(flat)} finding(s) across "
+            f"{len(findings)} device(s) · {len(rules)} rule(s) active)"
+            "</span></h3>"
+            + policy_table
+            + _FILTER_SCRIPT
+        )
+        return _page("otitbup — anomaly", body)
 
     def retention(self) -> bytes:
         from .models import DEFAULT_RETENTION
@@ -2249,6 +2722,77 @@ class WebUI:
         body = "<h2>Help</h2>" + manuals + blocks
         return _page("otitbup — help", body)
 
+    def webui_settings_page(self) -> bytes:
+        """Personal web-UI settings: colour theme, text size, and WCAG
+        accessibility support. Applied instantly and saved per user (or in
+        a browser cookie when signed out). The *global default* theme lives
+        in the config editor's Web UI section."""
+        cur_theme = getattr(_CTX, "theme", None) or "auto"
+        if cur_theme not in _THEMES:
+            cur_theme = "auto"
+        cur_size = getattr(_CTX, "size", None) or "medium"
+        if cur_size not in _SIZES:
+            cur_size = "medium"
+        wcag_on = bool(getattr(_CTX, "wcag", False))
+
+        theme_opts = "".join(
+            f"<option value='{t}'{' selected' if t == cur_theme else ''}>"
+            f"{t}</option>" for t in _THEMES)
+        size_opts = "".join(
+            f"<option value='{s}'{' selected' if s == cur_size else ''}>"
+            f"{s}</option>" for s in _SIZES)
+        theme_js = (
+            "var v=this.value,r=document.documentElement;"
+            "if(v==='auto'){r.removeAttribute('data-theme');}"
+            "else{r.setAttribute('data-theme',v);}"
+            "fetch('/theme?set='+encodeURIComponent(v),"
+            "{credentials:'same-origin'});")
+        size_js = (
+            "var v=this.value,r=document.documentElement;"
+            "if(v==='medium'){r.removeAttribute('data-size');}"
+            "else{r.setAttribute('data-size',v);}"
+            "fetch('/theme?size='+encodeURIComponent(v),"
+            "{credentials:'same-origin'});")
+        wcag_js = (
+            "var r=document.documentElement;"
+            "if(this.checked){r.setAttribute('data-wcag','1');}"
+            "else{r.removeAttribute('data-wcag');}"
+            "fetch('/theme?wcag='+(this.checked?'1':'0'),"
+            "{credentials:'same-origin'});")
+        body = (
+            "<h2>Web UI settings</h2>"
+            "<p class='muted'>Personal display preferences — applied "
+            "immediately and saved to your account (or this browser when "
+            "signed out). The global default theme is set under "
+            "<a href='/config#cfg-webui'>Configuration &rarr; Web UI</a>.</p>"
+            "<h3>Theme "
+            + _help("Colour theme for this account. 'auto' follows the "
+                    "operating system's light/dark preference. 'wcag' and "
+                    "'high-contrast' are accessibility-first palettes.")
+            + "</h3>"
+            f"<p><select id='set-theme' aria-label='theme' "
+            f"onchange=\"{theme_js}\">{theme_opts}</select></p>"
+            "<h3>Text size "
+            + _help("Scales all text and controls in the web UI. 'large' "
+                    "and 'x-large' help on control-room wall displays and "
+                    "for low-vision users.")
+            + "</h3>"
+            f"<p><select id='set-size' aria-label='text size' "
+            f"onchange=\"{size_js}\">{size_opts}</select></p>"
+            "<h3>WCAG support "
+            + _help("Accessibility mode per WCAG 2.1: always-underlined "
+                    "links and strong visible keyboard-focus outlines, on "
+                    "top of whichever theme is active. Combine with the "
+                    "'wcag' theme for AA-contrast colours.")
+            + "</h3>"
+            "<p><label><input type='checkbox' id='set-wcag' "
+            + ("checked " if wcag_on else "")
+            + f"onchange=\"{wcag_js}\"> "
+            "enable WCAG accessibility support (underlined links, visible "
+            "focus outlines)</label></p>"
+        )
+        return _page("otitbup — web UI settings", body)
+
     def doc_page(self, slug: str) -> bytes | None:
         """Render a bundled Markdown manual (USAGE/FAQ/CONFIGURATION/…) to
         HTML for in-app viewing. Returns None if the doc isn't found."""
@@ -2263,21 +2807,125 @@ class WebUI:
         )
         return _page(f"otitbup — {slug}", body)
 
-    def drivers(self) -> bytes:
+    def drivers(self, sort: str = "name") -> bytes:
         from .drivers import driver_descriptions
-        in_use = {d.driver for d in self.config.all_devices()}
+        in_use: dict[str, int] = {}
+        for d in self.config.all_devices():
+            in_use[d.driver] = in_use.get(d.driver, 0) + 1
+        described = driver_descriptions().items()
+        if sort == "inuse":
+            # In-use drivers first (most devices first), then the rest
+            # alphabetically.
+            described = sorted(
+                described, key=lambda kv: (-in_use.get(kv[0], 0), kv[0]))
+            header = "<a href='/drivers' title='sort alphabetically'>In use ▾</a>"
+        else:
+            described = sorted(described)
+            header = ("<a href='/drivers?sort=inuse' "
+                      "title='sort by in use'>In use</a>")
         rows = [
-            f"<tr data-row><td><code>{html.escape(name)}</code></td>"
+            f"<tr data-row><td><a href='/drivers/{quote(name)}'>"
+            f"<code>{html.escape(name)}</code></a></td>"
             f"<td>{html.escape(description)}</td>"
-            f"<td>{'✓' if name in in_use else ''}</td></tr>"
-            for name, description in driver_descriptions().items()
+            f"<td>{'✓ ' + str(in_use[name]) if name in in_use else ''}</td>"
+            "</tr>"
+            for name, description in described
         ]
         body = (
             "<h2>Driver catalog</h2>"
-            "<table><tr><th>Driver</th><th>Description</th><th>In use</th></tr>"
-            + "".join(rows) + "</table>"
+            "<p class='muted'>Click a driver for how it is set up and "
+            "works; click <b>In use</b> to sort by use or alphabetically."
+            "</p>"
+            "<input id='filter' type='search' placeholder='Filter…' "
+            "autocomplete='off'>"
+            "<table><tr><th>Driver</th><th>Description</th>"
+            f"<th>{header}</th></tr>"
+            + "".join(rows) + "</table>" + _FILTER_SCRIPT
         )
         return _page("otitbup — drivers", body)
+
+    def driver_detail(self, name: str) -> bytes | None:
+        """Everything an operator needs to set a driver up: what it does,
+        the options/credentials it takes (module documentation), the vendor
+        preset (for SSH profiles), dependencies, and which devices use it."""
+        from .drivers import driver_info
+        info = driver_info(name)
+        if info is None:
+            return None
+        users = [d for d in self.config.all_devices() if d.driver == name]
+        parts = [
+            f"<h2><code>{html.escape(name)}</code></h2>",
+            "<p class='muted'><a href='/drivers'>&larr; driver catalog</a>"
+            "</p>",
+            f"<p>{html.escape(info['description'])}</p>",
+        ]
+        if info["requires"]:
+            parts.append(
+                "<p><span class='badge'>dependency</span> requires "
+                f"<code>{html.escape(info['requires'])}</code> — install "
+                f"with <code>pip install \"otitbup[{info['extra']}]\"</code> "
+                f"(or <code>make install-devices</code>).</p>")
+        else:
+            parts.append("<p><span class='badge'>stdlib-only</span> "
+                         "no extra dependencies needed.</p>")
+        profile = info.get("profile")
+        if profile:
+            commands = "".join(
+                f"<li><code>{html.escape(c)}</code></li>"
+                for c in profile.get("commands", []))
+            scrub = "".join(
+                f"<li><code>{html.escape(s)}</code></li>"
+                for s in profile.get("scrub", []))
+            parts.append(
+                "<h3>Vendor profile (preset over generic_ssh)</h3>"
+                f"<p>netmiko device_type: <code>"
+                f"{html.escape(str(profile.get('device_type', '')))}</code>"
+                "</p>"
+                "<p>commands captured:</p><ul>" + commands + "</ul>"
+                + ("<p>volatile lines scrubbed from diffs:</p><ul>"
+                   + scrub + "</ul>" if scrub else "")
+                + "<p class='muted'>every field can be overridden per "
+                  "device via <code>options:</code> (device_type, commands, "
+                  "port, scrub)</p>")
+        if info["class_doc"]:
+            parts.append("<h3>Driver notes</h3>"
+                         f"<pre>{html.escape(info['class_doc'])}</pre>")
+        if info["module_doc"]:
+            parts.append("<h3>Setup &amp; how it works</h3>"
+                         f"<pre>{html.escape(info['module_doc'])}</pre>")
+        if info["module"]:
+            parts.append(
+                f"<p class='muted'>implementation: <code>"
+                f"{html.escape(info['module'])}:"
+                f"{html.escape(info['class_name'] or '')}</code></p>")
+        if users:
+            rows = "".join(
+                f"<tr><td><a href='{_device_link(d)}'>"
+                f"{html.escape(d.qualified_name)}</a></td>"
+                f"<td>{html.escape(d.address or '-')}</td>"
+                f"<td>{html.escape(d.schedule)}</td></tr>" for d in users)
+            parts.append(
+                f"<h3>In use by {len(users)} device(s)</h3>"
+                "<table><tr><th>Device</th><th>Address</th><th>Schedule</th>"
+                "</tr>" + rows + "</table>")
+        else:
+            parts.append("<p class='muted'>not used by any configured "
+                         "device</p>")
+        example = [
+            "sites:",
+            "  - name: site-a",
+            "    zones:",
+            "      - name: zone-1",
+            "        devices:",
+            "          - name: my-device",
+            f"            driver: {name}",
+            "            address: 10.0.0.10",
+            "            schedule: 12h",
+            "            credentials: my-device   # key in the secrets store",
+        ]
+        parts.append("<h3>Example inventory entry</h3><pre>"
+                     + html.escape("\n".join(example)) + "</pre>")
+        return _page(f"otitbup — driver {name}", "".join(parts))
 
     def device(self, qualified_name: str, ctx: dict | None = None) -> bytes | None:
         from .auth import role_rank
@@ -2737,34 +3385,56 @@ class _Handler(BaseHTTPRequestHandler):
         """The effective colour theme: the signed-in user's saved preference
         (per-account, on disk), else this browser's cookie, else the
         configured global default. Only known themes are honoured."""
+        return self._resolve_pref(identity, "theme", _THEMES,
+                                  self.ui.config.webui.get("theme"))
+
+    def _resolve_pref(self, identity: dict | None, key: str,
+                      allowed: tuple | None, default=None):
+        """Per-user UI preference: saved pref, else cookie, else default."""
         if identity:
-            pref = self.ui.prefs.get_value(identity["username"], "theme")
-            if pref in _THEMES:
-                return pref
-        ck = self._cookie("otitbup_theme")
-        if ck in _THEMES:
+            pref = self.ui.prefs.get_value(identity["username"], key)
+            if allowed is None or pref in allowed:
+                if pref not in (None, ""):
+                    return pref
+        ck = self._cookie(f"otitbup_{key}")
+        if ck and (allowed is None or ck in allowed):
             return ck
-        return self.ui.config.webui.get("theme")
+        return default
+
+    def _set_ctx(self, identity: dict | None) -> None:
+        """Fill the per-request render context (theme, text size, WCAG)."""
+        _CTX.identity = identity
+        _CTX.theme = self._resolve_theme(identity)
+        _CTX.size = self._resolve_pref(identity, "size", _SIZES)
+        _CTX.wcag = self._resolve_pref(identity, "wcag", ("1",)) == "1"
 
     def _handle_theme(self, query: dict) -> None:
-        """Set the current user's theme preference (menu-bar picker)."""
-        theme = (query.get("set", [""])[0] or "").strip()
-        if theme not in _THEMES:
-            theme = "auto"
+        """Persist a UI preference (theme picker / web-UI-settings page).
+        One preference per request: ?set=<theme>, ?size=<size> or
+        ?wcag=1|0. Empty/default values clear the preference."""
+        if "size" in query:
+            key, value = "size", (query.get("size", [""])[0] or "").strip()
+            if value not in _SIZES or value == "medium":
+                value = ""
+        elif "wcag" in query:
+            key = "wcag"
+            value = "1" if query.get("wcag", [""])[0] == "1" else ""
+        else:
+            key, value = "theme", (query.get("set", [""])[0] or "").strip()
+            if value not in _THEMES or value == "auto":
+                value = ""
         identity = self._identify()
         if identity:
             try:
-                self.ui.prefs.set_value(
-                    identity["username"], "theme",
-                    "" if theme == "auto" else theme)
+                self.ui.prefs.set_value(identity["username"], key, value)
             except Exception:
                 pass
-        if theme == "auto":
-            cookie = "otitbup_theme=; Path=/; Max-Age=0; SameSite=Lax"
+        if not value:
+            cookie = f"otitbup_{key}=; Path=/; Max-Age=0; SameSite=Lax"
         else:
-            cookie = (f"otitbup_theme={theme}; Path=/; Max-Age=31536000; "
+            cookie = (f"otitbup_{key}={value}; Path=/; Max-Age=31536000; "
                       "SameSite=Lax")
-        # The client already applied the theme; just persist and return 204.
+        # The client already applied the change; just persist and return 204.
         return self._send(204, b"", "text/plain",
                           headers={"Set-Cookie": cookie})
 
@@ -2819,11 +3489,10 @@ class _Handler(BaseHTTPRequestHandler):
         raw = self.path.split("?", 1)
         path = unquote(raw[0])
         query = parse_qs(raw[1]) if len(raw) > 1 else {}
-        # Per-request render context (theme + who is signed in). Theme is
+        # Per-request render context (theme + who is signed in). Prefs are
         # re-resolved after identify() so a signed-in user's saved preference
         # can override the cookie/global default.
-        _CTX.identity = None
-        _CTX.theme = self._resolve_theme(None)
+        self._set_ctx(None)
         if path == "/healthz":
             return self._send(200, b'{"status":"ok"}\n', "application/json")
         if path in ("/favicon.svg", "/favicon.ico"):
@@ -2856,8 +3525,7 @@ class _Handler(BaseHTTPRequestHandler):
                 )
             return self._send(200, self.ui.login_page(next_url=path))
         self._identity = identity
-        _CTX.identity = identity
-        _CTX.theme = self._resolve_theme(identity)
+        self._set_ctx(identity)
         role = identity["role"] if identity else "admin"
         csrf = identity["token"] if identity and identity["via"] == "session" else ""
 
@@ -2932,13 +3600,18 @@ class _Handler(BaseHTTPRequestHandler):
             content = self.ui.drift()
         elif path == "/strategy":
             content = self.ui.strategy()
+        elif path == "/webui-settings":
+            content = self.ui.webui_settings_page()
         elif path == "/help":
             content = self.ui.help_page()
         elif path.startswith("/help/"):
             content = self.ui.doc_page(path[len("/help/"):].strip("/"))
             # None -> fall through to the 404 handling below.
+        elif path == "/anomaly":
+            content = self.ui.anomaly_page()
         elif path == "/policy":
-            content = self.ui.policy()
+            # The Policy page became Anomaly (anomalies + policy deviations).
+            return self._redirect("/anomaly")
         elif path == "/activity":
             content = self.ui.activity()
         elif path == "/events":
@@ -2961,7 +3634,9 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == "/retention":
             content = self.ui.retention()
         elif path == "/drivers":
-            content = self.ui.drivers()
+            content = self.ui.drivers(sort=query.get("sort", ["name"])[0])
+        elif path.startswith("/drivers/"):
+            content = self.ui.driver_detail(path[len("/drivers/"):].strip("/"))
         elif path.startswith("/device/"):
             rest = path[len("/device/"):].strip("/")
             parts = rest.split("/")
@@ -2992,8 +3667,7 @@ class _Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length).decode("utf-8", "replace") if length else ""
         form = {k: v[0] for k, v in parse_qs(raw).items()}
         path = unquote(self.path.split("?", 1)[0])
-        _CTX.identity = None
-        _CTX.theme = self._resolve_theme(None)
+        self._set_ctx(None)
 
         # Login/logout are their own auth flow.
         if path == "/login":
@@ -3002,8 +3676,7 @@ class _Handler(BaseHTTPRequestHandler):
             return self._handle_logout()
 
         identity = self._identify()
-        _CTX.identity = identity
-        _CTX.theme = self._resolve_theme(identity)
+        self._set_ctx(identity)
 
         # Write API (JSON): Bearer token or session; no CSRF for token auth.
         if path.startswith("/api/"):
@@ -3139,6 +3812,11 @@ class _Handler(BaseHTTPRequestHandler):
                     lambda: self.ui.action_config_collector_add(form, actor),
                 "/config/collector-delete":
                     lambda: self.ui.action_config_collector_delete(form, actor),
+                "/config/policy-rule-add":
+                    lambda: self.ui.action_config_policy_rule_add(form, actor),
+                "/config/policy-rule-delete":
+                    lambda: self.ui.action_config_policy_rule_delete(
+                        form, actor),
             }
             handler = handlers.get(path)
             if handler is None:

@@ -12,12 +12,21 @@ Every noteworthy action emits one Event. Sinks are configured under
       snmp_trap:
         address: 10.0.0.2
         port: 162
-        community: public
+        version: v2c                        # v1 | v2c | v3
+        community: public                   # v1/v2c
         enterprise_oid: 1.3.6.1.4.1.99999   # your enterprise OID base
+        v3:                                 # only for version: v3 (USM)
+          engine_id: 8000270b0102030405     # hex; must match the receiver
+          username: otitbup
+          auth_protocol: sha256             # none | md5 | sha1 | sha256
+          auth_key_file: /etc/otitbup/snmpv3.auth
+          priv_protocol: none               # none | aes128
+          priv_key_file: /etc/otitbup/snmpv3.priv
 
 Both sinks are stdlib-only (no pysnmp): syslog via SysLogHandler, SNMP via
-a minimal BER-encoded SNMPv2-Trap PDU over UDP. Sink failures are logged,
-never fatal.
+minimal BER-encoded trap PDUs over UDP (RFC 1157 Trap-PDU for v1,
+SNMPv2-Trap for v2c, USM per RFC 3414/3826 for v3 — authPriv needs the
+`crypto` extra for AES). Sink failures are logged, never fatal.
 """
 from __future__ import annotations
 
@@ -41,6 +50,7 @@ BACKUP_STOP = "backup.stop"
 BACKUP_ERROR = "backup.error"
 CONFIG_READ = "config.read"
 CONFIG_RELOAD = "config.reload"
+CONFIG_CHANGED = "config.changed"
 CHANGE_UNEXPECTED = "change.unexpected"
 ANOMALY = "anomaly.detected"
 INTEGRITY_OK = "integrity.ok"
@@ -60,9 +70,11 @@ _EVENT_IDS: dict[str, int] = {
     USER_CREATE: 12, USER_DELETE: 13, USER_PASSWD: 14,
     CHANGE_UNEXPECTED: 15, ANOMALY: 16,
     INTEGRITY_OK: 17, INTEGRITY_ERROR: 18,
+    CONFIG_CHANGED: 19,
 }
 _DEFAULT_SEVERITY = {
     BACKUP_ERROR: "error",
+    CONFIG_CHANGED: "warning",
     CHANGE_UNEXPECTED: "warning",
     ANOMALY: "warning",
     INTEGRITY_ERROR: "error",
@@ -167,32 +179,211 @@ def _varbind(oid: str, value: bytes) -> bytes:
     return _tlv(0x30, _ber_oid(oid) + value)
 
 
-def build_snmpv2_trap(
-    community: str, enterprise_oid: str, event: Event, request_id: int,
-    uptime_ticks: int,
+def _event_varbinds(enterprise_oid: str, event: Event) -> bytes:
+    """The enterprise varbinds shared by every trap version: event type,
+    message, and severity as strings under <enterprise>.1.x."""
+    return (
+        _varbind(f"{enterprise_oid}.1.1", _tlv(0x04, event.type.encode()))
+        + _varbind(f"{enterprise_oid}.1.2", _tlv(0x04, event.message.encode()))
+        + _varbind(f"{enterprise_oid}.1.3", _tlv(0x04, event.severity.encode()))
+    )
+
+
+def build_snmpv1_trap(
+    community: str, enterprise_oid: str, event: Event, uptime_ticks: int,
+    agent_addr: str = "0.0.0.0",
 ) -> bytes:
-    """Encode an SNMPv2c Trap PDU. Varbinds: sysUpTime.0, snmpTrapOID.0
-    (= <enterprise>.0.<event-id>), plus message and severity strings."""
+    """Encode an RFC 1157 SNMPv1 Trap-PDU: enterprise OID, agent address,
+    generic-trap 6 (enterpriseSpecific) and the event id as specific-trap."""
+    addr = bytes(int(p) for p in agent_addr.split("."))
+    pdu = _tlv(
+        0xA4,                                    # Trap-PDU [4]
+        _ber_oid(enterprise_oid)
+        + _tlv(0x40, addr)                       # agent-addr (IpAddress)
+        + _ber_int(6)                            # generic-trap: enterpriseSpecific
+        + _ber_int(_EVENT_IDS.get(event.type, 0))  # specific-trap
+        + _ber_int(uptime_ticks, tag=0x43)       # time-stamp (TimeTicks)
+        + _tlv(0x30, _event_varbinds(enterprise_oid, event)),
+    )
+    return _tlv(
+        0x30,
+        _ber_int(0) + _tlv(0x04, community.encode()) + pdu,  # version v1=0
+    )
+
+
+def _v2_trap_pdu(enterprise_oid: str, event: Event, request_id: int,
+                 uptime_ticks: int) -> bytes:
+    """The SNMPv2-Trap-PDU (also carried inside v3 messages). Varbinds:
+    sysUpTime.0, snmpTrapOID.0 (= <enterprise>.0.<event-id>), plus the
+    event strings."""
     trap_oid = f"{enterprise_oid}.0.{_EVENT_IDS.get(event.type, 0)}"
     varbinds = (
         _varbind("1.3.6.1.2.1.1.3.0", _ber_int(uptime_ticks, tag=0x43))
         + _varbind("1.3.6.1.6.3.1.1.4.1.0", _ber_oid(trap_oid))
-        + _varbind(f"{enterprise_oid}.1.1",
-                   _tlv(0x04, event.type.encode()))
-        + _varbind(f"{enterprise_oid}.1.2",
-                   _tlv(0x04, event.message.encode()))
-        + _varbind(f"{enterprise_oid}.1.3",
-                   _tlv(0x04, event.severity.encode()))
+        + _event_varbinds(enterprise_oid, event)
     )
-    pdu = _tlv(
+    return _tlv(
         0xA7,                                    # SNMPv2-Trap-PDU [7]
         _ber_int(request_id) + _ber_int(0) + _ber_int(0)
         + _tlv(0x30, varbinds),
     )
+
+
+def build_snmpv2_trap(
+    community: str, enterprise_oid: str, event: Event, request_id: int,
+    uptime_ticks: int,
+) -> bytes:
+    """Encode a community-based SNMPv2c Trap message."""
+    pdu = _v2_trap_pdu(enterprise_oid, event, request_id, uptime_ticks)
     return _tlv(
         0x30,
         _ber_int(1) + _tlv(0x04, community.encode()) + pdu,  # version v2c=1
     )
+
+
+# --------------------------------------------------------------- SNMPv3/USM
+
+# auth protocol -> (hashlib name, HMAC truncation length per RFC 3414/7860)
+_V3_AUTH = {
+    "md5": ("md5", 12),
+    "sha1": ("sha1", 12),
+    "sha": ("sha1", 12),
+    "sha256": ("sha256", 24),
+}
+
+
+def usm_localized_key(password: str, engine_id: bytes, hash_name: str) -> bytes:
+    """RFC 3414 password-to-key: hash the password stream expanded to 1 MiB
+    (Ku), then localize it to the engine: H(Ku || engineID || Ku)."""
+    import hashlib
+    if not password:
+        raise ValueError("empty SNMPv3 passphrase")
+    data = (password.encode() * (1048576 // len(password.encode()) + 1))
+    ku = hashlib.new(hash_name, data[:1048576]).digest()
+    return hashlib.new(hash_name, ku + engine_id + ku).digest()
+
+
+def build_snmpv3_trap(
+    v3: dict[str, Any], enterprise_oid: str, event: Event, request_id: int,
+    uptime_ticks: int,
+) -> bytes:
+    """Encode an SNMPv3 (USM) trap. The trap sender is the authoritative
+    engine, so `engine_id` here must match the user configured on the
+    receiver. Supports noAuthNoPriv, authNoPriv (HMAC-MD5/SHA1/SHA-256) and
+    authPriv (AES-128-CFB per RFC 3826; needs the `crypto` extra)."""
+    engine_id = bytes.fromhex(str(v3.get("engine_id", "8000270b01")).strip())
+    username = str(v3.get("username", "otitbup"))
+    auth_proto = str(v3.get("auth_protocol", "none")).lower()
+    priv_proto = str(v3.get("priv_protocol", "none")).lower()
+    auth_pass = str(v3.get("auth_key", "") or "")
+    priv_pass = str(v3.get("priv_key", "") or "")
+    if priv_proto not in ("", "none") and auth_proto in ("", "none"):
+        raise ValueError("SNMPv3 privacy requires an auth protocol")
+
+    boots = int(v3.get("engine_boots", 1))
+    etime = uptime_ticks // 100
+    scoped_pdu = _tlv(
+        0x30,
+        _tlv(0x04, engine_id) + _tlv(0x04, b"")     # contextEngineID, name
+        + _v2_trap_pdu(enterprise_oid, event, request_id, uptime_ticks),
+    )
+
+    flags = 0
+    auth_len = 0
+    hash_name = ""
+    if auth_proto not in ("", "none"):
+        if auth_proto not in _V3_AUTH:
+            raise ValueError(f"unknown SNMPv3 auth protocol {auth_proto!r}")
+        hash_name, auth_len = _V3_AUTH[auth_proto]
+        flags |= 0x01
+    priv_params = b""
+    msg_data = scoped_pdu
+    if priv_proto not in ("", "none"):
+        if priv_proto not in ("aes", "aes128"):
+            raise ValueError(f"unknown SNMPv3 priv protocol {priv_proto!r}")
+        flags |= 0x02
+        import struct
+        try:
+            from cryptography.hazmat.primitives.ciphers import Cipher, algorithms
+            try:  # cryptography >= 49 keeps CFB under decrepit
+                from cryptography.hazmat.decrepit.ciphers.modes import CFB
+            except ImportError:
+                from cryptography.hazmat.primitives.ciphers.modes import CFB
+        except ImportError as exc:
+            raise ValueError(
+                "SNMPv3 authPriv needs the cryptography package "
+                "(pip install \"otitbup[crypto]\")") from exc
+        priv_key = usm_localized_key(priv_pass, engine_id, hash_name)[:16]
+        priv_params = struct.pack(">Q", request_id & 0xFFFFFFFFFFFFFFFF)
+        iv = struct.pack(">II", boots, etime) + priv_params
+        cipher = Cipher(algorithms.AES(priv_key), CFB(iv))
+        enc = cipher.encryptor()
+        msg_data = _tlv(0x04, enc.update(scoped_pdu) + enc.finalize())
+
+    def assemble(auth_params: bytes) -> bytes:
+        usm = _tlv(0x30, (
+            _tlv(0x04, engine_id)
+            + _ber_int(boots) + _ber_int(etime)
+            + _tlv(0x04, username.encode())
+            + _tlv(0x04, auth_params)
+            + _tlv(0x04, priv_params)
+        ))
+        header = _tlv(0x30, (
+            _ber_int(request_id)                 # msgID
+            + _ber_int(65507)                    # msgMaxSize
+            + _tlv(0x04, bytes([flags]))         # msgFlags (not reportable)
+            + _ber_int(3)                        # msgSecurityModel: USM
+        ))
+        return _tlv(0x30, _ber_int(3) + header + _tlv(0x04, usm) + msg_data)
+
+    if not auth_len:
+        return assemble(b"")
+    import hmac as _hmac
+    auth_key = usm_localized_key(auth_pass, engine_id, hash_name)
+    # RFC 3414: HMAC over the whole message with the auth field zeroed,
+    # then the truncated MAC replaces the zeros. Same length -> the
+    # message structure is identical, so rebuilding is safe.
+    zeroed = assemble(b"\x00" * auth_len)
+    mac = _hmac.new(auth_key, zeroed, hash_name).digest()[:auth_len]
+    return assemble(mac)
+
+
+def _read_key_file(path) -> str:
+    from pathlib import Path
+    return Path(path).read_text().strip()
+
+
+def build_trap(cfg: dict[str, Any], event: Event, request_id: int,
+               uptime_ticks: int) -> bytes:
+    """Build a trap datagram in the configured version (events.snmp_trap:
+    version: v1 | v2c (default) | v3)."""
+    version = str(cfg.get("version", "v2c")).lower()
+    enterprise_oid = cfg.get("enterprise_oid", "1.3.6.1.4.1.99999")
+    if version in ("v1", "1"):
+        return build_snmpv1_trap(
+            community=cfg.get("community", "public"),
+            enterprise_oid=enterprise_oid, event=event,
+            uptime_ticks=uptime_ticks,
+            agent_addr=str(cfg.get("agent_addr", "0.0.0.0")),
+        )
+    if version in ("v3", "3"):
+        v3 = dict(cfg.get("v3") or {})
+        # Passphrases come from files (kept out of the YAML) unless given
+        # inline (tests / secrets templating).
+        if not v3.get("auth_key") and v3.get("auth_key_file"):
+            v3["auth_key"] = _read_key_file(v3["auth_key_file"])
+        if not v3.get("priv_key") and v3.get("priv_key_file"):
+            v3["priv_key"] = _read_key_file(v3["priv_key_file"])
+        return build_snmpv3_trap(
+            v3, enterprise_oid, event, request_id, uptime_ticks)
+    if version in ("v2c", "v2", "2c", "2"):
+        return build_snmpv2_trap(
+            community=cfg.get("community", "public"),
+            enterprise_oid=enterprise_oid, event=event,
+            request_id=request_id, uptime_ticks=uptime_ticks,
+        )
+    raise ValueError(f"unknown snmp_trap.version {version!r} "
+                     "(use v1, v2c or v3)")
 
 
 # ------------------------------------------------------------- EventBus
@@ -319,11 +510,8 @@ class EventBus:
         self._request_id = (self._request_id + 1) & 0x7FFFFFFF
         uptime = int((time.monotonic() - self._start) * 100)
         try:
-            datagram = build_snmpv2_trap(
-                community=cfg.get("community", "public"),
-                enterprise_oid=cfg.get("enterprise_oid",
-                                       "1.3.6.1.4.1.99999"),
-                event=event, request_id=self._request_id or 1,
+            datagram = build_trap(
+                cfg, event, request_id=self._request_id or 1,
                 uptime_ticks=uptime,
             )
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

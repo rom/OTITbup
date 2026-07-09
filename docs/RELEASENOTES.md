@@ -9,6 +9,52 @@ branch; `0.1.0` is the current package version.
 
 ## Unreleased
 
+### Added — config-change detection, SNMP trap versions, UI overhaul
+
+- **Configuration-change detection between runs.** `backup`, `daemon` and
+  `serve` now diff the YAML config against the last *accepted* snapshot
+  (`config-snapshot.json`, next to the data directory). Minor changes
+  (tunables, added devices, alerts, themes, …) print warnings and are
+  accepted automatically; **major** changes (removed/renamed inventory,
+  driver/address/credential edits, `data_dir`, `secrets`, `encryption`,
+  `git`, `offsite`, retention locks, users/auth, LDAP) require explicit
+  acceptance — an interactive `[y/N]` dialogue on a TTY, or the new
+  `--accept-config-changes` flag for unattended runs. Unaccepted major
+  changes keep warning on every run (and emit the new `config.changed`
+  event) until an operator signs them off.
+- **SNMP trap versions.** `events.snmp_trap.version` selects `v1`
+  (RFC 1157 Trap-PDU), `v2c` (default, unchanged) or `v3` (USM per
+  RFC 3414: noAuthNoPriv / authNoPriv with MD5/SHA-1/SHA-256, authPriv
+  with AES-128-CFB via the `crypto` extra). v3 credentials are configured
+  under `events.snmp_trap.v3` with passphrases in key files.
+- **Makefile.** `make install-devices` pip-installs every supported device
+  driver dependency, `make install-extensions` the extension/integration
+  extras (crypto, LDAP), plus `install-all`, `dev`, `test`, `lint`.
+- **Six new themes:** `high-contrast`, `solarized`, `nord`, `dracula`,
+  `gruvbox`, and `wcag` (WCAG 2.1 AA-contrast palette).
+- **Web UI settings page** (Administration → Web UI settings): per-user
+  theme, **text size** (small/medium/large/x-large) and a **WCAG support**
+  mode (always-underlined links, strong keyboard-focus outlines).
+- **Menus renamed and grouped.** *Policy* is now **Anomaly** — the page
+  shows behavioural anomalies *and* policy deviations, with shortcuts to
+  the anomaly/policy settings in the config editor (`/policy` redirects).
+  *Help* is now **Documentation** with Help / Release notes / FAQ / Usage
+  guide / Site collectors submenus. *Config* is now **Administration**
+  with Web UI settings / Config / Users submenus.
+- **Config editor:** every setting has an expandable **?** context-help
+  button; the Inventory section now sits above Global settings; a new
+  **Policy** section disables built-in rules and manages custom rules
+  (add/remove) from the UI.
+- **Driver catalog:** click **In use** to sort by use (or back to
+  alphabetical); every driver links to a detail page describing how the
+  driver is set up and works — options, vendor SSH profile presets
+  (device_type/commands/scrub), required pip extra, devices using it, and
+  an example inventory entry.
+- **More built-in policy rules:** FTP/TFTP servers, SSHv1, SNMPv3 DES
+  privacy, plaintext/type-7 user passwords, default admin passwords,
+  `permit ip any any`, `transport input all`, MD5 enable secrets, and IP
+  source routing.
+
 ### Added / changed — web UI polish & configurability
 
 - **Per-user colour themes.** Each user picks a theme from the menu-bar

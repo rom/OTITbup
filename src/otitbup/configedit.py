@@ -246,6 +246,38 @@ def delete_collector(path: str | Path, name: str) -> None:
     save_raw(path, raw)
 
 
+def add_policy_rule(path: str | Path, rule: dict[str, Any]) -> str:
+    """Append a custom policy rule (policy.rules). Requires an id and one of
+    match/absent. Rejects a duplicate id. Returns the rule id."""
+    raw = load_raw(path)
+    policy = raw.get("policy")
+    if not isinstance(policy, dict):
+        policy = {}
+    rules = policy.setdefault("rules", [])
+    rule_id = rule.get("id")
+    if not rule_id:
+        raise ConfigEditError("rule id is required")
+    if not (rule.get("match") or rule.get("absent")):
+        raise ConfigEditError("a rule needs a `match` or an `absent` regex")
+    if any(r.get("id") == rule_id for r in rules):
+        raise ConfigEditError(f"policy rule already exists: {rule_id}")
+    rules.append(rule)
+    raw["policy"] = policy
+    save_raw(path, raw)
+    return str(rule_id)
+
+
+def delete_policy_rule(path: str | Path, rule_id: str) -> None:
+    raw = load_raw(path)
+    policy = raw.get("policy") or {}
+    rules = policy.get("rules") or []
+    remaining = [r for r in rules if r.get("id") != rule_id]
+    if len(remaining) == len(rules):
+        raise ConfigEditError(f"no such policy rule: {rule_id}")
+    policy["rules"] = remaining
+    save_raw(path, raw)
+
+
 def add_site(path: str | Path, site: str,
              fields: dict[str, Any] | None = None) -> None:
     raw = load_raw(path)
