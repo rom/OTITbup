@@ -641,8 +641,6 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "blobkey":
-        import os
-
         from .blobstore import BlobStoreError, rotate_key
         blobs_dir = Path(config.data_dir).parent / "blobs"
         if args.blobkey_command == "genkey":
@@ -650,10 +648,8 @@ def main(argv: list[str] | None = None) -> int:
             print(Fernet.generate_key().decode())
             return 0
         # rotate
-        enc = config.encryption or {}
-        current = (os.environ.get("OTITBUP_BLOB_KEY") or enc.get("blob_key"))
-        if not current and enc.get("blob_key_file"):
-            current = Path(enc["blob_key_file"]).read_text().strip()
+        from .runner import resolve_blob_key
+        current = resolve_blob_key(config)
         old_key = None
         if args.old_key_file:
             old_key = Path(args.old_key_file).read_text().strip()
@@ -905,15 +901,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "retention":
+        from .retention import RetentionError, describe_policy, plan
         from .retention import apply as retention_apply
-        from .retention import describe_policy, plan
         from .runner import default_blobstore
         from .runstore import default_runstore
         store = GitStore(config.data_dir)
         store.ensure_repo()
         blobstore = default_blobstore(config)
-        prune_plan = plan(config, store, blobstore,
-                          runstore=default_runstore(config))
+        try:
+            prune_plan = plan(config, store, blobstore,
+                              runstore=default_runstore(config))
+        except RetentionError as exc:
+            print(f"retention aborted (nothing pruned): {exc}",
+                  file=sys.stderr)
+            return 1
         for dplan in prune_plan.devices:
             sources = ", ".join(
                 f"{key}={dplan.sources[key]}"
@@ -1146,13 +1147,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "offsite":
         import datetime as _dt
-        import os
 
         from . import offsite as offsite_mod
-        enc = config.encryption or {}
-        blob_key = (os.environ.get("OTITBUP_BLOB_KEY") or enc.get("blob_key"))
-        if not blob_key and enc.get("blob_key_file"):
-            blob_key = Path(enc["blob_key_file"]).read_text().strip()
+        from .runner import resolve_blob_key
+        blob_key = resolve_blob_key(config)
         try:
             if args.offsite_command == "genkey":
                 print(offsite_mod.generate_key())

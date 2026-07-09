@@ -146,10 +146,6 @@ def restore_network_config(
     )
 
 
-def is_restorable(driver: str) -> bool:
-    return driver in _RESTORABLE
-
-
 def _normalize(config: str) -> list[str]:
     return [
         ln.rstrip() for ln in config.splitlines()

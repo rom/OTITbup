@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .models import AppConfig
 from .runner import Runner
-from .windows import in_window, parse_interval
+from .windows import cron_matches, in_window, is_cron, parse_interval
 
 log = logging.getLogger("otitbup.daemon")
 
@@ -85,7 +85,6 @@ class Daemon:
         self.state_path.write_text(json.dumps(self.state, indent=2))
 
     def _due(self, now: datetime) -> list:
-        from .windows import cron_matches, is_cron
         due = []
         for device in self.config.all_devices():
             zone = self.config.find_zone(device)
@@ -120,13 +119,20 @@ class Daemon:
         )
         self._install_sighup()
         while True:
-            self.reload()  # pick up config edits without a restart
-            self.run_once()
-            self._maybe_report()
-            self._maybe_gc()
-            self._maybe_integrity()
-            self._maybe_offsite()
-            self._maybe_rehearse()
+            # One misbehaving tick (a config typo that fails to parse, a
+            # corrupt state value, a transient git/DB error) must never kill
+            # the scheduler and silently stop an unattended appliance from
+            # backing up. Log and carry on to the next poll.
+            try:
+                self.reload()  # pick up config edits without a restart
+                self.run_once()
+                self._maybe_report()
+                self._maybe_gc()
+                self._maybe_integrity()
+                self._maybe_offsite()
+                self._maybe_rehearse()
+            except Exception:
+                log.exception("daemon tick failed; continuing")
             time.sleep(_POLL_SECONDS)
 
     def _install_sighup(self) -> None:
@@ -150,7 +156,13 @@ class Daemon:
             log.info("due: %s", ", ".join(d.qualified_name for d in due))
             self.runner.backup_devices(due)
             for device in due:
-                self.state[device.qualified_name] = now.isoformat()
+                # Cron devices are deduplicated by the "cron:<minute>" key
+                # that _due() already stamped; overwriting it with a
+                # timestamp here made them fire again on every poll within
+                # the same minute. Only interval devices track last-run as a
+                # timestamp.
+                if not is_cron(device.schedule):
+                    self.state[device.qualified_name] = now.isoformat()
             self._save_state()
         return len(due)
 
@@ -161,9 +173,16 @@ class Daemon:
         if not interval:
             return
         now = datetime.now(UTC)
+        try:
+            parsed = parse_interval(interval)
+        except ValueError as exc:
+            # A bad reports.interval must not kill the daemon (it isn't
+            # validated at config load); warn once per tick and skip.
+            log.warning("invalid reports.interval %r: %s", interval, exc)
+            return
         last = self.state.get("__report__")
         if last is not None:
-            due_at = datetime.fromisoformat(last) + parse_interval(interval)
+            due_at = datetime.fromisoformat(last) + parsed
             if now < due_at:
                 return
         try:

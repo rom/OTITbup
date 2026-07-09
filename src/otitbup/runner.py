@@ -31,16 +31,24 @@ from .runstore import RunRecord, RunStore, default_runstore
 from .secrets import SecretsBackend
 
 
-def default_blobstore(config: AppConfig) -> BlobStore:
-    """The blob store lives next to (not inside) the backup repo, and is
-    encrypted at rest when encryption.blob_key(_file) or OTITBUP_BLOB_KEY
-    is configured."""
+def resolve_blob_key(config: AppConfig) -> str | None:
+    """The blob-store encryption key, from OTITBUP_BLOB_KEY, else
+    encryption.blob_key, else the contents of encryption.blob_key_file."""
     import os
     enc = config.encryption or {}
     key = os.environ.get("OTITBUP_BLOB_KEY") or enc.get("blob_key")
     if not key and enc.get("blob_key_file"):
         key = Path(enc["blob_key_file"]).read_text().strip()
-    return BlobStore(Path(config.data_dir).parent / "blobs", key=key,
+    return key
+
+
+def default_blobstore(config: AppConfig) -> BlobStore:
+    """The blob store lives next to (not inside) the backup repo, and is
+    encrypted at rest when encryption.blob_key(_file) or OTITBUP_BLOB_KEY
+    is configured."""
+    enc = config.encryption or {}
+    return BlobStore(Path(config.data_dir).parent / "blobs",
+                     key=resolve_blob_key(config),
                      compress=bool(enc.get("compress", False)))
 
 

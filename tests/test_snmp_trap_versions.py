@@ -132,6 +132,22 @@ def test_v3_priv_trap_encrypts_scoped_pdu():
     assert b"backup.error" in plain
 
 
+def test_v3_priv_salt_is_unique_per_trap():
+    pytest.importorskip("cryptography")
+    v3 = {"engine_id": "8000270b0102", "username": "u",
+          "auth_protocol": "sha256", "auth_key": "auth-pass-123",
+          "priv_protocol": "aes128", "priv_key": "priv-pass-123"}
+    salts = set()
+    # Same request_id/uptime every time (as after a process restart): the
+    # privacy salt must still differ so the AES-CFB IV never repeats.
+    for _ in range(50):
+        dgram = build_snmpv3_trap(v3, OID, EVENT, request_id=1, uptime_ticks=1)
+        parts = _message_parts(dgram)
+        usm = _tlv_children(_tlv_children(parts[2][1])[0][1])
+        salts.add(usm[5][1])
+    assert len(salts) == 50
+
+
 def test_v3_priv_without_auth_rejected():
     with pytest.raises(ValueError):
         build_snmpv3_trap(

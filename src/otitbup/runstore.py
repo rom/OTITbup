@@ -11,6 +11,7 @@ Lives at <data_dir>/../runstore.db — next to, not inside, the git repo.
 from __future__ import annotations
 
 import sqlite3
+import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -118,6 +119,10 @@ class RunStore:
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        # Serialises the audit hash-chain read-modify-write within this
+        # process; a BEGIN IMMEDIATE transaction (see audit()) covers other
+        # processes/connections.
+        self._audit_lock = threading.Lock()
         self._migrate()
 
     def _migrate(self) -> None:
@@ -192,9 +197,6 @@ class RunStore:
                     break
                 status.consecutive_failures += 1
         return status
-
-    def all_status(self, devices: list[str]) -> dict[str, DeviceStatus]:
-        return {name: self.status(name) for name in devices}
 
     # ---------------------------------------------------- rehearsals
 
@@ -361,7 +363,15 @@ class RunStore:
         role: str | None = None, detail: str | None = None,
     ) -> None:
         import hashlib
-        with self._conn() as conn:
+        # The chain is a read-modify-write (read last hash, link to it,
+        # insert). Concurrent writers — the backup thread pool and the web
+        # server's handler threads — must not read the same predecessor and
+        # fork the chain, which verify_audit() would then report as
+        # tampering on a healthy system. The in-process lock serialises
+        # threads here; BEGIN IMMEDIATE takes SQLite's write lock up front so
+        # a second process/connection blocks until this insert commits.
+        with self._audit_lock, self._conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             prev = conn.execute(
                 "SELECT entry_hash FROM audit ORDER BY id DESC LIMIT 1"
             ).fetchone()

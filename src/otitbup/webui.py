@@ -28,433 +28,20 @@ import yaml
 
 from .gitstore import GitStore
 from .models import AppConfig, Device
+from .webui_settings_schema import (
+    _FIELD_HELP,
+    _SETTINGS_FORMS,
+    _SIZES,
+    _THEMES,
+    _form_id,
+)
+from .webui_style import _BRAND, _FAVICON_SVG, _FILTER_SCRIPT, _STYLE
 
 log = logging.getLogger("otitbup.webui")
 
 _COMMIT_RE = re.compile(r"^[0-9a-fA-F]{4,40}$")
 _HISTORY_LINE = re.compile(r"^(\w+)\s+(\S+ \S+ \S+)\s+(.*)$")
 
-_STYLE = """
-:root {
-  --bg: #eef1f6; --surface: #ffffff; --text: #10151c; --muted: #5b6672;
-  --border: #e4e9f0; --line: #eef2f7; --hover: #f3f6fb; --th-bg: #f7f9fc;
-  --field: #ffffff; --accent: #2563eb; --accent-ink: #1d4ed8;
-  --accent-soft: #e7efff; --teal: #0ea5a4;
-  --ok: #167a37; --ok-soft: #e6f4ea; --warn: #b26a00; --warn-soft: #fbf0dd;
-  --danger: #c02636; --danger-soft: #fdeaec; --danger-border: #f0c2c7;
-  --radius: 12px;
-  --shadow: 0 1px 2px rgba(16,24,40,.05), 0 12px 30px -18px rgba(16,24,40,.22);
-  --shadow-sm: 0 1px 2px rgba(16,24,40,.06);
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0d1015; --surface: #161b22; --text: #e6eaf0; --muted: #98a2ad;
-    --border: #262d37; --line: #20262f; --hover: #1c222b; --th-bg: #1a2029;
-    --field: #11151b; --accent: #6ea8fe; --accent-ink: #8bbcff;
-    --accent-soft: #1b2740; --teal: #2dd4bf;
-    --ok: #5cbd6c; --ok-soft: #16281a; --warn: #e0a54a; --warn-soft: #2e2413;
-    --danger: #f2848d; --danger-soft: #2f1a1d; --danger-border: #5a2a2f;
-    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 14px 34px -20px rgba(0,0,0,.75);
-    --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
-  }
-}
-/* Selectable colour themes (via <html data-theme>); these override the
-   OS-driven auto light/dark above. */
-:root[data-theme="light"] {
-  --bg:#eef1f6; --surface:#fff; --text:#10151c; --muted:#5b6672;
-  --border:#e4e9f0; --line:#eef2f7; --hover:#f3f6fb; --th-bg:#f7f9fc;
-  --field:#fff; --accent:#2563eb; --accent-ink:#1d4ed8; --accent-soft:#e7efff;
-  --teal:#0ea5a4; --ok:#167a37; --ok-soft:#e6f4ea; --warn:#b26a00;
-  --warn-soft:#fbf0dd; --danger:#c02636; --danger-soft:#fdeaec;
-  --danger-border:#f0c2c7;
-  --shadow:0 1px 2px rgba(16,24,40,.05),0 12px 30px -18px rgba(16,24,40,.22);
-  --shadow-sm:0 1px 2px rgba(16,24,40,.06);
-}
-:root[data-theme="dark"] {
-  --bg:#0d1015; --surface:#161b22; --text:#e6eaf0; --muted:#98a2ad;
-  --border:#262d37; --line:#20262f; --hover:#1c222b; --th-bg:#1a2029;
-  --field:#11151b; --accent:#6ea8fe; --accent-ink:#8bbcff;
-  --accent-soft:#1b2740; --teal:#2dd4bf; --ok:#5cbd6c; --ok-soft:#16281a;
-  --warn:#e0a54a; --warn-soft:#2e2413; --danger:#f2848d; --danger-soft:#2f1a1d;
-  --danger-border:#5a2a2f;
-  --shadow:0 1px 2px rgba(0,0,0,.3),0 14px 34px -20px rgba(0,0,0,.75);
-  --shadow-sm:0 1px 2px rgba(0,0,0,.4);
-}
-:root[data-theme="sky"] {
-  --bg:#e9f2fb; --surface:#fff; --text:#0f2233; --muted:#5a7085;
-  --border:#d3e3f2; --line:#e6f0f9; --hover:#eef6fd; --th-bg:#edf5fc;
-  --field:#fff; --accent:#0284c7; --accent-ink:#036ba1; --accent-soft:#d6ecfb;
-  --teal:#0891b2; --ok:#0f766e; --ok-soft:#d7f0ec; --warn:#b45309;
-  --warn-soft:#fbeddb; --danger:#be123c; --danger-soft:#fbe0e6;
-  --danger-border:#f3c2ce;
-  --shadow:0 1px 2px rgba(3,105,161,.08),0 14px 32px -18px rgba(3,105,161,.28);
-  --shadow-sm:0 1px 2px rgba(3,105,161,.1);
-}
-:root[data-theme="desert"] {
-  --bg:#f4ecdd; --surface:#fffdf7; --text:#3b2f1e; --muted:#8a7a5f;
-  --border:#e6d8c0; --line:#f0e7d5; --hover:#f7f0e2; --th-bg:#f6efe0;
-  --field:#fffdf7; --accent:#b45309; --accent-ink:#92400e;
-  --accent-soft:#f3e3cb; --teal:#a16207; --ok:#5f7d1f; --ok-soft:#eaf0d6;
-  --warn:#b7791f; --warn-soft:#f6ead0; --danger:#b23a2e; --danger-soft:#f6ddd7;
-  --danger-border:#e6c3ba;
-  --shadow:0 1px 2px rgba(120,80,20,.08),0 14px 32px -18px rgba(120,80,20,.3);
-  --shadow-sm:0 1px 2px rgba(120,80,20,.1);
-}
-:root[data-theme="autumn"] {
-  --bg:#1c1512; --surface:#271d18; --text:#f1e4d8; --muted:#b39d89;
-  --border:#3a2c23; --line:#31251d; --hover:#31251d; --th-bg:#2f2219;
-  --field:#1f1712; --accent:#ea7a3c; --accent-ink:#f2925c;
-  --accent-soft:#3a271a; --teal:#c98a2b; --ok:#8bbf5a; --ok-soft:#25301a;
-  --warn:#e0a54a; --warn-soft:#332616; --danger:#f0836f; --danger-soft:#331d18;
-  --danger-border:#5a2f26;
-  --shadow:0 1px 2px rgba(0,0,0,.35),0 14px 34px -20px rgba(0,0,0,.8);
-  --shadow-sm:0 1px 2px rgba(0,0,0,.45);
-}
-:root[data-theme="spring"] {
-  --bg:#eaf6ec; --surface:#fff; --text:#12271a; --muted:#5c7564;
-  --border:#d3e8d8; --line:#e6f2e9; --hover:#eef8f0; --th-bg:#edf7ef;
-  --field:#fff; --accent:#16a34a; --accent-ink:#15803d; --accent-soft:#d6f0dd;
-  --teal:#0d9488; --ok:#15803d; --ok-soft:#d8f0de; --warn:#a16207;
-  --warn-soft:#f3ecd0; --danger:#be123c; --danger-soft:#fbe0e6;
-  --danger-border:#f0c2cd;
-  --shadow:0 1px 2px rgba(16,90,40,.08),0 14px 32px -18px rgba(16,90,40,.26);
-  --shadow-sm:0 1px 2px rgba(16,90,40,.1);
-}
-/* High contrast: black/white/yellow, maximal separation, no soft shadows. */
-:root[data-theme="high-contrast"] {
-  --bg:#000; --surface:#000; --text:#fff; --muted:#e6e6e6;
-  --border:#fff; --line:#767676; --hover:#1f1f1f; --th-bg:#0a0a0a;
-  --field:#000; --accent:#ffd500; --accent-ink:#ffd500;
-  --accent-soft:#3d3300; --teal:#00e5e5; --ok:#00e676; --ok-soft:#003317;
-  --warn:#ffb000; --warn-soft:#332200; --danger:#ff5252;
-  --danger-soft:#330a0a; --danger-border:#ff5252;
-  --shadow:none; --shadow-sm:none;
-}
-:root[data-theme="high-contrast"] a { text-decoration: underline; }
-:root[data-theme="solarized"] {
-  --bg:#fdf6e3; --surface:#fefbf0; --text:#073642; --muted:#657b83;
-  --border:#e6dfc8; --line:#eee8d5; --hover:#f5efdc; --th-bg:#eee8d5;
-  --field:#fefbf0; --accent:#268bd2; --accent-ink:#1a6ba3;
-  --accent-soft:#dcebf5; --teal:#2aa198; --ok:#617900; --ok-soft:#eef0d5;
-  --warn:#8f6c00; --warn-soft:#f3ead0; --danger:#dc322f;
-  --danger-soft:#f9e0dd; --danger-border:#efc0ba;
-  --shadow:0 1px 2px rgba(101,123,131,.1),0 14px 32px -18px rgba(101,123,131,.3);
-  --shadow-sm:0 1px 2px rgba(101,123,131,.12);
-}
-:root[data-theme="nord"] {
-  --bg:#2e3440; --surface:#3b4252; --text:#eceff4; --muted:#aeb6c5;
-  --border:#4c566a; --line:#434c5e; --hover:#434c5e; --th-bg:#3f4759;
-  --field:#333947; --accent:#88c0d0; --accent-ink:#9fd2e0;
-  --accent-soft:#39505b; --teal:#8fbcbb; --ok:#a3be8c; --ok-soft:#384233;
-  --warn:#ebcb8b; --warn-soft:#464030; --danger:#e08790;
-  --danger-soft:#46333a; --danger-border:#7a4a52;
-  --shadow:0 1px 2px rgba(0,0,0,.3),0 14px 34px -20px rgba(0,0,0,.7);
-  --shadow-sm:0 1px 2px rgba(0,0,0,.35);
-}
-:root[data-theme="dracula"] {
-  --bg:#22232e; --surface:#282a36; --text:#f8f8f2; --muted:#a8b1d1;
-  --border:#44475a; --line:#3a3d4d; --hover:#343747; --th-bg:#2f3140;
-  --field:#22232e; --accent:#bd93f9; --accent-ink:#cfaefc;
-  --accent-soft:#3b3355; --teal:#8be9fd; --ok:#69e788; --ok-soft:#24382b;
-  --warn:#f5c169; --warn-soft:#3d3423; --danger:#ff7b7b;
-  --danger-soft:#3d2626; --danger-border:#6d3a3a;
-  --shadow:0 1px 2px rgba(0,0,0,.35),0 14px 34px -20px rgba(0,0,0,.75);
-  --shadow-sm:0 1px 2px rgba(0,0,0,.4);
-}
-:root[data-theme="gruvbox"] {
-  --bg:#282828; --surface:#32302f; --text:#ebdbb2; --muted:#b3a488;
-  --border:#504945; --line:#3c3836; --hover:#3c3836; --th-bg:#373432;
-  --field:#2b2928; --accent:#83a598; --accent-ink:#9dbaad;
-  --accent-soft:#37413d; --teal:#8ec07c; --ok:#b8bb26; --ok-soft:#37391a;
-  --warn:#fabd2f; --warn-soft:#403513; --danger:#fb6a5a;
-  --danger-soft:#402420; --danger-border:#6d3a32;
-  --shadow:0 1px 2px rgba(0,0,0,.35),0 14px 34px -20px rgba(0,0,0,.7);
-  --shadow-sm:0 1px 2px rgba(0,0,0,.4);
-}
-/* WCAG: light theme with every text/background pair at or above the
-   WCAG 2.1 AA 4.5:1 contrast ratio, always-underlined links, and strong
-   visible focus (see the focus-visible rule below). */
-:root[data-theme="wcag"] {
-  --bg:#ffffff; --surface:#ffffff; --text:#1a1a1a; --muted:#595959;
-  --border:#767676; --line:#c8c8c8; --hover:#eef2f7; --th-bg:#f2f2f2;
-  --field:#ffffff; --accent:#005a9c; --accent-ink:#00457a;
-  --accent-soft:#d9e8f5; --teal:#00615e; --ok:#1e6f30; --ok-soft:#e2f2e6;
-  --warn:#8a5300; --warn-soft:#f7ecd9; --danger:#a11326;
-  --danger-soft:#f9e2e5; --danger-border:#a11326;
-  --shadow:none; --shadow-sm:none;
-}
-:root[data-theme="wcag"] a { text-decoration: underline; }
-/* Text-size preference (web UI settings): scales every rem-based size. */
-:root[data-size="small"] { font-size: 87.5%; }
-:root[data-size="large"] { font-size: 115%; }
-:root[data-size="x-large"] { font-size: 132%; }
-/* WCAG support mode (web UI settings): visible focus, underlined links,
-   independent of the chosen colour theme. */
-:root[data-wcag] a { text-decoration: underline; }
-:root[data-wcag] *:focus-visible,
-:root[data-theme="wcag"] *:focus-visible,
-:root[data-theme="high-contrast"] *:focus-visible {
-  outline: 3px solid var(--accent); outline-offset: 2px;
-}
-* { box-sizing: border-box; }
-body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-       margin: 0; color: var(--text); background: var(--bg);
-       -webkit-font-smoothing: antialiased; line-height: 1.5; }
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
-
-/* App bar */
-.appbar { position: sticky; top: 0; z-index: 30; background: var(--surface);
-          border-bottom: 1px solid var(--border); box-shadow: var(--shadow-sm); }
-.bar { max-width: 80rem; margin: 0 auto; padding: .55rem 1.25rem;
-       display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
-h1 { font-size: 1.2rem; margin: 0; }
-h1 a { color: inherit; text-decoration: none; }
-.brand { display: inline-flex; align-items: center; gap: .55rem;
-         text-decoration: none; }
-.brand .mark { display: block; border-radius: 8px; flex: none;
-     box-shadow: 0 1px 3px rgba(15,30,60,.28); }
-.brand:hover { text-decoration: none; }
-.wm { font-size: 1.3rem; font-weight: 800; letter-spacing: -.02em;
-      color: var(--text); }
-.wm .ot { color: var(--teal); } .wm .it { color: var(--accent); }
-nav { display: flex; flex-wrap: wrap; gap: .12rem; margin-left: auto; }
-nav a { padding: .34rem .6rem; border-radius: 8px; color: var(--muted);
-        font-size: .855rem; font-weight: 500; white-space: nowrap; }
-nav a:hover { background: var(--hover); color: var(--text);
-              text-decoration: none; }
-nav a.active { background: var(--accent-soft); color: var(--accent-ink);
-               font-weight: 600; }
-/* Dropdown menu group (Logs) — CSS-only, opens on hover or keyboard focus */
-.nav-group { position: relative; }
-.nav-top { display: inline-block; padding: .34rem .6rem; border-radius: 8px;
-       color: var(--muted); font-size: .855rem; font-weight: 500;
-       white-space: nowrap; cursor: default; user-select: none; }
-.nav-top::after { content: ''; }
-.nav-group:hover .nav-top, .nav-group:focus-within .nav-top {
-       background: var(--hover); color: var(--text); }
-.nav-top.active { background: var(--accent-soft); color: var(--accent-ink);
-       font-weight: 600; }
-.nav-drop { position: absolute; top: 100%; left: 0; min-width: 11rem;
-       margin-top: .2rem; padding: .3rem; background: var(--surface);
-       border: 1px solid var(--border); border-radius: 10px;
-       box-shadow: var(--shadow); z-index: 40; display: none;
-       flex-direction: column; gap: .08rem; }
-.nav-group:hover .nav-drop, .nav-group:focus-within .nav-drop {
-       display: flex; }
-.nav-drop a { display: block; }
-.who { display: inline-flex; align-items: center; gap: .35rem;
-       color: var(--muted); font-size: .8rem; padding-left: .7rem;
-       margin-left: .2rem; border-left: 1px solid var(--border);
-       white-space: nowrap; }
-.who b { color: var(--text); font-weight: 600; }
-.theme-pick { margin-left: .4rem; padding: .22rem 1.3rem .22rem .5rem;
-       font-size: .78rem; border: 1px solid var(--border); border-radius: 999px;
-       background: var(--surface); color: var(--muted); cursor: pointer;
-       text-transform: capitalize; }
-.theme-pick:hover { color: var(--text); }
-.who .role { font-size: .68rem; text-transform: uppercase; letter-spacing: .04em;
-       background: var(--accent-soft); color: var(--accent-ink);
-       padding: .05rem .4rem; border-radius: 999px; font-weight: 600; }
-
-/* Content surface */
-main { max-width: 80rem; margin: 1.5rem auto; padding: 1.6rem 1.9rem;
-       background: var(--surface); border: 1px solid var(--border);
-       border-radius: var(--radius); box-shadow: var(--shadow); }
-main > :first-child { margin-top: 0; }
-h2 { font-size: 1.2rem; font-weight: 700; letter-spacing: -.01em;
-     margin: 1.8rem 0 .8rem; }
-h3 { font-size: .98rem; font-weight: 650; margin: 1.4rem 0 .6rem; }
-p { margin: .6rem 0; }
-
-/* Tables */
-table { border-collapse: separate; border-spacing: 0; width: 100%;
-        border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
-        margin: .6rem 0 1.3rem; font-size: .885rem; }
-th, td { text-align: left; padding: .55rem .8rem;
-         border-bottom: 1px solid var(--line); }
-th { background: var(--th-bg); font-size: .72rem; font-weight: 600;
-     text-transform: uppercase; letter-spacing: .045em; color: var(--muted); }
-tbody tr:hover td, tr:hover td { background: var(--hover); }
-tr:last-child td { border-bottom: none; }
-
-pre { background: var(--th-bg); border: 1px solid var(--border);
-      border-radius: 10px; padding: 1rem; overflow-x: auto; font-size: .84rem;
-      line-height: 1.5; }
-code { font-size: .85em; font-family: ui-monospace, SFMono-Regular, Menlo,
-       monospace; }
-
-/* Controls */
-button, input, select, textarea { font: inherit; }
-button { font-size: .855rem; font-weight: 600; padding: .42rem .85rem;
-         border: 1px solid var(--border); border-radius: 8px;
-         background: var(--surface); color: var(--text); cursor: pointer;
-         transition: background .12s, filter .12s; }
-button:hover { background: var(--hover); }
-button[type=submit] { background: var(--accent); border-color: var(--accent);
-         color: #fff; }
-button[type=submit]:hover { filter: brightness(1.07); background: var(--accent); }
-button.danger, button[formaction*="delete"] { background: var(--surface);
-         color: var(--danger); border-color: var(--danger-border); }
-button.danger:hover, button[formaction*="delete"]:hover {
-         background: var(--danger-soft); filter: none; }
-input, select, textarea { padding: .42rem .55rem; border: 1px solid var(--border);
-         border-radius: 8px; background: var(--field); color: var(--text); }
-input:focus, select:focus, textarea:focus { outline: none;
-         border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-
-/* Badges & status */
-.badge { font-size: .72rem; font-weight: 600; padding: .12rem .55rem;
-         border-radius: 999px; background: var(--ok-soft); color: var(--ok);
-         white-space: nowrap; }
-.badge.never { background: var(--danger-soft); color: var(--danger); }
-.muted { color: var(--muted); font-size: .85rem; }
-.sev-critical, .sev-high { color: var(--danger); font-weight: 600; }
-.sev-medium { color: var(--warn); } .sev-low { color: var(--muted); }
-/* Event-log (syslog-style) severities */
-.sev-emergency, .sev-alert, .sev-error { color: var(--danger);
-       font-weight: 600; }
-.sev-warning { color: var(--warn); font-weight: 600; }
-.sev-notice { color: var(--accent-ink); }
-.sev-info, .sev-debug { color: var(--muted); }
-tr.evt-error > td, tr.evt-critical > td, tr.evt-alert > td,
-tr.evt-emergency > td { background: var(--danger-soft); }
-tr.evt-warning > td { background: var(--warn-soft, var(--accent-soft)); }
-.ok { color: var(--ok); } .miss { color: var(--danger); }
-.strat { font-size: 1.02rem; padding: .3rem 0; }
-
-/* Stat tiles */
-.tiles { display: flex; gap: .9rem; flex-wrap: wrap; margin: 1rem 0 1.5rem; }
-.tile { background: var(--surface); border: 1px solid var(--border);
-        border-radius: 12px; padding: .85rem 1.15rem; min-width: 8.5rem;
-        box-shadow: var(--shadow-sm); }
-.tile b { display: block; font-size: 1.7rem; font-weight: 700;
-          letter-spacing: -.02em; }
-.tile span { font-size: .72rem; text-transform: uppercase;
-             letter-spacing: .045em; color: var(--muted); font-weight: 600; }
-
-#filter { margin: 0 0 1rem; padding: .5rem .75rem; width: 22rem;
-          max-width: 100%; }
-
-.zone-head td { background: var(--th-bg); font-weight: 700; font-size: .74rem;
-                text-transform: uppercase; letter-spacing: .045em;
-                color: var(--muted); }
-
-/* Help tooltip */
-.help { position: relative; display: inline-flex; align-items: center;
-        justify-content: center; cursor: help; width: 16px; height: 16px;
-        border-radius: 50%; background: var(--border); color: var(--muted);
-        font-size: 11px; font-weight: 700; margin-left: .3rem; }
-.help .pop { visibility: hidden; opacity: 0; position: absolute; z-index: 40;
-        left: 50%; transform: translateX(-50%); bottom: 150%; width: 15rem;
-        background: #10151c; color: #f0f3f6; padding: .5rem .7rem;
-        border-radius: 8px; font-size: .8rem; font-weight: normal;
-        line-height: 1.45; text-align: left; transition: opacity .1s;
-        box-shadow: 0 6px 20px rgba(0,0,0,.35); }
-.help:hover .pop, .help:focus .pop { visibility: visible; opacity: 1; }
-/* Expandable per-setting help in the config editor */
-button.help-btn { width: 18px; height: 18px; padding: 0; border: none;
-        border-radius: 50%; background: var(--border); color: var(--muted);
-        font-size: 11px; font-weight: 700; line-height: 1; cursor: pointer;
-        margin-left: .35rem; vertical-align: middle; }
-button.help-btn:hover, button.help-btn[aria-expanded="true"] {
-        background: var(--accent-soft); color: var(--accent-ink); }
-tr.cfg-help td { color: var(--muted); font-size: .8rem;
-        padding: 0 .5rem .5rem; }
-
-/* Config editor */
-details { margin: .4rem 0; border: 1px solid var(--border); border-radius: 10px;
-          padding: .3rem .8rem; background: var(--surface); }
-details[open] { box-shadow: var(--shadow-sm); }
-summary { cursor: pointer; padding: .4rem .1rem; font-weight: 600;
-          font-size: .9rem; }
-details table.cfg { border: none; margin: .4rem 0; }
-table.cfg td { border: none; padding: .25rem .5rem; }
-table.cfg input { width: 22rem; max-width: 100%; }
-.cfg-inline { display: flex; flex-wrap: wrap; gap: .55rem; align-items: end;
-        margin: .5rem 0; padding: .7rem .8rem; border: 1px solid var(--border);
-        border-radius: 10px; background: var(--th-bg); }
-label.inl { display: flex; flex-direction: column; gap: .2rem; font-size: .68rem;
-        color: var(--muted); text-transform: uppercase; letter-spacing: .04em;
-        font-weight: 600; }
-label.inl input, label.inl select { width: 8.5rem; font-size: .85rem;
-        padding: .35rem .45rem; text-transform: none; letter-spacing: normal;
-        font-weight: 400; }
-
-/* Login page (no app chrome) */
-.login-wrap { min-height: 100vh; display: flex; align-items: center;
-        justify-content: center; padding: 1.5rem; }
-.login-card { width: 100%; max-width: 22rem; background: var(--surface);
-        border: 1px solid var(--border); border-radius: 16px;
-        box-shadow: var(--shadow); padding: 2rem 1.9rem; }
-.login-card .brand { justify-content: center; margin-bottom: 1.1rem; }
-.login-card h2 { text-align: center; margin: 0 0 1.2rem; font-size: 1.3rem; }
-.login-card form { display: flex; flex-direction: column; gap: .7rem; }
-.login-card input { width: 100%; padding: .6rem .7rem; font-size: .95rem; }
-.login-card button { width: 100%; padding: .6rem; font-size: .95rem;
-        margin-top: .3rem; }
-.login-card p { margin: 0; }
-
-/* In-app docs */
-.doc { line-height: 1.65; max-width: 52rem; }
-.doc h1 { display: block; font-size: 1.6rem; margin: .2rem 0 1rem; }
-.doc h2 { border-bottom: 1px solid var(--border); padding-bottom: .3rem; }
-.doc blockquote { border-left: 3px solid var(--accent); margin: .9rem 0;
-        padding: .3rem 0 .3rem 1rem; color: var(--muted); }
-.doc li { margin: .25rem 0; } .doc table { margin: 1rem 0; }
-.doc pre { background: var(--th-bg); }
-
-@media (max-width: 640px) {
-  .bar { padding: .5rem .9rem; }
-  main { margin: .9rem .6rem; padding: 1.1rem 1rem; border-radius: 10px; }
-  nav { margin-left: 0; width: 100%; }
-}
-"""
-
-# Brand mark: a git-commit graph (three commits on a spine plus a branch) on
-# a teal→blue badge — "versioned backups" for a git-backed backup tool. The
-# same artwork is the SVG favicon. Scales cleanly from 16px to any size.
-def _logo_mark(size: int = 30) -> str:
-    return (
-        f"<svg class='mark' viewBox='0 0 32 32' width='{size}' height='{size}' "
-        "role='img' aria-label='otitbup' xmlns='http://www.w3.org/2000/svg'>"
-        "<defs><linearGradient id='obG' x1='0' y1='0' x2='1' y2='1'>"
-        "<stop offset='0' stop-color='#12b8a6'/>"
-        "<stop offset='1' stop-color='#1f63d8'/></linearGradient></defs>"
-        "<rect x='1' y='1' width='30' height='30' rx='8' fill='url(#obG)'/>"
-        "<rect x='1' y='1' width='30' height='15' rx='8' fill='#fff' "
-        "opacity='.08'/>"
-        "<g fill='none' stroke='#fff' stroke-width='2.2' stroke-linecap='round'>"
-        "<path d='M10.5 6.5 V 25.5'/>"
-        "<path d='M10.5 16 C 10.5 11 16 9.5 21.5 9.5'/></g>"
-        "<g fill='#fff'>"
-        "<circle cx='10.5' cy='6.5' r='2.8'/>"
-        "<circle cx='10.5' cy='16' r='2.8'/>"
-        "<circle cx='10.5' cy='25.5' r='2.8'/>"
-        "<circle cx='21.5' cy='9.5' r='2.8'/></g></svg>"
-    )
-
-
-_FAVICON_SVG = _logo_mark(32).encode()
-
-_BRAND = (
-    f"<a class='brand' href='/'>{_logo_mark(30)}"
-    "<span class='wm'><span class='ot'>ot</span><span class='it'>it</span>"
-    "bup</span></a>"
-)
-
-
-_FILTER_SCRIPT = """
-<script>
-document.getElementById('filter').addEventListener('input', function () {
-  var needle = this.value.toLowerCase();
-  document.querySelectorAll('tr[data-row]').forEach(function (row) {
-    row.style.display =
-      row.textContent.toLowerCase().indexOf(needle) >= 0 ? '' : 'none';
-  });
-});
-</script>
-"""
 
 
 # Per-request context (each request runs in its own thread) so _page can
@@ -607,451 +194,6 @@ def _device_link_name(qualified_name: str) -> str:
 
 def _csrf(token: str) -> str:
     return f"<input type='hidden' name='csrf' value='{html.escape(token)}'>"
-
-
-# Admin-editable global config sections. Each field is
-# (dotted-path-within-section, label, type). type: str | int | bool.
-# Selectable colour themes for the web UI (applied via <html data-theme>).
-_THEMES = ("auto", "light", "dark", "high-contrast", "solarized", "nord",
-           "dracula", "gruvbox", "wcag", "sky", "desert", "autumn", "spring")
-
-# Text-size preference (applied via <html data-size>).
-_SIZES = ("small", "medium", "large", "x-large")
-
-# Admin-editable global config. Each field is
-# (dotted-path, label, type, example) where type is
-# str | int | float | bool | csv | "choice:a|b|c", and example is the
-# placeholder / default shown in an empty field (or the default choice).
-# `id` disambiguates two forms that write the same config section.
-_SETTINGS_FORMS = [
-    {"section": "offsite", "title": "Offsite copy (external server / cloud)",
-     "fields": [
-         ("transport", "Transport", "choice:file|sftp|s3", "s3"),
-         ("interval_days", "Auto-push every N days (0=off)", "float", "1"),
-         ("key_file", "Encryption key file", "str", "/etc/otitbup/offsite.key"),
-         ("dir", "file: directory / mount", "str", "/mnt/offsite/otitbup"),
-         ("host", "sftp: host", "str", "backup.example.com"),
-         ("port", "sftp: port", "int", "22"),
-         ("username", "sftp: username", "str", "otitbup"),
-         ("ssh_key_file", "sftp: SSH key file", "str",
-          "/etc/otitbup/id_ed25519"),
-         ("path", "sftp: remote path", "str", "/srv/otitbup"),
-         ("bucket", "s3: bucket", "str", "ot-backups"),
-         ("prefix", "s3: prefix", "str", "otitbup/"),
-         ("region", "s3: region", "str", "eu-central-1"),
-         ("endpoint", "s3: endpoint", "str",
-          "https://s3.eu-central-1.amazonaws.com"),
-         ("access_key", "s3: access key", "str", "AKIA..."),
-         ("secret_key_file", "s3: secret key file", "str",
-          "/etc/otitbup/s3.secret"),
-     ]},
-    {"id": "webui", "section": "webui", "title": "Web UI",
-     "fields": [
-         ("host", "Bind host", "str", "127.0.0.1"),
-         ("port", "Bind port", "int", "8080"),
-         ("theme", "Default colour theme (per-user overrides)",
-          "choice:" + "|".join(_THEMES), "auto"),
-         ("tls.cert_file", "TLS certificate file", "str", "webui-cert.pem"),
-         ("tls.key_file", "TLS key file", "str", "webui-key.pem"),
-     ]},
-    {"id": "sso", "section": "webui", "title": "Single sign-on (SSO)",
-     "fields": [
-         ("trusted_header", "Trusted user header (from auth proxy)", "str",
-          "X-Forwarded-User"),
-         ("trusted_role_header", "Trusted role header", "str",
-          "X-Forwarded-Role"),
-         ("trusted_default_role", "Default role for SSO users",
-          "choice:viewer|operator|admin", "viewer"),
-     ]},
-    {"section": "ldap", "title": "LDAP / Active Directory login (SSO)",
-     "fields": [
-         ("url", "LDAP URL", "str", "ldaps://dc.example.com"),
-         ("user_dn_template", "User DN template", "str",
-          "uid={username},ou=people,dc=example,dc=com"),
-         ("group_base", "Group search base", "str",
-          "ou=groups,dc=example,dc=com"),
-         ("default_role", "Default role", "choice:viewer|operator|admin",
-          "viewer"),
-     ]},
-    {"section": "events", "title": "Events (syslog / SNMP traps)",
-     "fields": [
-         ("syslog.address", "syslog address", "str", "10.0.0.1"),
-         ("syslog.port", "syslog port", "int", "514"),
-         ("syslog.protocol", "syslog transport", "choice:udp|tcp|tls", "udp"),
-         ("syslog.facility", "syslog facility", "str", "local0"),
-         ("syslog.cafile", "syslog TLS CA bundle (tls only)", "str",
-          "/etc/ssl/certs/ca-bundle.crt"),
-         ("snmp_trap.address", "SNMP trap address", "str", "10.0.0.2"),
-         ("snmp_trap.port", "SNMP trap port", "int", "162"),
-         ("snmp_trap.version", "SNMP trap version", "choice:v1|v2c|v3",
-          "v2c"),
-         ("snmp_trap.community", "SNMP community (v1/v2c)", "str", "public"),
-         ("snmp_trap.enterprise_oid", "enterprise OID", "str",
-          "1.3.6.1.4.1.99999"),
-         ("snmp_trap.v3.engine_id", "v3: engine id (hex)", "str",
-          "8000270b0102030405"),
-         ("snmp_trap.v3.username", "v3: username", "str", "otitbup"),
-         ("snmp_trap.v3.auth_protocol", "v3: auth protocol",
-          "choice:none|md5|sha1|sha256", "sha256"),
-         ("snmp_trap.v3.auth_key_file", "v3: auth passphrase file", "str",
-          "/etc/otitbup/snmpv3.auth"),
-         ("snmp_trap.v3.priv_protocol", "v3: privacy protocol",
-          "choice:none|aes128", "none"),
-         ("snmp_trap.v3.priv_key_file", "v3: privacy passphrase file", "str",
-          "/etc/otitbup/snmpv3.priv"),
-     ]},
-    {"section": "logging", "title": "Logging",
-     "fields": [
-         ("level", "Level", "choice:debug|info|warning|error", "info"),
-         ("format", "Format", "choice:text|json", "text"),
-         ("file", "Log file (rotates)", "str",
-          "/var/log/otitbup/otitbup.log"),
-         ("max_bytes", "Max bytes", "int", "10485760"),
-         ("backups", "Rotations kept", "int", "5"),
-     ]},
-    {"section": "netbox", "title": "Integration: NetBox",
-     "fields": [("url", "URL", "str", "https://netbox.example.com"),
-                ("token", "API token", "str", "0123456789abcdef")]},
-    {"section": "tickets", "title": "Integration: ticketing",
-     "fields": [
-         ("backend", "Backend", "choice:servicenow|jira|rt|generic",
-          "servicenow"),
-         ("url", "URL", "str", "https://example.service-now.com"),
-         ("username", "Username", "str", "svc-otitbup"),
-         ("password", "Password / API token", "str", ""),
-     ]},
-    {"section": "encryption", "title": "Encryption at rest",
-     "fields": [
-         ("blob_key_file", "Blob-store key file", "str",
-          "/etc/otitbup/blob.key"),
-         ("compress", "Compress blobs before encrypting", "bool", ""),
-     ]},
-    {"section": "capture", "title": "Capture-quality guards",
-     "fields": [
-         ("min_bytes", "Reject captures smaller than (bytes)", "int", "512"),
-         ("expect_match", "Required content (regex)", "str", "hostname"),
-     ]},
-    {"section": "integrity", "title": "Integrity scrubbing",
-     "fields": [
-         ("interval_days", "Scrub every N days (0=off)", "float", "7"),
-         ("all_commits", "Verify whole history", "bool", ""),
-         ("fsck", "Run git fsck", "bool", ""),
-         ("signatures", "Verify commit signatures", "bool", ""),
-     ]},
-    {"section": "rehearsal", "title": "Scheduled restore rehearsals",
-     "fields": [("interval_days", "Rehearse every N days (0=off)", "float",
-                 "30")]},
-    {"section": "git", "title": "Git remote & signed history",
-     "fields": [
-         ("remote", "Push remote", "str",
-          "git@gitlab.example.com:ot/backups.git"),
-         ("push", "Push after each backup", "bool", ""),
-         ("sign.key_file", "Commit signing key (SSH)", "str",
-          "/etc/otitbup/commit-signing-key"),
-     ]},
-    {"section": "secrets", "title": "Secrets backend",
-     "fields": [
-         ("backend", "Backend",
-          "choice:plainfile|encryptedfile|vault|cyberark", "encryptedfile"),
-         ("path", "File path", "str", "secrets.yml"),
-         ("key_file", "Encryption key file", "str", "otitbup.key"),
-         ("url", "Vault/CyberArk URL", "str", "https://vault.example:8200"),
-         ("mount", "Vault mount", "str", "secret"),
-         ("token_file", "Vault token file", "str", "vault.token"),
-     ]},
-    {"section": "retention", "title": "Retention (global defaults)",
-     "fields": [
-         ("keep_versions", "Keep newest N backups", "int", "30"),
-         ("keep_days", "Keep backups newer than N days", "int", "365"),
-         ("large_file_threshold", "Blob offload threshold (bytes)", "int",
-          "1048576"),
-         ("lock_days", "Retention lock: keep last N days (WORM)", "int", "90"),
-     ]},
-    {"section": "alerts", "title": "Alerts",
-     "fields": [
-         ("stale_days", "Stale after N days (0=off)", "int", "7"),
-         ("min_interval", "Rate-limit window (s)", "int", "3600"),
-         ("webhooks", "Webhook URLs (comma-separated)", "csv",
-          "https://chat.example.com/hook"),
-         ("email.smtp_host", "SMTP host", "str", "mail.example.com"),
-         ("email.from", "From address", "str", "otitbup@example.com"),
-         ("email.to", "Recipients (comma-separated)", "csv",
-          "ot-team@example.com"),
-     ]},
-    {"section": "retry", "title": "Retry on transient failures",
-     "fields": [
-         ("attempts", "Attempts per device (1=no retry)", "int", "3"),
-         ("backoff", "Backoff seconds (doubles each retry)", "float", "2.0"),
-     ]},
-    {"section": "hooks", "title": "Pre/post hooks (global)",
-     "fields": [
-         ("pre", "Pre-backup shell command", "str",
-          "/usr/local/bin/notify start $OTITBUP_DEVICE"),
-         ("post", "Post-backup shell command", "str",
-          "/usr/local/bin/notify done $OTITBUP_DEVICE $OTITBUP_OK"),
-     ]},
-    {"section": "anomaly", "title": "Anomaly detection",
-     "fields": [
-         ("enabled", "Enabled", "bool", ""),
-         ("sigma", "Duration z-score threshold", "float", "3.0"),
-         ("duration_floor", "Ignore runs faster than (s)", "float", "5.0"),
-         ("change_window", "Change-storm window", "int", "5"),
-         ("change_recent", "Recent change-rate trigger", "float", "0.8"),
-         ("change_baseline", "Max baseline change-rate", "float", "0.2"),
-         ("flap_window", "Flapping window", "int", "6"),
-         ("flap_transitions", "Flapping transitions", "int", "3"),
-         ("trend_window", "Slow-trend window", "int", "5"),
-         ("trend_ratio", "Slow-trend multiplier", "float", "2.0"),
-         ("size_drop", "Size-drop fraction of median", "float", "0.5"),
-     ]},
-    {"section": "policy", "title": "Policy (config compliance rules)",
-     "fields": [
-         ("disable", "Disabled rule ids (comma-separated)", "csv",
-          "no-snmpv1v2, no-http-server"),
-     ]},
-    {"section": "housekeeping", "title": "Git housekeeping",
-     "fields": [
-         ("gc_interval_days", "git gc every N days (0=off)", "int", "7"),
-         ("gc_aggressive", "Aggressive gc", "bool", ""),
-     ]},
-    {"section": "desired", "title": "Config-as-code (desired state)",
-     "fields": [
-         ("dir", "Desired-config directory", "str", "./desired"),
-         ("strip_trailing_ws", "Ignore trailing whitespace", "bool", ""),
-     ]},
-    {"section": "reports", "title": "Scheduled compliance reports",
-     "fields": [
-         ("interval", "Interval (e.g. 7d; empty=off)", "str", "7d"),
-         ("period_days", "Report period (days)", "int", "30"),
-         ("out", "Output path", "str", "compliance-report.html"),
-     ]},
-    {"section": "strategy", "title": "3-2-1 strategy",
-     "fields": [
-         ("offsite", "Git remote is genuinely off-site", "bool", ""),
-         ("offline.path", "Offline export path", "str",
-          "/mnt/usb/otitbup-export.tar.gz"),
-         ("offline.max_age_days", "Offline max age (days)", "int", "7"),
-     ]},
-    {"section": "federation", "title": "Federation (central roll-up)",
-     "fields": [("role", "Role", "str", "central")]},
-]
-
-
-# Context help for the config editor: (form id, dotted field) -> what the
-# setting does, expanded by the per-setting "?" button. Fields without an
-# entry get a generated pointer to the Configuration reference.
-_FIELD_HELP = {
-    ("offsite", "transport"): "How the encrypted offsite snapshot leaves the "
-        "appliance: a local/mounted directory (file), SFTP to a remote "
-        "server, or an S3-compatible object store.",
-    ("offsite", "interval_days"): "The daemon pushes a fresh encrypted "
-        "snapshot every N days. 0 disables automatic pushes; `otitbup "
-        "offsite push` still works manually.",
-    ("offsite", "key_file"): "Fernet key used to encrypt snapshots before "
-        "they leave the appliance. Generate with `otitbup offsite genkey`. "
-        "Keep a copy off-appliance — without it snapshots are unreadable.",
-    ("offsite", "dir"): "Target directory for the `file` transport, e.g. a "
-        "mounted NAS/USB path.",
-    ("offsite", "host"): "SFTP server hostname or IP (sftp transport).",
-    ("offsite", "port"): "SFTP server TCP port, usually 22.",
-    ("offsite", "username"): "SFTP login user on the remote server.",
-    ("offsite", "ssh_key_file"): "Private SSH key used for the SFTP login "
-        "(password auth is deliberately unsupported for unattended pushes).",
-    ("offsite", "path"): "Remote directory on the SFTP server where "
-        "snapshots are stored.",
-    ("offsite", "bucket"): "S3 bucket name (s3 transport).",
-    ("offsite", "prefix"): "Key prefix inside the bucket, so several "
-        "appliances can share one bucket.",
-    ("offsite", "region"): "AWS/S3 region of the bucket.",
-    ("offsite", "endpoint"): "S3 endpoint URL — set for MinIO/Ceph or "
-        "region-specific endpoints.",
-    ("offsite", "access_key"): "S3 access key id. The paired secret key "
-        "lives in a file (next field), never in this config.",
-    ("offsite", "secret_key_file"): "File containing the S3 secret key "
-        "(mode 0600). Kept out of the YAML so the config can live in git.",
-    ("webui", "host"): "Interface the web UI binds to. Keep 127.0.0.1 "
-        "behind a reverse proxy; 0.0.0.0 exposes it on every interface.",
-    ("webui", "port"): "TCP port for the web UI.",
-    ("webui", "theme"): "Default colour theme for everyone. Each user can "
-        "override it for themselves under Administration → Web UI settings.",
-    ("webui", "tls.cert_file"): "PEM certificate chain for HTTPS. Create a "
-        "self-signed pair with `otitbup certgen`.",
-    ("webui", "tls.key_file"): "PEM private key matching the certificate.",
-    ("sso", "trusted_header"): "Header carrying the already-authenticated "
-        "username from your OIDC/SAML reverse proxy. Only enable when the "
-        "proxy strips this header from client requests.",
-    ("sso", "trusted_role_header"): "Optional header carrying the user's "
-        "role from the auth proxy.",
-    ("sso", "trusted_default_role"): "Role given to SSO users when no role "
-        "header is present.",
-    ("ldap", "url"): "LDAP/AD server URL; ldaps:// for TLS.",
-    ("ldap", "user_dn_template"): "Template used to build the bind DN from "
-        "the login name; {username} is substituted.",
-    ("ldap", "group_base"): "Search base for group lookups used in role "
-        "mapping.",
-    ("ldap", "default_role"): "Role for LDAP users that match no group "
-        "mapping.",
-    ("events", "syslog.address"): "Syslog collector (SIEM) address; every "
-        "operational event is forwarded there.",
-    ("events", "syslog.port"): "Syslog port — 514 for UDP/TCP, commonly "
-        "6514 for TLS.",
-    ("events", "syslog.protocol"): "udp (fire-and-forget), tcp, or tls "
-        "(RFC 5425, verified against the CA bundle below).",
-    ("events", "syslog.facility"): "Syslog facility events are tagged "
-        "with, e.g. local0.",
-    ("events", "syslog.cafile"): "CA bundle used to verify the syslog "
-        "server certificate (tls protocol only).",
-    ("events", "snmp_trap.address"): "SNMP trap receiver (NMS) address.",
-    ("events", "snmp_trap.port"): "Trap receiver port, normally 162.",
-    ("events", "snmp_trap.version"): "SNMP trap format: v1 (Trap-PDU), "
-        "v2c (SNMPv2-Trap, community-based) or v3 (USM: authenticated and "
-        "optionally encrypted — fill in the v3 fields below).",
-    ("events", "snmp_trap.community"): "Community string for v1/v2c traps.",
-    ("events", "snmp_trap.enterprise_oid"): "OID base for the trap "
-        "identity; use your own enterprise arc.",
-    ("events", "snmp_trap.v3.engine_id"): "Authoritative engine id (hex) "
-        "for v3 traps — must match the user config on the receiver.",
-    ("events", "snmp_trap.v3.username"): "USM security name for v3 traps.",
-    ("events", "snmp_trap.v3.auth_protocol"): "Authentication hash for v3: "
-        "sha1/sha256 (md5 exists for legacy receivers). 'none' sends "
-        "noAuthNoPriv.",
-    ("events", "snmp_trap.v3.auth_key_file"): "File with the v3 "
-        "authentication passphrase (mode 0600, kept out of the YAML).",
-    ("events", "snmp_trap.v3.priv_protocol"): "Privacy (encryption) for "
-        "v3: aes128 requires the `crypto` extra; 'none' sends authNoPriv.",
-    ("events", "snmp_trap.v3.priv_key_file"): "File with the v3 privacy "
-        "passphrase.",
-    ("logging", "level"): "Verbosity of the process log (not the audit "
-        "trail): debug is very chatty, info is the sensible default.",
-    ("logging", "format"): "text for humans/journald, json for log "
-        "shippers.",
-    ("logging", "file"): "Log file path; rotated at max_bytes keeping "
-        "`backups` old files. Empty logs to stderr only.",
-    ("logging", "max_bytes"): "Rotate the log file when it reaches this "
-        "size.",
-    ("logging", "backups"): "How many rotated log files to keep.",
-    ("netbox", "url"): "NetBox instance used by `otitbup reconcile` to "
-        "compare the inventory against your DCIM source of truth.",
-    ("netbox", "token"): "NetBox API token (read access to dcim.devices).",
-    ("tickets", "backend"): "Ticket system that receives incidents for "
-        "backup failures and unexpected changes.",
-    ("tickets", "url"): "Base URL of the ticket system.",
-    ("tickets", "username"): "Service account used to open tickets.",
-    ("tickets", "password"): "Password or API token for the service "
-        "account.",
-    ("encryption", "blob_key_file"): "Fernet key encrypting the blob store "
-        "at rest (large artifacts). Without it blobs are stored plain.",
-    ("encryption", "compress"): "Compress blobs before encrypting — saves "
-        "space, costs a little CPU.",
-    ("capture", "min_bytes"): "Reject captures smaller than this: a "
-        "too-small file usually means a login page or error instead of a "
-        "real config.",
-    ("capture", "expect_match"): "Regex that must appear somewhere in the "
-        "captured text; rejects error pages that pass the size check.",
-    ("integrity", "interval_days"): "How often the daemon re-hashes stored "
-        "artifacts against their manifests (bit-rot scrubbing). 0 = off.",
-    ("integrity", "all_commits"): "Scrub the whole history, not just each "
-        "device's latest backup — slower, most thorough.",
-    ("integrity", "fsck"): "Also run `git fsck` on the repository during "
-        "scrubs.",
-    ("integrity", "signatures"): "Verify commit signatures during scrubs "
-        "(needs git.sign configured).",
-    ("rehearsal", "interval_days"): "Reminder cadence for restore "
-        "rehearsals — devices with no rehearsal in N days are flagged. "
-        "0 = off.",
-    ("git", "remote"): "Git remote the backup repo mirrors to after each "
-        "backup — your second copy (3-2-1).",
-    ("git", "push"): "Push to the remote automatically after every "
-        "backup.",
-    ("git", "sign.key_file"): "SSH private key used to sign backup "
-        "commits, giving cryptographic provenance to the history.",
-    ("secrets", "backend"): "Where device credentials live: an encrypted "
-        "YAML file (default), plain YAML (labs only), HashiCorp Vault, or "
-        "CyberArk.",
-    ("secrets", "path"): "Path of the secrets YAML (plainfile/"
-        "encryptedfile backends).",
-    ("secrets", "key_file"): "Fernet key that decrypts the encrypted "
-        "secrets file. Generate with `otitbup secrets genkey`.",
-    ("secrets", "url"): "Vault or CyberArk API URL.",
-    ("secrets", "mount"): "Vault KV mount containing the secrets.",
-    ("secrets", "token_file"): "File containing the Vault token.",
-    ("retention", "keep_versions"): "Keep the newest N backups per device; "
-        "older ones become prunable. 0 = unlimited.",
-    ("retention", "keep_days"): "Keep backups newer than N days. 0 = "
-        "unlimited.",
-    ("retention", "large_file_threshold"): "Artifacts bigger than this are "
-        "offloaded to the deduplicated blob store instead of the git repo.",
-    ("retention", "lock_days"): "WORM window: the last N days of backups "
-        "can never be pruned, whatever the other rules say.",
-    ("alerts", "stale_days"): "Alert when a device has had no successful "
-        "backup for N days. 0 = off.",
-    ("alerts", "min_interval"): "Rate limit: identical alerts are "
-        "suppressed within this window (seconds).",
-    ("alerts", "webhooks"): "Chat/incident webhook URLs (Slack/Teams/"
-        "generic JSON), comma-separated.",
-    ("alerts", "email.smtp_host"): "SMTP relay used for alert email.",
-    ("alerts", "email.from"): "From address on alert email.",
-    ("alerts", "email.to"): "Alert recipients, comma-separated.",
-    ("retry", "attempts"): "Total attempts per device per run; transient "
-        "network errors are retried, permanent ones are not. 1 = no retry.",
-    ("retry", "backoff"): "Seconds before the first retry; doubles each "
-        "further retry.",
-    ("hooks", "pre"): "Shell command before each device backup; "
-        "$OTITBUP_DEVICE holds the qualified name. Non-zero exit skips "
-        "the device.",
-    ("hooks", "post"): "Shell command after each backup; $OTITBUP_OK is "
-        "1/0 for success/failure.",
-    ("anomaly", "enabled"): "Master switch for behavioural anomaly "
-        "detection over run history (see the Anomaly page).",
-    ("anomaly", "sigma"): "A run is 'slow' when its duration is this many "
-        "standard deviations above the device's own mean.",
-    ("anomaly", "duration_floor"): "Ignore runs faster than this — "
-        "millisecond jitter on quick devices never counts as a spike.",
-    ("anomaly", "change_window"): "How many recent runs the change-storm "
-        "detector looks at.",
-    ("anomaly", "change_recent"): "Change-storm fires when at least this "
-        "fraction of the recent window changed…",
-    ("anomaly", "change_baseline"): "…and the device's long-run change "
-        "rate is at or below this fraction (a normally-quiet device).",
-    ("anomaly", "flap_window"): "How many recent runs the flapping "
-        "detector looks at.",
-    ("anomaly", "flap_transitions"): "Ok/fail transitions inside the "
-        "window that count as flapping (an intermittent device/link).",
-    ("anomaly", "trend_window"): "Recent-run window for the gradual "
-        "slowdown detector.",
-    ("anomaly", "trend_ratio"): "Slow-trend fires when the recent mean "
-        "duration is this multiple of the older baseline.",
-    ("anomaly", "size_drop"): "Size-drop fires when a capture is smaller "
-        "than this fraction of the device's median size (likely "
-        "truncated).",
-    ("policy", "disable"): "Built-in rule ids to skip (see the Anomaly "
-        "page for the active rules). Custom rules are managed below.",
-    ("housekeeping", "gc_interval_days"): "Run `git gc` on the backup repo "
-        "every N days to repack and prune. 0 = never.",
-    ("housekeeping", "gc_aggressive"): "Use --aggressive gc: much slower, "
-        "slightly smaller repository.",
-    ("desired", "dir"): "Directory of intended 'golden' configs; drift "
-        "between desired and captured configs is reported.",
-    ("desired", "strip_trailing_ws"): "Ignore trailing whitespace when "
-        "comparing desired vs captured.",
-    ("reports", "interval"): "Generate a compliance report on this "
-        "schedule (e.g. 7d). Empty disables scheduled reports.",
-    ("reports", "period_days"): "How many days each report covers.",
-    ("reports", "out"): "Where the scheduled report is written.",
-    ("strategy", "offsite"): "Declare that the git remote is genuinely "
-        "off-site (different building/failure domain) — counts toward "
-        "3-2-1.",
-    ("strategy", "offline.path"): "Path of the offline/air-gapped export "
-        "archive (from `otitbup export`).",
-    ("strategy", "offline.max_age_days"): "The offline copy counts only "
-        "while younger than this.",
-    ("federation", "role"): "Set to 'central' on the roll-up appliance "
-        "that polls the site collectors listed below.",
-}
-
-
-def _form_id(spec: dict) -> str:
-    return spec.get("id", spec["section"])
 
 
 def _dig(data: dict, dotted: str):
@@ -1232,7 +374,7 @@ class WebUI:
         )
         return _login_shell("otitbup — login", body)
 
-    def users_page(self, identity: dict, csrf: str) -> bytes:
+    def users_page(self, csrf: str) -> bytes:
         users = self.all_users()
         rows = ""
         for name, rec in sorted(users.items()):
@@ -1676,7 +818,7 @@ class WebUI:
                        f"{html.escape(sname)}</b></summary>")
             out.append(self._retention_form(
                 "/config/site", {"site": sname}, site.get("retention") or {},
-                csrf, extra=[]))
+                csrf))
             for zone in site.get("zones", []) or []:
                 zname = zone.get("name", "")
                 out.append(f"<details><summary>zone: "
@@ -1763,7 +905,7 @@ class WebUI:
             + "<button type='submit'>Add site</button></form>"
         )
 
-    def _retention_form(self, action, hidden, r, csrf, extra) -> str:
+    def _retention_form(self, action, hidden, r, csrf) -> str:
         h = "".join(
             f"<input type='hidden' name='{k}' value='{html.escape(str(v))}'>"
             for k, v in hidden.items())
@@ -3381,6 +2523,41 @@ class _Handler(BaseHTTPRequestHandler):
                 return value
         return None
 
+    def _is_tls(self) -> bool:
+        import ssl
+        return isinstance(self.connection, ssl.SSLSocket)
+
+    def _session_cookie(self, value: str, *, expire: bool = False) -> str:
+        """Build the session Set-Cookie, adding Secure under HTTPS so the
+        token (which doubles as the CSRF token) never leaks over plaintext."""
+        attrs = "HttpOnly; SameSite=Strict; Path=/"
+        if self._is_tls():
+            attrs += "; Secure"
+        if expire:
+            attrs += "; Max-Age=0"
+        return f"otitbup_session={value}; {attrs}"
+
+    @staticmethod
+    def _safe_next(url: str) -> str:
+        """Sanitise the post-login redirect target: only a local absolute
+        path is allowed. Rejects scheme-relative (`//host`, `/\\host`) URLs
+        that would redirect off-site and CR/LF that would inject headers."""
+        if ("\r" in url or "\n" in url or not url.startswith("/")
+                or url.startswith(("//", "/\\"))):
+            return "/"
+        return url
+
+    def _same_origin(self) -> bool:
+        """True if the request's Origin/Referer matches its Host (or is
+        absent — a non-browser client with no ambient credentials to abuse).
+        Blocks cross-site form POSTs riding Basic/SSO/session credentials."""
+        origin = self.headers.get("Origin") or self.headers.get("Referer")
+        if not origin:
+            return True
+        from urllib.parse import urlparse
+        host = self.headers.get("Host", "")
+        return urlparse(origin).netloc == host
+
     def _resolve_theme(self, identity: dict | None) -> str | None:
         """The effective colour theme: the signed-in user's saved preference
         (per-account, on disk), else this browser's cookie, else the
@@ -3524,7 +2701,6 @@ class _Handler(BaseHTTPRequestHandler):
                     headers={"WWW-Authenticate": 'Basic realm="otitbup"'},
                 )
             return self._send(200, self.ui.login_page(next_url=path))
-        self._identity = identity
         self._set_ctx(identity)
         role = identity["role"] if identity else "admin"
         csrf = identity["token"] if identity and identity["via"] == "session" else ""
@@ -3580,7 +2756,7 @@ class _Handler(BaseHTTPRequestHandler):
             elif path == "/config":
                 page = self.ui.config_page(csrf)
             else:
-                page = self.ui.users_page(identity or {}, csrf)
+                page = self.ui.users_page(csrf)
             return self._send(200, page)
 
         content: bytes | None = None
@@ -3688,10 +2864,20 @@ class _Handler(BaseHTTPRequestHandler):
         role = identity["role"] if identity else "admin"
         scopes = identity.get("scopes", "*") if identity else "*"
 
-        # CSRF: cookie-session POSTs must echo the session token.
+        # CSRF defence for browser-delivered credentials:
+        #  * cookie-session POSTs must echo the session token;
+        #  * HTTP Basic and trusted-SSO-header identities carry no token, but
+        #    the browser attaches those credentials automatically, so a
+        #    cross-site form could drive them. Enforce a same-origin check
+        #    (Origin/Referer must match Host) for every HTML form POST. A
+        #    non-browser client (no Origin/Referer) can't ride ambient
+        #    browser credentials, so its absence is allowed.
         if identity and identity["via"] == "session":
             if form.get("csrf") != identity["token"]:
                 return self._send(403, _page("forbidden", "<p>bad CSRF token</p>"))
+        if not self._same_origin():
+            return self._send(403, _page("forbidden",
+                                         "<p>cross-origin POST rejected</p>"))
 
         from .auth import role_rank
         ok, message, back = self._dispatch_post(
@@ -3725,10 +2911,8 @@ class _Handler(BaseHTTPRequestHandler):
             LOGIN, f"login: {ident['username']} ({ident['role']})",
             actor=ident["username"], detail=ident["username"],
         )
-        self._redirect(next_url if next_url.startswith("/") else "/", headers={
-            "Set-Cookie":
-                f"otitbup_session={session.token}; HttpOnly; SameSite=Strict; "
-                "Path=/",
+        self._redirect(self._safe_next(next_url), headers={
+            "Set-Cookie": self._session_cookie(session.token),
         })
 
     def _handle_logout(self) -> None:
@@ -3741,8 +2925,7 @@ class _Handler(BaseHTTPRequestHandler):
                 actor=session.username, detail=session.username,
             )
         self._redirect("/login", headers={
-            "Set-Cookie":
-                "otitbup_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
+            "Set-Cookie": self._session_cookie("", expire=True),
         })
 
     def _api_post(self, path: str, identity: dict | None) -> None:

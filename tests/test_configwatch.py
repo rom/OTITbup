@@ -91,6 +91,47 @@ def test_device_driver_and_address_changes_are_major(cfg):
     assert len(change.major) == 2
 
 
+def test_new_field_on_existing_device_is_major(cfg):
+    # Adding credentials/address to a device that already existed re-points
+    # what/where/how it is backed up — it must not slip through as a minor
+    # 'added' change (regression: the added-is-routine rule was too broad).
+    path, snap = cfg
+    check(path, snap)
+
+    def mutate(raw):
+        dev = raw["sites"][0]["zones"][0]["devices"][0]
+        dev["credentials"] = "attacker-creds"
+    _rewrite(path, mutate)
+    change = check(path, snap)
+    assert change.major and not change.minor
+    assert any("credentials" in d for d in change.major)
+
+
+def test_new_device_still_minor_when_field_gate_tightened(cfg):
+    # A brand-new device (all fields "added") stays routine even though it
+    # carries a driver/address/credentials.
+    path, snap = cfg
+    check(path, snap)
+    _rewrite(path, lambda raw: raw["sites"][0]["zones"][0]["devices"].append(
+        {"name": "plc-99", "driver": "generic_ssh", "address": "10.0.0.9",
+         "credentials": "plc-99", "schedule": "1h"}))
+    change = check(path, snap)
+    assert not change.major
+    assert any("plc-99" in d for d in change.minor)
+
+
+def test_new_retention_on_existing_device_is_minor(cfg):
+    path, snap = cfg
+    check(path, snap)
+
+    def mutate(raw):
+        raw["sites"][0]["zones"][0]["devices"][0]["retention"] = {
+            "keep_versions": 5}
+    _rewrite(path, mutate)
+    change = check(path, snap)
+    assert change.minor and not change.major
+
+
 def test_device_schedule_change_is_minor(cfg):
     path, snap = cfg
     check(path, snap)
