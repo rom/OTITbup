@@ -74,6 +74,16 @@ _MIGRATIONS: list[str] = [
     CREATE TABLE IF NOT EXISTS meta (
         key TEXT PRIMARY KEY, value TEXT, updated_at REAL NOT NULL);
     """,
+    # v8 — persistent operational event log (feeds the web UI Event logs).
+    # Keeps the full human-readable message that the audit chain elides
+    # (the audit row stores only a short detail for backup errors et al.).
+    """
+    CREATE TABLE IF NOT EXISTS events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL,
+        type TEXT NOT NULL, severity TEXT, actor TEXT, detail TEXT,
+        message TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS ix_events_at ON events(at);
+    """,
 ]
 
 SCHEMA_VERSION = len(_MIGRATIONS)
@@ -390,6 +400,38 @@ class RunStore:
                     "SELECT * FROM audit ORDER BY at DESC LIMIT ?", (limit,)
                 )
             ]
+
+    # --------------------------------------------------------- event log
+
+    def record_event(
+        self, at: float, event_type: str, message: str,
+        severity: str | None = None, actor: str | None = None,
+        detail: str | None = None,
+    ) -> None:
+        """Persist one operational event with its full message (the record
+        behind the web UI's Event logs page)."""
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO events (at, type, severity, actor, detail, "
+                "message) VALUES (?, ?, ?, ?, ?, ?)",
+                (at, event_type, severity, actor, detail, message),
+            )
+
+    def recent_events(
+        self, limit: int = 300, severities: list[str] | None = None,
+    ) -> list[dict]:
+        """Recent events, newest first. `severities` optionally filters to a
+        set of severity names (e.g. ['error', 'warning'])."""
+        query = "SELECT * FROM events"
+        params: list = []
+        if severities:
+            marks = ",".join("?" for _ in severities)
+            query += f" WHERE severity IN ({marks})"
+            params.extend(severities)
+        query += " ORDER BY at DESC LIMIT ?"
+        params.append(limit)
+        with self._conn() as conn:
+            return [dict(row) for row in conn.execute(query, params)]
 
 
     # --------------------------------------------------------- users

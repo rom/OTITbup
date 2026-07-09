@@ -29,7 +29,7 @@ def _load_crypto():
     except ImportError as exc:
         raise SigningError(
             "signing requires the 'cryptography' package "
-            "(pip install otitbup[crypto])"
+            "(pip install 'otitbup[crypto]')"
         ) from exc
 
 

@@ -70,7 +70,7 @@ def _fernet(cfg: dict):
     except ImportError as exc:                       # pragma: no cover
         raise OffsiteError(
             "offsite encryption needs the 'cryptography' package "
-            "(pip install otitbup[crypto])"
+            "(pip install 'otitbup[crypto]')"
         ) from exc
     return Fernet(_load_key(cfg))
 
@@ -146,7 +146,7 @@ class FileTransport(Transport):
 
 
 class SFTPTransport(Transport):
-    """An SSH/SFTP server (needs paramiko: pip install otitbup[sftp])."""
+    """An SSH/SFTP server (needs paramiko: pip install 'otitbup[sftp]')."""
 
     def __init__(self, cfg: dict):
         self.cfg = cfg
@@ -158,7 +158,7 @@ class SFTPTransport(Transport):
         except ImportError as exc:                   # pragma: no cover
             raise OffsiteError(
                 "offsite.transport=sftp needs paramiko "
-                "(pip install otitbup[sftp])"
+                "(pip install 'otitbup[sftp]')"
             ) from exc
         cfg = self.cfg
         transport = paramiko.Transport(

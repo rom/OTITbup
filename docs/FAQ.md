@@ -66,6 +66,19 @@ are **all stdlib** — no extra dependency. The lazy driver registry means an
 optional import is only attempted when a device actually uses that driver,
 so a Modbus-and-network-only site installs almost nothing.
 
+### `pip install otitbup[siemens]` fails with "no matches found" — why?
+Your shell (zsh, the macOS default) treats the square brackets as a glob
+pattern and tries to expand them before pip ever sees them. **Quote the
+argument** and it installs fine:
+
+```bash
+pip install 'otitbup[siemens]'      # zsh-safe (bash tolerates either)
+```
+
+This applies to every extra (`'otitbup[ssh]'`, `'otitbup[crypto]'`, …) and
+to editable installs (`pip install -e '.[siemens]'`). The tool's own error
+messages now print the quoted form so they are copy-pasteable as-is.
+
 ### How do I run it — one-shot, scheduled, or as a service?
 Three ways, same config. `otitbup backup [name…]` runs one pass and exits
 (good for cron and CI). `otitbup daemon` runs the built-in scheduler: it

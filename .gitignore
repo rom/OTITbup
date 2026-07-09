@@ -9,6 +9,8 @@ runstore.db
 alert-state.json
 *.lock
 state.json
+reports/
+user-prefs.json
 secrets.yml
 otitbup.yml
 !examples/otitbup.yml

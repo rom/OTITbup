@@ -51,6 +51,26 @@ def test_rehearsals(rs):
     assert rs.last_rehearsal("d2") is None
 
 
+def test_event_log_records_and_filters(rs):
+    rs.record_event(100.0, "backup.stop", "backup finished: d1",
+                    severity="info", detail="d1")
+    rs.record_event(200.0, "backup.error",
+                    "backup failed: d1: siemens_s7 requires python-snap7",
+                    severity="error", detail="d1")
+    rs.record_event(150.0, "anomaly.detected", "slow backup on d1",
+                    severity="warning", detail="d1")
+
+    events = rs.recent_events()
+    assert [e["at"] for e in events] == [200.0, 150.0, 100.0]  # newest first
+    assert events[0]["message"].endswith("python-snap7")
+    assert events[0]["type"] == "backup.error"
+
+    # Severity filter keeps only the requested levels.
+    problems = rs.recent_events(severities=["error", "warning"])
+    assert {e["severity"] for e in problems} == {"error", "warning"}
+    assert all(e["type"] != "backup.stop" for e in problems)
+
+
 def test_maintenance_scope_and_expiry(rs):
     rs.set_maintenance("plant-a/cell-1/plc-01", None, now=1000)
     assert rs.in_maintenance("plant-a/cell-1/plc-01", 2000)

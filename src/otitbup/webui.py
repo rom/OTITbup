@@ -149,11 +149,34 @@ nav a:hover { background: var(--hover); color: var(--text);
               text-decoration: none; }
 nav a.active { background: var(--accent-soft); color: var(--accent-ink);
                font-weight: 600; }
+/* Dropdown menu group (Logs) — CSS-only, opens on hover or keyboard focus */
+.nav-group { position: relative; }
+.nav-top { display: inline-block; padding: .34rem .6rem; border-radius: 8px;
+       color: var(--muted); font-size: .855rem; font-weight: 500;
+       white-space: nowrap; cursor: default; user-select: none; }
+.nav-top::after { content: ''; }
+.nav-group:hover .nav-top, .nav-group:focus-within .nav-top {
+       background: var(--hover); color: var(--text); }
+.nav-top.active { background: var(--accent-soft); color: var(--accent-ink);
+       font-weight: 600; }
+.nav-drop { position: absolute; top: 100%; left: 0; min-width: 11rem;
+       margin-top: .2rem; padding: .3rem; background: var(--surface);
+       border: 1px solid var(--border); border-radius: 10px;
+       box-shadow: var(--shadow); z-index: 40; display: none;
+       flex-direction: column; gap: .08rem; }
+.nav-group:hover .nav-drop, .nav-group:focus-within .nav-drop {
+       display: flex; }
+.nav-drop a { display: block; }
 .who { display: inline-flex; align-items: center; gap: .35rem;
        color: var(--muted); font-size: .8rem; padding-left: .7rem;
        margin-left: .2rem; border-left: 1px solid var(--border);
        white-space: nowrap; }
 .who b { color: var(--text); font-weight: 600; }
+.theme-pick { margin-left: .4rem; padding: .22rem 1.3rem .22rem .5rem;
+       font-size: .78rem; border: 1px solid var(--border); border-radius: 999px;
+       background: var(--surface); color: var(--muted); cursor: pointer;
+       text-transform: capitalize; }
+.theme-pick:hover { color: var(--text); }
 .who .role { font-size: .68rem; text-transform: uppercase; letter-spacing: .04em;
        background: var(--accent-soft); color: var(--accent-ink);
        padding: .05rem .4rem; border-radius: 999px; font-weight: 600; }
@@ -212,6 +235,15 @@ input:focus, select:focus, textarea:focus { outline: none;
 .muted { color: var(--muted); font-size: .85rem; }
 .sev-critical, .sev-high { color: var(--danger); font-weight: 600; }
 .sev-medium { color: var(--warn); } .sev-low { color: var(--muted); }
+/* Event-log (syslog-style) severities */
+.sev-emergency, .sev-alert, .sev-error { color: var(--danger);
+       font-weight: 600; }
+.sev-warning { color: var(--warn); font-weight: 600; }
+.sev-notice { color: var(--accent-ink); }
+.sev-info, .sev-debug { color: var(--muted); }
+tr.evt-error > td, tr.evt-critical > td, tr.evt-alert > td,
+tr.evt-emergency > td { background: var(--danger-soft); }
+tr.evt-warning > td { background: var(--warn-soft, var(--accent-soft)); }
 .ok { color: var(--ok); } .miss { color: var(--danger); }
 .strat { font-size: 1.02rem; padding: .3rem 0; }
 
@@ -263,6 +295,20 @@ label.inl { display: flex; flex-direction: column; gap: .2rem; font-size: .68rem
 label.inl input, label.inl select { width: 8.5rem; font-size: .85rem;
         padding: .35rem .45rem; text-transform: none; letter-spacing: normal;
         font-weight: 400; }
+
+/* Login page (no app chrome) */
+.login-wrap { min-height: 100vh; display: flex; align-items: center;
+        justify-content: center; padding: 1.5rem; }
+.login-card { width: 100%; max-width: 22rem; background: var(--surface);
+        border: 1px solid var(--border); border-radius: 16px;
+        box-shadow: var(--shadow); padding: 2rem 1.9rem; }
+.login-card .brand { justify-content: center; margin-bottom: 1.1rem; }
+.login-card h2 { text-align: center; margin: 0 0 1.2rem; font-size: 1.3rem; }
+.login-card form { display: flex; flex-direction: column; gap: .7rem; }
+.login-card input { width: 100%; padding: .6rem .7rem; font-size: .95rem; }
+.login-card button { width: 100%; padding: .6rem; font-size: .95rem;
+        margin-top: .3rem; }
+.login-card p { margin: 0; }
 
 /* In-app docs */
 .doc { line-height: 1.65; max-width: 52rem; }
@@ -342,7 +388,30 @@ def _who_chip() -> str:
             f"<span class='role'>{role}</span></span>")
 
 
-def _page(title: str, body: str) -> bytes:
+def _theme_picker() -> str:
+    """A menu-bar dropdown that sets the current user's theme preference."""
+    cur = getattr(_CTX, "theme", None) or "auto"
+    if cur not in _THEMES:
+        cur = "auto"
+    options = "".join(
+        f"<option value='{t}'{' selected' if t == cur else ''}>{t}</option>"
+        for t in _THEMES)
+    # Apply the theme instantly on the client, then persist in the background
+    # (no page reload). Falls back to a full navigation if fetch is absent.
+    onchange = (
+        "var v=this.value,r=document.documentElement;"
+        "if(v==='auto'){r.removeAttribute('data-theme');}"
+        "else{r.setAttribute('data-theme',v);}"
+        "if(window.fetch){fetch('/theme?set='+encodeURIComponent(v),"
+        "{credentials:'same-origin'});}"
+        "else{location.href='/theme?set='+v;}")
+    return (
+        "<select class='theme-pick' title='Colour theme' aria-label='theme' "
+        f"onchange=\"{onchange}\">{options}</select>"
+    )
+
+
+def _head(title: str) -> str:
     theme = getattr(_CTX, "theme", None) or ""
     theme_attr = (f" data-theme='{html.escape(theme)}'"
                   if theme and theme != "auto" else "")
@@ -351,22 +420,45 @@ def _page(title: str, body: str) -> bytes:
         f"<meta name='viewport' content='width=device-width, initial-scale=1'>"
         f"<link rel='icon' type='image/svg+xml' href='/favicon.svg'>"
         f"<title>{html.escape(title)}</title><style>{_STYLE}</style></head>"
-        f"<body><header class='appbar'><div class='bar'><h1>{_BRAND}</h1>"
+    )
+
+
+def _login_shell(title: str, body: str) -> bytes:
+    """A bare, centered page with no app menu — for the sign-in screen."""
+    return (
+        _head(title)
+        + "<body><div class='login-wrap'><div class='login-card'>"
+        + f"{_BRAND}{body}</div></div></body></html>"
+    ).encode()
+
+
+def _page(title: str, body: str) -> bytes:
+    return (
+        _head(title)
+        + f"<body><header class='appbar'><div class='bar'><h1>{_BRAND}</h1>"
         f"<nav><a href='/dashboard'>Dashboard</a><a href='/'>Devices</a>"
         f"<a href='/health'>Health</a>"
         f"<a href='/search'>Search</a><a href='/drift'>Drift</a>"
         f"<a href='/policy'>Policy</a>"
         f"<a href='/retention'>Retention</a><a href='/strategy'>Strategy</a>"
-        f"<a href='/drivers'>Drivers</a>"
-        f"<a href='/activity'>Backup log</a><a href='/audit'>Audit log</a>"
+        f"<a href='/reports'>Reports</a><a href='/drivers'>Drivers</a>"
+        "<div class='nav-group'><span class='nav-top' tabindex='0'>"
+        "Logs ▾</span><div class='nav-drop'>"
+        "<a href='/audit'>Audit logs</a>"
+        "<a href='/activity'>Backup logs</a>"
+        "<a href='/events'>Event logs</a></div></div>"
         f"<a href='/users'>Users</a><a href='/config'>Config</a>"
         f"<a href='/help'>Help</a>"
-        f"<a href='/logout'>Logout</a>{_who_chip()}</nav></div></header>"
+        f"<a href='/logout'>Logout</a>{_theme_picker()}"
+        f"{_who_chip()}</nav></div></header>"
         f"<main>{body}</main>"
         "<script>(function(){var p=location.pathname;"
         "document.querySelectorAll('nav a').forEach(function(a){"
         "var h=a.getAttribute('href');if(h!=='/logout'&&"
-        "(h==='/'?p==='/':p.indexOf(h)===0))a.classList.add('active');});})();"
+        "(h==='/'?p==='/':p.indexOf(h)===0))a.classList.add('active');});"
+        "document.querySelectorAll('.nav-group').forEach(function(g){"
+        "if(g.querySelector('.nav-drop a.active'))"
+        "g.querySelector('.nav-top').classList.add('active');});})();"
         "</script>"
         f"</body></html>"
     ).encode()
@@ -453,7 +545,8 @@ _SETTINGS_FORMS = [
      "fields": [
          ("host", "Bind host", "str", "127.0.0.1"),
          ("port", "Bind port", "int", "8080"),
-         ("theme", "Colour theme", "choice:" + "|".join(_THEMES), "auto"),
+         ("theme", "Default colour theme (per-user overrides)",
+          "choice:" + "|".join(_THEMES), "auto"),
          ("tls.cert_file", "TLS certificate file", "str", "webui-cert.pem"),
          ("tls.key_file", "TLS key file", "str", "webui-key.pem"),
      ]},
@@ -761,6 +854,9 @@ class WebUI:
             except AttributeError:
                 pass
         self.sessions = SessionStore()
+        from .userprefs import UserPrefs
+        self.prefs = UserPrefs(
+            Path(config.data_dir).parent / "user-prefs.json")
 
     def all_users(self) -> dict:
         """Config-declared users (static) merged with runstore users
@@ -790,16 +886,16 @@ class WebUI:
             f"<p class='sev-high'>{html.escape(error)}</p>" if error else ""
         )
         body = (
-            "<h2>Sign in</h2>" + msg
+            "<h2>Login</h2>" + msg
             + "<form method='post' action='/login'>"
             f"<input type='hidden' name='next' value='{html.escape(next_url)}'>"
-            "<p><input name='username' placeholder='username' "
-            "autocomplete='username' autofocus></p>"
-            "<p><input name='password' type='password' "
-            "placeholder='password' autocomplete='current-password'></p>"
-            "<p><button type='submit'>Sign in</button></p></form>"
+            "<input name='username' placeholder='username' "
+            "autocomplete='username' autofocus>"
+            "<input name='password' type='password' "
+            "placeholder='password' autocomplete='current-password'>"
+            "<button type='submit'>Login</button></form>"
         )
-        return _page("otitbup — sign in", body)
+        return _login_shell("otitbup — login", body)
 
     def users_page(self, identity: dict, csrf: str) -> bytes:
         users = self.all_users()
@@ -908,28 +1004,76 @@ class WebUI:
     ) -> tuple[bool, str]:
         if self.runstore is None:
             return False, "unavailable"
-        base = Path(self.config.data_dir).parent
-        out = base / f"compliance-report.{fmt}"
+        from . import reportstore
         if fmt == "html":
             from .reports import compliance_report
-            out.write_text(compliance_report(
-                self.config, self.store, self.runstore))
+            data = compliance_report(
+                self.config, self.store, self.runstore).encode()
         else:
             from .reportfmt import FORMATS, render
             if fmt not in FORMATS:
                 return False, f"unknown format {fmt}"
             data, _ct, _ext = render(fmt, self.config, self.store,
                                      self.runstore)
-            out.write_bytes(data)
-        message = f"report written to {out}"
+        out = reportstore.store_report(self.config, fmt, data)
+        message = f"report archived: {out.name}"
         if sign:
             from .signing import SigningError, sign_file
             try:
-                sign_file(out, base / "report-signing.key")
+                sign_file(out, Path(self.config.data_dir).parent
+                          / "report-signing.key")
                 message += " (signed)"
             except SigningError as exc:
                 return True, message + f" — not signed: {exc}"
         return True, message
+
+    def reports(self, ctx: dict | None = None) -> bytes:
+        """List the archived compliance reports, newest first, with links to
+        view/download each, plus a generate control for operators."""
+        import datetime
+
+        from . import reportstore
+        from .auth import role_rank
+        ctx = ctx or {}
+        role = ctx.get("role", "admin")
+        csrf = ctx.get("csrf", "")
+        files = reportstore.list_reports(self.config)
+        rows = []
+        for f in files:
+            when = datetime.datetime.fromtimestamp(
+                f.mtime, datetime.UTC).strftime("%Y-%m-%d %H:%M UTC")
+            kib = f.size / 1024
+            size = f"{f.size} B" if f.size < 1024 else f"{kib:.1f} KiB"
+            signed = ("<span class='badge'>signed</span>" if f.signed else "")
+            name = html.escape(f.name)
+            rows.append(
+                f"<tr data-row><td><a href='/reports/view/{name}'>{name}</a>"
+                f"</td><td>{f.fmt}</td><td>{when}</td><td>{size}</td>"
+                f"<td>{signed}</td></tr>")
+        table = (
+            "<table><tr><th>Report</th><th>Format</th><th>Generated</th>"
+            "<th>Size</th><th></th></tr>"
+            + ("".join(rows) or
+               "<tr><td colspan='5'>no reports generated yet</td></tr>")
+            + "</table>")
+        gen = ""
+        if not self.users or role_rank(role) >= role_rank("operator"):
+            gen = (
+                "<h3>Generate a report</h3>"
+                "<form method='post' action='/report' class='cfg-inline'>"
+                + _csrf(csrf)
+                + "<label class='inl'>format<select name='format'>"
+                "<option>html</option><option>csv</option>"
+                "<option>pdf</option><option>docx</option></select></label>"
+                "<label class='inl'>sign<input type='checkbox' name='sign' "
+                "value='1'></label>"
+                "<button type='submit'>Generate</button></form>")
+        body = (
+            "<h2>Reports</h2>"
+            "<p class='muted'>Compliance reports are archived (timestamped, "
+            "versioned) under the <code>reports/</code> directory.</p>"
+            + gen + table)
+        return _page("otitbup — reports", body)
 
     def reload_config(self) -> tuple[bool, str]:
         if not self.config_path:
@@ -1859,6 +2003,53 @@ class WebUI:
         )
         return _page("otitbup — audit", body)
 
+    def event_log(self, errors_only: bool = False) -> bytes:
+        """Operational event log: the messages surfaced to operators —
+        backup failures (with the full driver error), config reloads,
+        anomalies, integrity results, logins, and so on — newest first."""
+        if self.runstore is None:
+            return _page("otitbup — events",
+                         "<p class='muted'>unavailable</p>")
+        import datetime as _dt
+        severities = ["emergency", "alert", "critical", "error", "warning"] \
+            if errors_only else None
+        events = self.runstore.recent_events(limit=300, severities=severities)
+        rows = []
+        for r in events:
+            when = _dt.datetime.fromtimestamp(
+                r["at"], _dt.UTC).strftime("%Y-%m-%d %H:%M:%S")
+            sev = (r.get("severity") or "info").lower()
+            actor = r.get("actor")
+            actor_cell = f" <span class='muted'>({html.escape(actor)})</span>" \
+                if actor else ""
+            rows.append(
+                f"<tr data-row class='evt-{html.escape(sev)}'>"
+                f"<td>{when}</td>"
+                f"<td class='sev-{html.escape(sev)}'>{html.escape(sev)}</td>"
+                f"<td><code>{html.escape(r.get('type') or '')}</code></td>"
+                f"<td>{html.escape(r.get('message') or '')}{actor_cell}</td>"
+                "</tr>")
+        table = (
+            "<input id='filter' type='search' placeholder='Filter…' "
+            "autocomplete='off'>"
+            "<table><tr><th>When (UTC)</th><th>Severity</th><th>Type</th>"
+            "<th>Message</th></tr>"
+            + ("".join(rows) or
+               "<tr><td colspan='4'>no events recorded yet</td></tr>")
+            + "</table>" + _FILTER_SCRIPT)
+        toggle = (
+            "<a href='/events'>all</a> · <b>errors &amp; warnings</b>"
+            if errors_only else
+            "<b>all</b> · <a href='/events?errors=1'>errors &amp; warnings</a>")
+        body = (
+            "<h2>Event log</h2>"
+            "<p class='muted'>Operational events and messages surfaced to "
+            "operators — including backup failures and their full error text. "
+            f"Show: {toggle}.</p>"
+            + table
+            + "<p class='muted'>last 300 events</p>")
+        return _page("otitbup — events", body)
+
     def policy(self) -> bytes:
         from .policy import check_all, load_rules, severity_rank
         findings = check_all(self.config, self.store)
@@ -2532,12 +2723,50 @@ class _Handler(BaseHTTPRequestHandler):
             broadcaster.unsubscribe(queue)
 
     def _cookie_token(self) -> str | None:
+        return self._cookie("otitbup_session")
+
+    def _cookie(self, name: str) -> str | None:
         cookie = self.headers.get("Cookie", "")
         for part in cookie.split(";"):
             key, _, value = part.strip().partition("=")
-            if key == "otitbup_session":
+            if key == name:
                 return value
         return None
+
+    def _resolve_theme(self, identity: dict | None) -> str | None:
+        """The effective colour theme: the signed-in user's saved preference
+        (per-account, on disk), else this browser's cookie, else the
+        configured global default. Only known themes are honoured."""
+        if identity:
+            pref = self.ui.prefs.get_value(identity["username"], "theme")
+            if pref in _THEMES:
+                return pref
+        ck = self._cookie("otitbup_theme")
+        if ck in _THEMES:
+            return ck
+        return self.ui.config.webui.get("theme")
+
+    def _handle_theme(self, query: dict) -> None:
+        """Set the current user's theme preference (menu-bar picker)."""
+        theme = (query.get("set", [""])[0] or "").strip()
+        if theme not in _THEMES:
+            theme = "auto"
+        identity = self._identify()
+        if identity:
+            try:
+                self.ui.prefs.set_value(
+                    identity["username"], "theme",
+                    "" if theme == "auto" else theme)
+            except Exception:
+                pass
+        if theme == "auto":
+            cookie = "otitbup_theme=; Path=/; Max-Age=0; SameSite=Lax"
+        else:
+            cookie = (f"otitbup_theme={theme}; Path=/; Max-Age=31536000; "
+                      "SameSite=Lax")
+        # The client already applied the theme; just persist and return 204.
+        return self._send(204, b"", "text/plain",
+                          headers={"Set-Cookie": cookie})
 
     def _identify(self) -> dict | None:
         """Resolve the request identity, in order: cookie session (browser),
@@ -2590,9 +2819,11 @@ class _Handler(BaseHTTPRequestHandler):
         raw = self.path.split("?", 1)
         path = unquote(raw[0])
         query = parse_qs(raw[1]) if len(raw) > 1 else {}
-        # Per-request render context (theme + who is signed in).
-        _CTX.theme = self.ui.config.webui.get("theme")
+        # Per-request render context (theme + who is signed in). Theme is
+        # re-resolved after identify() so a signed-in user's saved preference
+        # can override the cookie/global default.
         _CTX.identity = None
+        _CTX.theme = self._resolve_theme(None)
         if path == "/healthz":
             return self._send(200, b'{"status":"ok"}\n', "application/json")
         if path in ("/favicon.svg", "/favicon.ico"):
@@ -2604,6 +2835,10 @@ class _Handler(BaseHTTPRequestHandler):
             # Logout is idempotent and safe over GET (a menu link) — clears
             # the session cookie and returns to the login page.
             return self._handle_logout()
+        if path == "/theme":
+            # Cosmetic per-user preference; allowed pre-auth so the picker
+            # works on the login page too.
+            return self._handle_theme(query)
         if path == "/login":
             return self._send(200, self.ui.login_page(
                 next_url=query.get("next", ["/"])[0]))
@@ -2622,6 +2857,7 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, self.ui.login_page(next_url=path))
         self._identity = identity
         _CTX.identity = identity
+        _CTX.theme = self._resolve_theme(identity)
         role = identity["role"] if identity else "admin"
         csrf = identity["token"] if identity and identity["via"] == "session" else ""
 
@@ -2705,6 +2941,23 @@ class _Handler(BaseHTTPRequestHandler):
             content = self.ui.policy()
         elif path == "/activity":
             content = self.ui.activity()
+        elif path == "/events":
+            content = self.ui.event_log(
+                errors_only=query.get("errors", ["0"])[0] == "1")
+        elif path == "/reports":
+            content = self.ui.reports(ctx={"role": role, "csrf": csrf})
+        elif path.startswith("/reports/view/"):
+            from . import reportstore
+            name = path[len("/reports/view/"):]
+            fpath = reportstore.report_path(self.ui.config, name)
+            if fpath is None:
+                return self._send(404, _page("not found",
+                                             "<p>report not found</p>"))
+            disp = ("inline" if name.endswith((".html", ".pdf"))
+                    else "attachment")
+            return self._send(
+                200, fpath.read_bytes(), reportstore.content_type(name),
+                headers={"Content-Disposition": f"{disp}; filename={name}"})
         elif path == "/retention":
             content = self.ui.retention()
         elif path == "/drivers":
@@ -2739,8 +2992,8 @@ class _Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length).decode("utf-8", "replace") if length else ""
         form = {k: v[0] for k, v in parse_qs(raw).items()}
         path = unquote(self.path.split("?", 1)[0])
-        _CTX.theme = self.ui.config.webui.get("theme")
         _CTX.identity = None
+        _CTX.theme = self._resolve_theme(None)
 
         # Login/logout are their own auth flow.
         if path == "/login":
@@ -2750,6 +3003,7 @@ class _Handler(BaseHTTPRequestHandler):
 
         identity = self._identify()
         _CTX.identity = identity
+        _CTX.theme = self._resolve_theme(identity)
 
         # Write API (JSON): Bearer token or session; no CSRF for token auth.
         if path.startswith("/api/"):
@@ -2893,12 +3147,12 @@ class _Handler(BaseHTTPRequestHandler):
             return ok, msg, back
         if path == "/report":
             if not need("operator"):
-                return False, "operator role required", "/health"
+                return False, "operator role required", "/reports"
             ok, msg = self.ui.action_report(
                 fmt=form.get("format", "html"),
                 sign=form.get("sign") == "1",
             )
-            return ok, msg, "/health"
+            return ok, msg, "/reports"
         if path == "/users/create":
             if not need("admin"):
                 return False, "admin role required", "/users"

@@ -459,7 +459,10 @@ def test_theme_and_who_chip(tmp_path):
         assert "data-theme='desert'" in body
         assert "signed in as <b>admin</b>" in body
         assert body.index(">Dashboard<") < body.index(">Devices<")
-        assert ">Backup log<" in body and ">Audit log<" in body
+        # The three log views live under a "Logs" dropdown menu.
+        assert "class='nav-group'" in body and "Logs" in body
+        assert (">Audit logs<" in body and ">Backup logs<" in body
+                and ">Event logs<" in body)
     finally:
         httpd.shutdown()
 
@@ -473,5 +476,202 @@ def test_config_examples_and_choices(tmp_path):
         assert "<select name='syslog.protocol'>" in page
         assert "<select name='theme'>" in page
         assert ">Web UI<" in page and "Single sign-on (SSO)" in page
+    finally:
+        httpd.shutdown()
+
+
+def test_per_user_theme_preference(tmp_path):
+    import http.client
+    httpd, ui = _rw_server(tmp_path, theme="light")
+    # a second user to prove isolation
+    from otitbup.auth import hash_password
+    ui.runstore.add_user("bob", hash_password("pw", 1000), "viewer", 1.0)
+    try:
+        addr = httpd.server_address
+
+        def req(method, path, cookie=None, body=None):
+            c = http.client.HTTPConnection(*addr, timeout=5)
+            h = {}
+            if cookie:
+                h["Cookie"] = cookie
+            if body is not None:
+                h["Content-Type"] = "application/x-www-form-urlencoded"
+            c.request(method, path, body, h)
+            r = c.getresponse()
+            return r.status, dict(r.getheaders()), r.read().decode()
+
+        ca = req("POST", "/login",
+                 body="username=admin&password=pw")[1]["Set-Cookie"].split(";")[0]
+        cb = req("POST", "/login",
+                 body="username=bob&password=pw")[1]["Set-Cookie"].split(";")[0]
+
+        # Menu picker present; global default applied.
+        body = req("GET", "/dashboard", ca)[2]
+        assert "class='theme-pick'" in body and "data-theme='light'" in body
+
+        # admin picks autumn -> 204 (client already applied it, we just
+        # persist) and it survives without the cookie (per-account, on disk).
+        st, h, _ = req("GET", "/theme?set=autumn", ca)
+        assert st == 204 and "otitbup_theme=autumn" in h["Set-Cookie"]
+        assert "data-theme='autumn'" in req("GET", "/dashboard", ca)[2]
+
+        # bob is unaffected (isolation); his cookie choice still works.
+        assert "data-theme='light'" in req("GET", "/dashboard", cb)[2]
+        assert "data-theme='sky'" in req(
+            "GET", "/dashboard", cb + "; otitbup_theme=sky")[2]
+
+        # auto clears the cookie.
+        assert "otitbup_theme=; " in req(
+            "GET", "/theme?set=auto", cb)[1]["Set-Cookie"]
+    finally:
+        httpd.shutdown()
+
+
+def test_login_page_is_a_bare_shell(tmp_path):
+    # An unauthenticated request renders the login card with no app nav.
+    import http.client
+    httpd, _ = _rw_server(tmp_path)
+    try:
+        addr = httpd.server_address
+        c = http.client.HTTPConnection(*addr, timeout=5)
+        c.request("GET", "/")
+        page = c.getresponse().read().decode()
+        assert "class='login-wrap'" in page and "class='login-card'" in page
+        assert "<h2>Login</h2>" in page
+        assert "type='submit'>Login</button>" in page
+        # The app chrome (top menu / nav) must not appear on the login page.
+        assert "<nav" not in page
+        assert ">Dashboard<" not in page and ">Devices<" not in page
+    finally:
+        httpd.shutdown()
+
+
+def test_live_theme_picker_applies_client_side(tmp_path):
+    # The picker flips data-theme in the DOM and persists via a background
+    # fetch — no reload, no server redirect.
+    import http.client
+    httpd, _ = _rw_server(tmp_path, theme="light")
+    try:
+        addr = httpd.server_address
+        cookie = _login(addr)
+        c = http.client.HTTPConnection(*addr, timeout=5)
+        c.request("GET", "/dashboard", headers={"Cookie": cookie})
+        body = c.getresponse().read().decode()
+        assert "setAttribute('data-theme'" in body
+        assert "window.fetch" in body and "/theme?set=" in body
+    finally:
+        httpd.shutdown()
+
+
+def test_event_log_page_shows_error_messages(tmp_path):
+    import http.client
+    httpd, ui = _rw_server(tmp_path)
+    try:
+        # Record a couple of events straight into the shared runstore, as the
+        # event bus would when a backup fails / finishes.
+        from otitbup.events import BACKUP_ERROR, BACKUP_STOP
+        err = ("backup failed: plant-a/cell-1/plc-01: siemens_s7 requires "
+               "python-snap7 (pip install 'otitbup[siemens]')")
+        ui.runstore.record_event(100.0, BACKUP_STOP, "backup finished: sw-01",
+                                 severity="info", detail="sw-01")
+        ui.runstore.record_event(200.0, BACKUP_ERROR, err, severity="error",
+                                 detail="plant-a/cell-1/plc-01")
+
+        addr = httpd.server_address
+        cookie = _login(addr)
+
+        def get(path):
+            c = http.client.HTTPConnection(*addr, timeout=5)
+            c.request("GET", path, headers={"Cookie": cookie})
+            return c.getresponse().read().decode()
+
+        page = get("/events")
+        assert "<h2>Event log</h2>" in page
+        assert "siemens_s7 requires python-snap7" in page
+        assert "otitbup[siemens]" in page       # full command shown
+        assert "class='evt-error'" in page       # error row highlighted
+        assert "backup finished: sw-01" in page
+
+        # errors-only view drops the info-level event.
+        page = get("/events?errors=1")
+        assert "siemens_s7 requires python-snap7" in page
+        assert "backup finished: sw-01" not in page
+    finally:
+        httpd.shutdown()
+
+
+def test_reports_generate_archive_list_and_view(tmp_path):
+    import http.client
+    httpd, ui = _rw_server(tmp_path)
+    try:
+        addr = httpd.server_address
+
+        def req(method, path, cookie=None, body=None):
+            c = http.client.HTTPConnection(*addr, timeout=5)
+            h = {"Cookie": cookie} if cookie else {}
+            if body is not None:
+                h["Content-Type"] = "application/x-www-form-urlencoded"
+            c.request(method, path, body, h)
+            r = c.getresponse()
+            return r.status, dict(r.getheaders()), r.read()
+
+        raw = req("POST", "/login", body="username=admin&password=pw")[1][
+            "Set-Cookie"]
+        cookie = raw.split(";")[0]
+        token = cookie.split("=", 1)[1]         # session token doubles as CSRF
+
+        # Empty archive to start.
+        page = req("GET", "/reports", cookie)[2].decode()
+        assert "<h2>Reports</h2>" in page
+        assert "no reports generated yet" in page
+
+        # Generate one (needs the CSRF token, as the browser form supplies).
+        st, _, data = req("POST", "/report", cookie,
+                          f"format=html&csrf={token}")
+        assert st == 200
+        result = data.decode()
+        assert "archived" in result
+        assert 'href="/reports"' in result or "href='/reports'" in result
+
+        # It now shows up in the archive with a view link.
+        from otitbup import reportstore
+        files = reportstore.list_reports(ui.config)
+        assert len(files) == 1
+        name = files[0].name
+        page = req("GET", "/reports", cookie)[2].decode()
+        assert f"/reports/view/{name}" in page
+        assert "no reports generated yet" not in page
+
+        # The archived report is served inline.
+        st, h, data = req("GET", f"/reports/view/{name}", cookie)
+        assert st == 200
+        assert h["Content-Type"].startswith("text/html")
+        assert "inline" in h.get("Content-Disposition", "")
+        assert b"<" in data
+
+        # Path traversal is rejected (404, not the config file).
+        st, _, _ = req("GET", "/reports/view/..%2f..%2fotitbup.yml", cookie)
+        assert st == 404
+    finally:
+        httpd.shutdown()
+
+
+def test_report_post_requires_csrf(tmp_path):
+    # A session POST without the CSRF token is rejected (defence in depth).
+    import http.client
+    httpd, _ = _rw_server(tmp_path)
+    try:
+        addr = httpd.server_address
+        c = http.client.HTTPConnection(*addr, timeout=5)
+        c.request("POST", "/login", "username=admin&password=pw",
+                  {"Content-Type": "application/x-www-form-urlencoded"})
+        cookie = c.getresponse().getheader("Set-Cookie").split(";")[0]
+        c = http.client.HTTPConnection(*addr, timeout=5)
+        c.request("POST", "/report", "format=html",
+                  {"Cookie": cookie,
+                   "Content-Type": "application/x-www-form-urlencoded"})
+        r = c.getresponse()
+        r.read()
+        assert r.status == 403
     finally:
         httpd.shutdown()

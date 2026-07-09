@@ -112,7 +112,7 @@ class GenericSFTPDriver(Driver):
         except ImportError as exc:
             raise DriverError(
                 f"{self.name} requires paramiko "
-                "(pip install otitbup[sftp])"
+                "(pip install 'otitbup[sftp]')"
             ) from exc
 
         if not device.address:

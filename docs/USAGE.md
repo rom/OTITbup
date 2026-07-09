@@ -30,14 +30,14 @@ for design see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ```bash
 pip install -e .            # core (PyYAML only)
-pip install -e .[ssh]       # network gear (netmiko)
-pip install -e .[sftp]      # WAGO/PLCnext/Codesys (paramiko)
-pip install -e .[siemens]   # S7 (python-snap7)
-pip install -e .[rockwell]  # Logix (pycomm3)
-pip install -e .[opcua]     # OPC UA (asyncua)
-pip install -e .[beckhoff]  # TwinCAT (pyads)
-pip install -e .[crypto]    # encrypted secrets + TLS certgen (cryptography)
-pip install -e .[dev]       # tests (pytest)
+pip install -e '.[ssh]'       # network gear (netmiko)
+pip install -e '.[sftp]'      # WAGO/PLCnext/Codesys (paramiko)
+pip install -e '.[siemens]'   # S7 (python-snap7)
+pip install -e '.[rockwell]'  # Logix (pycomm3)
+pip install -e '.[opcua]'     # OPC UA (asyncua)
+pip install -e '.[beckhoff]'  # TwinCAT (pyads)
+pip install -e '.[crypto]'    # encrypted secrets + TLS certgen (cryptography)
+pip install -e '.[dev]'       # tests (pytest)
 ```
 
 Extras are optional and lazy: a driver only needs its extra when actually
@@ -309,6 +309,14 @@ status; it renders to HTML, CSV, PDF and DOCX, and `--sign` adds an
 Ed25519 signature (with a companion `.pubkey`) so auditors can confirm it
 wasn't altered.
 
+Every generated report is **archived** to a dedicated `reports/`
+subdirectory next to the data directory, under a timestamped name
+(`compliance-YYYYMMDD-HHMMSS.<ext>`), so runs accumulate as a versioned
+history rather than overwriting each other. `--out <path>` writes an extra
+copy to a fixed location. The web UI's **Reports** page lists the archive
+newest-first and lets operators view, download and generate reports in the
+browser.
+
 ### Integrity & at-rest protection
 
 ```bash
@@ -450,12 +458,25 @@ otitbup serve                          # http(s)://<host>:<port>
 Pages: **Devices** (dashboard, per-zone grouping, live filter), **Health**
 (coverage/staleness/failures, generate signed reports, reload config),
 **Search** (config search with site/zone filters), **Drift**,
-**Strategy** (3-2-1 / 3-2-1-1-0 evaluation), **Activity**, **Policy**,
-**Retention**, **Drivers**, **Users** (admin), **Audit** (admin), and a
+**Strategy** (3-2-1 / 3-2-1-1-0 evaluation), **Reports**, **Policy**,
+**Retention**, **Drivers**, a **Logs** menu, **Users** (admin), and a
 built-in **Help** page. Rich per-device pages carry artifacts, history,
 per-commit and any-two-commit diffs, a run-health timeline, notes,
 baseline drift and rehearsals. Hover the small **?** icons for inline
 popover help.
+
+**Logs menu.** Three views group under the **Logs** dropdown:
+
+- **Audit logs** — the tamper-evident access/change trail (who did what),
+  admin-only.
+- **Backup logs** — the git commit history of backups, with a live activity
+  panel (SSE).
+- **Event logs** — a durable operational log of the messages surfaced to
+  operators: backup failures **with the full driver error text**, anomalies,
+  integrity results, config reloads and logins. Newest-first, colour-coded
+  by severity, with an errors-&-warnings-only filter (`/events?errors=1`).
+  This is where you find a message like *"backup failed: plant-a/cell-1/
+  plc-01: siemens_s7 requires python-snap7 …"* after the fact.
 
 **In-app manuals.** The **Help** page links to the full manuals — Usage,
 Configuration, FAQ and Release notes — rendered in-app from the shipped

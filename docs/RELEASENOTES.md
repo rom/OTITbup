@@ -11,9 +11,26 @@ branch; `0.1.0` is the current package version.
 
 ### Added / changed — web UI polish & configurability
 
-- **Colour themes.** `webui.theme` selects `auto` (default, follows the OS),
-  `light`, `dark`, `sky`, `desert`, `autumn`, or `spring`; editable from the
-  Config page.
+- **Per-user colour themes.** Each user picks a theme from the menu-bar
+  dropdown — `auto` (follows the OS), `light`, `dark`, `sky`, `desert`,
+  `autumn`, or `spring`. The theme **applies instantly** (no reload or tab
+  switch); the choice then persists in the background. Preferences are kept
+  in an on-disk store (`user-prefs.json`, next to the data directory) keyed
+  by account, so they follow *every* signed-in identity — including
+  config-declared and SSO/LDAP users, not just UI-created accounts — across
+  browsers and devices. A browser cookie is set as a fallback. `webui.theme`
+  sets the default for users who haven't chosen one.
+- **Login page** is now a dedicated, centred sign-in card with a **Login**
+  heading and button, shown *without* the app menu bar — no navigation is
+  exposed until you are authenticated.
+- **Archived, versioned reports.** Generated compliance reports are written
+  to a dedicated `reports/` subdirectory (next to the data directory) under
+  timestamped names (`compliance-YYYYMMDD-HHMMSS.<ext>`), so every run is
+  retained rather than overwriting the last. A new **Reports** page in the
+  web UI lists them newest-first (format, size, signed badge), links each for
+  inline viewing/download, and offers a generate control for operators. The
+  CLI `report` command and the scheduled daemon report both archive here;
+  `--out`/`reports.out` still writes an extra copy to a fixed path.
 - **Syslog transport is selectable** for the events sink: `events.syslog.
   protocol` = `udp` (default), `tcp`, or `tls` (RFC 5425/6587; honours
   `cafile`/`verify`).
@@ -22,8 +39,20 @@ branch; `0.1.0` is the current package version.
   theme, syslog protocol, roles, log level/format, …), and splits the former
   "Web UI & SSO" panel into separate **Web UI** and **SSO** sections.
 - The menu bar shows **who is signed in** (username + role).
-- **Menu order:** Dashboard now comes before Devices; the two log views are
-  labelled **Backup log** and **Audit log**.
+- **Menu order:** Dashboard now comes before Devices.
+- **Logs menu.** The log views are grouped under a single **Logs** dropdown
+  with three entries: **Audit logs** (access/change trail), **Backup logs**
+  (commit history) and a new **Event logs** page.
+- **Event logs.** A persistent operational log of the messages surfaced to
+  operators — backup failures *with the full driver error text*, anomalies,
+  integrity results, config reloads, logins — newest-first, colour-coded by
+  severity, with an errors-&-warnings-only filter. Backed by a new `events`
+  table in the run store (the audit chain only kept a short detail, so the
+  full message a user saw was previously not retained anywhere queryable).
+- **Copy-pasteable install hints.** Optional-dependency error messages and
+  the docs now quote the pip extras (`pip install 'otitbup[siemens]'`) so
+  they work as-is in zsh, where the unquoted `otitbup[siemens]` is treated
+  as a glob and fails with `no matches found`.
 - **Fixed:** clicking **Logout** in the menu (a GET link) rendered a
   "not found" page — logout is now handled over GET and redirects to the
   sign-in page.
